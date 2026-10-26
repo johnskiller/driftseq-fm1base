@@ -7,8 +7,12 @@ import fs from 'node:fs';
 const html = fs.readFileSync('/home/john/.hermes/workspace/driftseq-fm1base/build/emu/index.html', 'utf8');
 
 function grab(name) {
-    const i = html.indexOf(`function ${name}`);
-    if (i < 0) throw new Error(`missing ${name}`);
+    /* match "function name" including a leading "async", otherwise the lifted
+     * source loses its async and every await inside it is a syntax error */
+    const re = new RegExp(`(?:async\\s+)?function\\s+${name}\\b`);
+    const m = re.exec(html);
+    if (!m) throw new Error(`missing ${name}`);
+    const i = m.index;
     let depth = 0, started = false, j = i;
     for (; j < html.length; j++) {
         const c = html[j];
@@ -79,7 +83,45 @@ check(/id="resume"/.test(html), 'has a tap-to-resume button');
 check(/\$\(.resume.\)\.addEventListener\(.click., rcResume\)/.test(html), 'the button resumes');
 check(/lastFrameAt = Date\.now\(\)/.test(html), 'stamps every frame');
 check(/Date\.now\(\) - lastFrameAt > 3000/.test(html), 'heartbeat notices a stalled frame stream');
-check(/audioCtx\s*=\s*ac/.test(html), 'keeps the context for the heartbeat');
+check(/audioCtx = ac;/.test(html), 'keeps the context for the heartbeat');
+
+/* ---- the rebuild path -------------------------------------------------------
+ * iOS may refuse to resume an interrupted context outright, so rcResume() falls
+ * back to building a whole new graph. These checks pin the fallback down: it has
+ * to exist, close the old context, and only rebuild inside a gesture.
+ */
+console.log('the rebuild path is present in the built page:');
+check(/async function buildAudio/.test(html), 'buildAudio exists (the graph is rebuildable)');
+check(/wasmBytes = await fetch\(.app\.wasm.\)/.test(html), 'the wasm bytes are kept for a rebuild');
+check(/await old\.ac\.close\(\)/.test(html), 'the old context is closed before rebuilding');
+check(/if \(audioCtx\.state === .running.\)/.test(html), 'a running context is left alone (no needless rebuild)');
+check(/rebuilding = true/.test(html), 'a rebuild cannot start twice at once');
+
+/* rcResume must try resume() first, then rebuild when the context refuses. Lift
+ * it out with the names it closes over, and drive both outcomes. */
+async function driveRcResume(state) {
+    const src = grab('rcResume');
+    const calls = { rebuilt: 0, showed: 0 };
+    const body = `
+        let audioCtx = { get state() { return ${JSON.stringify(state)}; },
+                         resume() { return Promise.resolve(); },
+                         close() { return Promise.resolve(); } };
+        let node = null, rebuilding = false;
+        const status = { textContent: '' }, showAlert = () => {};
+        const buildAudio = async () => { calls.rebuilt++; };
+        const showResume = () => { calls.showed++; };
+        ${src}
+        return rcResume;`;
+    const fn = new Function('calls', body)(calls);
+    await fn();
+    return calls;
+}
+{
+    const running = await driveRcResume('running');
+    check(running.rebuilt === 0, 'a running context does not trigger a rebuild');
+    const suspended = await driveRcResume('suspended');
+    check(suspended.rebuilt === 1, 'a suspended context DOES trigger a rebuild');
+}
 
 console.log(bad ? `\n== ${bad} FAILURES ==` : `\nRESUME LOGIC OK (${ok} checks)`);
 process.exit(bad ? 1 : 0);
