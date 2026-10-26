@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MPL-2.0 */
 // euclid canonical phase + rot + fill idempotence tests — appended semantics per 03 §4.2
 #include "driftseq.h"
 #include <stdio.h>

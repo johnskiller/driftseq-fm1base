@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MPL-2.0 */
 /* demo_pattern.c — the default DriftSeq demo: instant polymetric drift.
  *
  * Windows 16 / 12 / 8 / 12 with different divisions so the hero screen

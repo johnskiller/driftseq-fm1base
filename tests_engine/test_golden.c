@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MPL-2.0 */
 /* test_golden.c — golden MIDI-stream hash of the demo pattern (01 §7 seam contract)
  * Locks the engine's product: demo @ seed 42, 20 s of 64-frame blocks (integer tick
  * count — same loop as the emu) → one FNV-1a chunk hash.

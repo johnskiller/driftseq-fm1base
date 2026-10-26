@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MPL-2.0 */
 /* driftseq.c — deterministic sequencer engine (spec 01-core-model)
  *
  * Contract: ds_tick(state, dt) emits this tick's MIDI bytes into state->out.

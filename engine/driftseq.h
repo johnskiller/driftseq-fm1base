@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MPL-2.0 */
 /* driftseq.h — core data model (spec 01-core-model, 7c7f9bd) */
 #ifndef DRIFTSEQ_H
 #define DRIFTSEQ_H

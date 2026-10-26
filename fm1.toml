@@ -14,15 +14,19 @@ id_prefix = "FM-1_92"
 usb_manufacturer = "DriftSeq"
 usb_product = "DriftSeq FM-1"
 o2 = []                        # separate units at -O2 (an app's DSP) — none yet
+# The Sonivox EAS tree and its wavetable are third-party Apache-2.0 code that
+# must not be edited, so they are excluded from the app's own checks: its
+# 212 KB sample table reads as literal addresses to mmio_check (0x00011c7c and
+# the like are waveform data, not registers).
+vendored = ["eas/", "eas_inc/"]
 words = "words.tsv"
 ble = true                     # Bluetooth MIDI: the reason for this port
 ble_central = true             # and the FM-1 may connect to BLE MIDI devices
 tagline = "a polymetric sequencer for the FM-1"
 repo = "https://github.com/johnskiller/driftseq"
-# LICENCE, and why this line matters: fm1-base is MPL-2.0 file by file, which
-# combines into a GPL-3.0 work (the reverse does not). DriftSeq's own code stays
-# GPL-3.0-only. The platform stays an unmodified submodule, so no MPL
-# "publish your changes" obligation is triggered — that is the strongest reason
-# not to patch platform/ (porting notes §5.4).
-licence = "GPL-3.0-only"
+# LICENCE. MPL-2.0 is the reason this project exists: per-file copyleft (§3.3)
+# lets the built Larger Work — which links JieLi's Apache-2.0 *binary* Bluetooth
+# libraries, source unavailable — be distributed. GPL-3.0 could not. See
+# LICENSING.md.
+licence = "MPL-2.0"
 credits = "Built on fm1-base (MPL-2.0) and felucca-bsp."

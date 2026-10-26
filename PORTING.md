@@ -70,15 +70,26 @@ distributable BLE binary.
 
 ## Licence position
 
-- fm1-base: MPL-2.0 file by file → combines into GPL-3.0; links Apache-2.0
-  binaries including JieLi's Bluetooth libraries.
-- DriftSeq's own files: GPL-3.0-only, unchanged.
-- `platform/` stays an **unmodified** submodule, so no MPL publish-your-changes
-  obligation triggers. Do not patch it.
-- EAS: Apache-2.0, `LICENSE-2.0.txt` and `NOTICE` travel with it.
-- A BLE binary can be distributed **with** DriftSeq's source, as GPL-3.0
-  requires. Distributing the binary *without* source would require relicensing
-  DriftSeq's own files; that is a product decision, not a build detail.
+**DriftSeq here is MPL-2.0**, which is the point of the port. Full reasoning in
+`LICENSING.md`; the short version:
+
+- MPL-2.0 is **per file**; §3.3 lets a Larger Work go out under other terms as
+  long as the MPL files stay MPL and their source is available (it is, here).
+- So an image that links JieLi's Apache-2.0 **binary** Bluetooth libraries —
+  `btctrler.a`, `btstack.a`, `wl_rf_common.a`, `crypto_toolbox_Osize.a`,
+  `lib_ccm_aes.a`, none of which has source anywhere — **can be distributed**.
+- GPL-3.0 could not do that: §6 demands complete corresponding source for the
+  whole work, and nobody can supply JieLi's. That is why CTL-1's LICENSING.md
+  says a built Ctl cannot be distributed.
+
+An earlier version of this file claimed the opposite ("MPL does NOT make a BLE
+binary distributable") and was wrong; it has been corrected. fm1-base's own
+LICENSING.md agrees: "a firmware made of felucca-bsp, fm1-base and its own code
+may link JieLi's binary Bluetooth and Wi-Fi libraries."
+
+The 32 vendored-Felucca files in the old tree (which credit Leo Kuroshita) were
+never mine to relicense — and they are not carried here at all. fm1-base supplies
+MPL-2.0 equivalents. Only DriftSeq's own files were relicensed.
 
 ## What is left, in the order the porting notes recommend
 

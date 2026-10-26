@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MPL-2.0 */
 /* test_engine.c — golden-hash + behavioral tests for the DriftSeq engine (01 §7)
  * plain asserts, cc -O2 -Wall; exit 0 = PASS
  */

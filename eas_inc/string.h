@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-3.0-only */
+/* SPDX-License-Identifier: MPL-2.0 */
 /* <string.h> for the EAS sources, on fm1-base.
  *
  * WHY THIS FILE EXISTS. The pi32v2 toolchain's clang cannot find a C library
@@ -15,15 +15,13 @@
  * (`strcmp(libraryName, DEFAULT_WT_SNDLIB)` and friends). Defining it as a
  * static inline means no external symbol and nothing to resolve.
  *
- * WHY GPL HERE IS FINE, when it was not in the other tree. This file is
- * DriftSeq's own code (GPL-3.0-only, like the rest of DriftSeq) and it is
- * compiled into DriftSeq's own image. The licensing problem the EAS tree had was
- * different in kind: there the GPL header sat on the include path of a firmware
- * whose whole point was to link JieLi's Apache-2.0 *binary* Bluetooth libraries,
- * which GPL-3.0 cannot accompany with complete source. Here the binary question
- * is answered by fm1-base being MPL-2.0 instead — MPL combines with Apache-2.0
- * binaries freely — and DriftSeq's own GPL files do not change that, because
- * DriftSeq publishes its own complete source.
+ * WHY MPL HERE, NOT GPL. DriftSeq is being relicensed to MPL-2.0 file by file
+ * so that a built image may link JieLi's Apache-2.0 *binary* Bluetooth
+ * libraries and still be distributed. MPL-2.0 §3.3 permits a Larger Work under
+ * other terms so long as the MPL files stay MPL and their source is available;
+ * GPL-3.0 §6 instead demands complete corresponding source for the whole work,
+ * which nobody can supply for JieLi's archives. This file is part of the app, so
+ * it carries the app's licence. See LICENSING-NOTES.md.
  *
  * If DriftSeq ever wants to ship a BLE binary *without* publishing its own
  * source, this file and every other GPL-3.0-only one in the app must be
