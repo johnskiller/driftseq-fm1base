@@ -59,15 +59,33 @@ static void cv_disc(int32_t cx, int32_t cy, int32_t r, uint16_t c)
 
 /* A filled rounded rectangle with a radius of `r` px. r == 0 is cv_rect.
  *
- * The header's track-number pill is the only caller. The first version cut the
- * corners by plotting one pixel per row along a diagonal, which left the corner
- * as a detached dot with background showing between it and the body -- John saw
- * it on hardware as "切角内加了黑点". This walks the rows instead: for each of
- * the r rows at the top and bottom it computes the overhang from the circle
- * equation and fills the row that much narrower, so the arc is solid and joins
- * the body with no gap.
+ * The header's track-number pill is the only caller. Three versions, and the
+ * last one is the one that shipped:
  *
- * Integer only, and the mid-row is filled wide so the widest row is exact. */
+ *   1. corners plotted one pixel per row along the diagonal, body inset by the
+ *      full radius -- each corner was a detached dot with background showing
+ *      through the gap. John: "切角内加了黑点".
+ *   2. rows walked with the circle equation evaluated per row. Correct, but it
+ *      put an integer square root in the per-frame path for a constant.
+ *   3. the same rows, from a table. The overhang for a given radius never
+ *      changes, so it is baked into flash: 36 bytes covers r=1..8, and the
+ *      draw loop does nothing but row fills.
+ *
+ * A real 1bpp bitmap was the other option and is worse here: it would have to
+ * be blitted with a mask (the platform has no 1bpp blitter), it could not follow
+ * the pill's width, and it would cost more flash than this table for no gain. */
+static const uint8_t RR_OFF[9] = { 0, 0, 1, 3, 6, 10, 15, 21, 28 };
+static const uint8_t RR_INSET[36] = {
+    0,                  /* r=1 */
+    1, 0,               /* r=2 */
+    1, 0, 0,            /* r=3 */
+    2, 1, 0, 0,         /* r=4 */
+    3, 1, 1, 0, 0,      /* r=5 */
+    4, 2, 1, 1, 0, 0,   /* r=6 */
+    4, 3, 2, 1, 0, 0, 0,/* r=7 */
+    5, 3, 2, 1, 1, 0, 0, 0  /* r=8 */
+};
+
 static void cv_round_rect(int32_t x, int32_t y, int32_t w, int32_t h, int32_t r, uint16_t c)
 {
     int32_t i;
@@ -77,17 +95,10 @@ static void cv_round_rect(int32_t x, int32_t y, int32_t w, int32_t h, int32_t r,
         cv_rect(x, y, w, h, c);
         return;
     }
+    if (r > 8)
+        r = 8;
     for (i = 0; i < r; i++) {
-        /* distance from the row to the corner centre, in half-pixels so the
-         * radius test stays integer: overhang = r - sqrt(r^2 - (r-i-1/2)^2) */
-        int32_t dy2 = (2 * (r - i) - 1);            /* 2*dy, dy = r-i-0.5 */
-        int32_t d2 = (4 * r * r - dy2 * dy2);       /* 4*(r^2 - dy^2) */
-        /* (isqrt+1)/2 rounds to nearest instead of truncating. Truncating gave
-         * insets of 3,1,1,1 for r=4 -- three rows with the same overhang, which
-         * is a chamfer, not an arc. */
-        int32_t inset = r - (int32_t)(isqrt_u((uint32_t)(d2 > 0 ? d2 : 0)) + 1u) / 2;
-        if (inset < 0)
-            inset = 0;
+        int32_t inset = RR_INSET[RR_OFF[r] + i];
         cv_rect(x + inset, y + i, w - inset * 2, 1, c);
         cv_rect(x + inset, y + h - 1 - i, w - inset * 2, 1, c);
     }
