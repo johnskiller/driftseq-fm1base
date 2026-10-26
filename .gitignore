@@ -1,0 +1,7 @@
+# build products
+build/
+*.bin
+*.fwsc
+*.elf
+*.o
+__pycache__/

@@ -1,0 +1,28 @@
+# DriftSeq's build settings (platform/tools/build.py reads this file).
+#
+# IDENTITY — read this before changing id_prefix. The package identity is
+# `id_prefix + "00"` (build.py main), so "FM-1_92" yields FM-1_9200. DriftSeq's
+# old FELUCCA_ID was "FM-1_91001": six characters after the underscore, which no
+# id_prefix can produce. That string is therefore NOT preserved by this port —
+# and cannot be, the format does not allow it. Accepting a new identity is safe
+# (the loader compares product id to firmware_id and refuses on mismatch, so a
+# wrong one means a refused flash, not a brick); keeping a stale one is what
+# bricks. FM-1_92 is DriftSeq's own range, clear of fm1-base's 11 and of
+# fm1-ctrl's 91/92 pair — check that before shipping.
+name = "driftseq"
+id_prefix = "FM-1_92"
+usb_manufacturer = "DriftSeq"
+usb_product = "DriftSeq FM-1"
+o2 = []                        # separate units at -O2 (an app's DSP) — none yet
+words = "words.tsv"
+ble = true                     # Bluetooth MIDI: the reason for this port
+ble_central = true             # and the FM-1 may connect to BLE MIDI devices
+tagline = "a polymetric sequencer for the FM-1"
+repo = "https://github.com/johnskiller/driftseq"
+# LICENCE, and why this line matters: fm1-base is MPL-2.0 file by file, which
+# combines into a GPL-3.0 work (the reverse does not). DriftSeq's own code stays
+# GPL-3.0-only. The platform stays an unmodified submodule, so no MPL
+# "publish your changes" obligation is triggered — that is the strongest reason
+# not to patch platform/ (porting notes §5.4).
+licence = "GPL-3.0-only"
+credits = "Built on fm1-base (MPL-2.0) and felucca-bsp."
