@@ -329,6 +329,8 @@ static void emit_pc(ds_state *s, const ds_track *t) {
 /* land on a position: fire its voices per on/cond/prob */
 static void land(ds_state *s, ds_track *t, int trk, uint32_t pos) {
     ds_step *st = &t->steps[pos & 63];
+    if (st->tie) return;                 /* a tie never attacks: it extends the
+                                          * attack that is already sounding */
     if (!st->on || !st->nvoices) return;
     if (!cond_ok(st, s, trk)) return;
     {
@@ -337,15 +339,26 @@ static void land(ds_state *s, ds_track *t, int trk, uint32_t pos) {
             int vi;
             for (vi = 0; vi < st->nvoices; vi++) {
                 emit_note(s, t, &st->v[vi]);
-                {   /* gate: steps of this division, 0xFF = until next event */
+                {   /* gate: steps of this division, 0xFF = until next event.
+                     * Tie steps never attack, so a run of them after this one
+                     * belongs to this note: count them into the length. */
                     double g = (double)st->v[vi].gate;
+                    uint32_t rel = (pos + 64 - t->loop_start) & 63;
+                    uint32_t span = (uint32_t)(t->loop_len - rel);
                     if (st->v[vi].gate == 0xFF) {
-                        uint32_t rel = (pos + 64 - t->loop_start) & 63;
                         uint32_t d;
-                        g = (double)(t->loop_len - rel);
-                        for (d = 1; d < (uint32_t)(t->loop_len - rel); d++) {
+                        g = (double)span;
+                        for (d = 1; d < span; d++) {
                             ds_step *nx = &t->steps[(t->loop_start + rel + d) & 63];
+                            if (nx->tie) continue;          /* extend, do not cut */
                             if (nx->on && nx->nvoices) { g = (double)d; break; }
+                        }
+                    } else {
+                        uint32_t d;
+                        for (d = 1; d < span && (double)d < g + 63.0; d++) {
+                            ds_step *nx = &t->steps[(t->loop_start + rel + d) & 63];
+                            if (!nx->tie) break;
+                            g += 1.0;                       /* each tie step adds a cell */
                         }
                     }
                     gate_schedule(s, t, (uint8_t)trk, &st->v[vi], g);

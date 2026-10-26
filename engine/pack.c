@@ -39,10 +39,11 @@ void *memset(void *d, int c, unsigned n);
 #define TF_EUCLID    0x04u
 
 /* step_run header bits */
-#define SH_NVOICES_M 0x03u
-#define SH_ON        0x04u
-#define SH_PROB      0x08u
-#define SH_COND      0x10u
+#define SH_NVOICES_M 0x07u
+#define SH_ON        0x08u
+#define SH_PROB      0x10u
+#define SH_COND      0x20u
+#define SH_TIE       0x40u
 
 /* voice note byte: bit7 says a gate byte follows, bits0-6 are the note. MIDI
  * notes are 0..127, so the high bit is free for exactly this. */
@@ -52,9 +53,9 @@ void *memset(void *d, int c, unsigned n);
 /* ds_track has no padding (every member is uint8_t or an array of them), which
  * is what lets the default comparison below be a memcmp. If that ever stops
  * being true this fails the build instead of silently comparing garbage.
- * 64 steps x 20 B + 13 meta bytes = 1,293. */
+ * 64 steps x 17 B + 13 meta bytes = 1,101. */
 typedef char ds_pack_track_size_check[
-    (sizeof(ds_track) == DS_STEPS * (DS_VOICES * 4u + 4u) + 13u) ? 1 : -1];
+    (sizeof(ds_track) == DS_STEPS * (DS_VOICES * 3u + 5u) + 13u) ? 1 : -1];
 
 /* a step is content if it holds a note OR its `on` bit is set. `on` alone is the
  * silent-keep state the UI toggles; dropping it on save would resurrect notes
@@ -62,7 +63,7 @@ typedef char ds_pack_track_size_check[
 static int step_has_content(const ds_step *st)
 {
     uint8_t vi;
-    if (st->on)
+    if (st->on || st->tie)      /* tie is content with neither on nor a voice */
         return 1;
     for (vi = 0; vi < DS_VOICES; vi++)
         if (st->v[vi].note != 0xFF)
@@ -168,13 +169,18 @@ size_t ds_pack_track(uint8_t *out, size_t cap, const ds_track *t)
         if (!step_has_content(st))
             continue;
         nv = used_voices(st);
-        hdr = (uint8_t)(nv ? (uint8_t)(nv - 1u) : 0u);
+        /* nvoices field: 3 bits, 0..4 (0 = a bare gate: on or tie with no voice).
+         * The first version stored nv-1 in 2 bits, which could not express 0 and
+         * made a bare gate unpack one phantom voice. */
+        hdr = (uint8_t)(nv ? nv : 0u);
         if (st->on)
             hdr |= SH_ON;
         if (st->prob != 100)
             hdr |= SH_PROB;
         if (st->cond != DS_C_NONE)
             hdr |= SH_COND;
+        if (st->tie)
+            hdr |= SH_TIE;
 
         out[n++] = (uint8_t)(i - prev - 1);           /* gap since last run */
         out[n++] = hdr;
@@ -243,12 +249,14 @@ size_t ds_unpack_track(const uint8_t *in, size_t len, ds_track *t)
         step = step + 1 + (int)gap;
         if (step >= DS_STEPS) return 0;
         hdr = in[n++];
-        nv = (uint8_t)((hdr & SH_NVOICES_M) + 1u);
+        nv = (uint8_t)(hdr & SH_NVOICES_M);
         st = &t->steps[step];
         st->on = (hdr & SH_ON) ? 1 : 0;
+        st->tie = (hdr & SH_TIE) ? 1 : 0;
         if (hdr & SH_PROB) { if (n >= len) return 0; st->prob = in[n++]; }
         if (hdr & SH_COND) { if (n >= len) return 0; st->cond = in[n++]; }
         if (st->prob > 100 || st->cond >= DS_COND_COUNT) return 0;
+        if (nv > DS_VOICES) return 0;                 /* 3 bits can hold 5..7 */
         for (vi = 0; vi < nv; vi++) {
             uint8_t nb;
             if (n + 2 > len) return 0;

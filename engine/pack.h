@@ -14,7 +14,7 @@
  *   - fixed maximum footprint per track (so worst case is still provable
  *     at compile time, and an out-of-flash write is a compile-time fact),
  *   - but only the used prefix actually written, so an EMPTY track costs one
- *     byte and a 3-note bass line costs ~50, not 1,293.
+ *     byte and a 3-note bass line costs ~50, not 1,101.
  *
  * That is a variable-length record with a hard ceiling -- not dynamic
  * allocation. Every track is length-prefixed, so a reader can skip one it does
@@ -46,7 +46,7 @@
  *                            with on=0 -- it is still content)
  *         bit3    prob!=100
  *         bit4    cond!=DS_C_NONE
- *         bit5    gate!=1 (in the voice byte)
+ *         bit5    tie       (extends the previous attacking step; no attack here)
  *     then nvoices voice records:
  *       voice := u8 note | u8 vel | [u8 gate]
  *
@@ -57,7 +57,7 @@
  *   present, and only saves when it is not. Keep it simple: 2 or 3 bytes.
  *
  * The ceiling per track is therefore 1 + 9 + 1 + 64*(1+1+4*3) = 907 bytes,
- * against 1,293 today -- and the empty case is 1 byte against 1,293.
+ * against 1,101 today -- and the empty case is 1 byte against 1,101.
  *
  * This is a SAVE FORMAT only. The live pattern in RAM stays the flat struct:
  * the UI mutates steps by index at 40 fps, and a sparse in-RAM form would make
@@ -78,8 +78,8 @@
  * + 64 runs x 16 B  (gap + hdr + prob + cond + 4 x [note + vel + gate])
  * = 1,036 B
  *
- * against 1,293 B for the flat struct -- and an unused track costs 1 byte
- * against 1,293. The ceiling is what makes "do 16 patterns fit in the
+ * against 1,101 B for the flat struct -- and an unused track costs 1 byte
+ * against 1,101. The ceiling is what makes "do 16 patterns fit in the
  * partition" an arithmetic question at build time, not something a user finds
  * out at save time. */
 #define DS_PACK_TRACK_MAX   1036u

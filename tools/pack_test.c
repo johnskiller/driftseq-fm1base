@@ -96,6 +96,7 @@ int main(void)
             st->on = (uint8_t)(i & 1);
             st->prob = (uint8_t)(i % 101);
             st->cond = (uint8_t)(i % DS_COND_COUNT);
+            st->tie = (uint8_t)(i % 3 == 0);
             st->nvoices = DS_VOICES;
             for (vi = 0; vi < DS_VOICES; vi++) {
                 st->v[vi].note = (uint8_t)((i + vi * 7) % 128);
@@ -117,6 +118,19 @@ int main(void)
     ds_init(&s, 4);
     ds_voice_add(&p->track[3], 0, 36, 100, 2);
     roundtrip("one note on one track", p);
+
+    /* 5b. a tie step and NOTHING else: no on, no voice. This is the state that
+     *     a naive "does this step have content?" test throws away, which is
+     *     exactly how the format lost ties on the first pass. */
+    ds_init(&s, 6);
+    p->track[7].loop_len = 8;
+    ds_voice_add(&p->track[7], 0, 48, 90, 1);
+    p->track[7].steps[0].tie = 0;
+    p->track[7].steps[1].tie = 1;
+    p->track[7].steps[2].tie = 1;
+    p->track[7].steps[2].on = 0;
+    p->track[7].steps[2].nvoices = 0;
+    roundtrip("a tie with no on and no voice", p);
 
     /* 6. corruption must be REFUSED, not clamped */
     {
@@ -173,7 +187,7 @@ int main(void)
     }
 
     printf("\n--- the answer ---\n");
-    printf("today, unconditionally   : %6zu B per pattern (16 x 1,293 B)\n", sizeof(ds_pattern));
+    printf("today, unconditionally   : %6zu B per pattern (16 x %zu B)\n", sizeof(ds_pattern), sizeof(ds_track));
     printf("empty pattern, per track : %6ld B total (%ld B per track)\n", empty_b, empty_b / DS_TRACKS);
     printf("the demo pattern         : %6ld B  -> %.1f%% of today\n",
            demo_b, 100.0 * (double)demo_b / (double)sizeof(ds_pattern));

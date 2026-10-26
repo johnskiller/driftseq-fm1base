@@ -31,16 +31,19 @@ enum {
 typedef struct {
     uint8_t note;   /* 0..127 MIDI, 0xFF = none */
     uint8_t vel;    /* 1..127 */
-    uint8_t gate;   /* in steps of this track's division; 0xFF = until next event or loop end */
-    uint8_t on;     /* en bit: 0 = silent-keep (single-click toggles this) */
-} ds_note;
+    uint8_t gate;   /* in steps of this track's division; 0xFF = until next attacking step */
+} ds_note;          /* 3 B. A 4th byte held an 'en' bit that nothing ever read or wrote:
+                     * the step's on/nvoices carry that meaning (see ds_step below). */
 
 typedef struct {
     ds_note  v[DS_VOICES];      /* note 0xFF = empty voice */
-    uint8_t  nvoices;           /* count of used voices */
-    uint8_t  on;                /* en bit: 0 = silent-keep (single-click toggles this) */
+    uint8_t  nvoices;           /* count of used voices (0 with on=1 = a bare gate: the
+                                 * euclid skeleton and the drum lanes latch this way) */
+    uint8_t  on;                /* the cell sounds: euclid skeleton, and 0 = silent-keep */
     uint8_t  prob;              /* 0..100, 100 default */
     uint8_t  cond;              /* ds_cond enum */
+    uint8_t  tie;               /* 1 = this step does not attack; it extends the note that
+                                 * the previous attacking step started (continuous on PLAY) */
 } ds_step;
 
 typedef struct {
