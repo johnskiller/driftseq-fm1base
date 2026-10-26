@@ -135,8 +135,17 @@ static void settings_defaults(void)
 
 /* ---------------------------------------------------------------- engine --- */
 /* The sequencer. Seed from the clock so two units do not start identical, and
- * never reseed: the pattern is the user's, not the boot's. */
-static ds_state eng;
+ * never reseed: the pattern is the user's, not the boot's.
+ *
+ * PLAT_POOL puts it in the .pool section (app.ld: 0x01C20000..0x01C74000, 336
+ * KiB) instead of .bss (the 96 KiB RAM region). It is 26,164 B -- the single
+ * largest object in the app -- and every remaining byte of .bss is contended by
+ * the Bluetooth stack. Measured: RAM 94,436 -> 68,276 B, free 3,868 -> 30,028.
+ *
+ * The pool is plain on-chip SRAM on the same bus as .bss; cv_px (107 KB, written
+ * per pixel every frame) already lives there, so per-byte CPU access is proven.
+ * Nothing here is touched by DMA. */
+static ds_state eng PLAT_POOL;
 static uint32_t eng_last_ms;
 static uint32_t eng_sent;                          /* bytes put on the wire, for the host test */
 
