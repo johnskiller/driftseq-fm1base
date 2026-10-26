@@ -5,3 +5,6 @@ build/
 *.elf
 *.o
 __pycache__/
+
+# self-signed keys for the phone-facing HTTPS emulator (tools/serve-https.py)
+.certs/
