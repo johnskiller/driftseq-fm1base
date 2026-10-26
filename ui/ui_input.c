@@ -29,6 +29,20 @@ static void ui_input_poll(void)
 
     for (i = 0; i < NB; i++) {
         uint32_t bit = 1u << i;
+        /* GLO is a modifier, not an action: it tracks its own live state on the
+         * press and release edges and is never dispatched to ui_button, so
+         * holding it cannot fire a page change of its own. ui_encoder and the
+         * key handler read glo_held while the button is down, which is why this
+         * has to be set here rather than in ui_button (which only ever sees the
+         * release edge). Ported from the old tree's ui_input.c, where the same
+         * two lines were the only thing making GLO+K1..K4 mean anything. */
+        if (i == B_GLO) {
+            if (press & bit)
+                glo_held = 1;
+            if (release & bit)
+                glo_held = 0;
+            continue;
+        }
         if (press & bit)
             ui_button((uint8_t)i, 1, 0);
         if (release & bit)
