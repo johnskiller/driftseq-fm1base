@@ -6,9 +6,15 @@
 #include <stdint.h>
 #include "plat.h"
 
-#define APP_NAME "TEMPLATE"
+#define APP_NAME "DRIFTSEQ"
 #define APP_SPLASH_RGB RGB(242, 120, 72)
 #define APP_BLOCK 256u                   /* frames per audio block: 5.8 ms at 44.1 kHz */
+/* The canvas is 240 x 224: DriftSeq's painters draw one full-height pass per
+ * frame (a 20px top bar, 16 twelve-px track rows, a footer) and blit it whole.
+ * fm1-base defaults to 240 x 144, and cv_begin silently clamps to it rather
+ * than failing, so a wrong value here does not error -- it just stops drawing
+ * at row 144 and leaves the bottom of the screen black. */
+#define APP_CANVAS_PX (240u * 224u)
 #define APP_TOUCH                        /* velocity and pressure from the keys (lib/touch.h) */
 #define APP_BTDEV                        /* Bluetooth MIDI devices (lib/btdev.h) */
 #define APP_BLE_AT_BOOT (!template_ble_off())   /* Bluetooth at power-on: as the player left it (REC held) */

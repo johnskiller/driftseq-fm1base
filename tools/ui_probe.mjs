@@ -1,0 +1,168 @@
+/* tools/ui_probe.mjs — pixel assertions on the emulator's own screens.
+ *
+ * The wasm build runs the same painters the firmware does, so what it draws is
+ * what the device draws (minus the panel hardware). These assertions are the
+ * part of the migration a build cannot check: a screen that compiles, links and
+ * blits can still be blank, clamped, or missing a whole band.
+ *
+ *   node tools/ui_probe.mjs
+ *
+ * Every check names the failure it would catch. They are geometry and colour,
+ * not pictures -- the pictures are tools/ui_page_shot.mjs.
+ */
+import fs from 'node:fs';
+import path from 'node:path';
+import zlib from 'node:zlib';
+import { fileURLToPath } from 'node:url';
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const WASM = path.join(HERE, '..', 'build', 'emu', 'app.wasm');
+
+if (!fs.existsSync(WASM)) {
+    console.error('no wasm at ' + WASM + ' — build with --web first');
+    process.exit(2);
+}
+
+let fails = 0, checks = 0;
+const check = (ok, msg, detail) => {
+    checks++;
+    if (!ok) fails++;
+    console.log((ok ? 'ok: ' : 'FAIL: ') + msg + (detail ? '  [' + detail + ']' : ''));
+};
+
+const { instance } = await WebAssembly.instantiate(fs.readFileSync(WASM), {
+    wasi_snapshot_preview1: {
+        clock_time_get: () => 0, proc_exit: () => {}, fd_write: () => 0,
+        fd_close: () => 0, environ_get: () => 0, environ_sizes_get: () => 0,
+    },
+    env: {},
+});
+const M = instance.exports;
+
+const W = 240, H = 240;
+
+function step(ms) {
+    /* web_render(n) counts sample frames: 44.1 of them per emulated ms */
+    const n = Math.round(ms * 44.1);
+    for (let i = 0; i < n; i += 1024) M.web_render(Math.min(1024, n - i));
+}
+function press(bit) { M.web_buttons(1 << bit); step(40); M.web_buttons(0); step(60); }
+function grab() { return Array.from(new Uint16Array(M.memory.buffer, M.web_fb(), W * H)); }
+
+const rgb565 = (r, g, b) => ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3);
+
+/* the painters' palette, as RGB565 (ui_screens.c / ui_tables.c) */
+const TB_BG = rgb565(24, 24, 32);
+const C_BLACK = 0;
+
+function analyse(fb) {
+    const rows = [];
+    for (let y = 0; y < H; y++) {
+        let n = 0;
+        for (let x = 0; x < W; x++) if (fb[y * W + x] !== C_BLACK) n++;
+        rows.push(n);
+    }
+    const bands = [];
+    let s = null;
+    for (let y = 0; y < H; y++) {
+        if (rows[y] && s === null) s = y;
+        else if (!rows[y] && s !== null) { bands.push([s, y - 1]); s = null; }
+    }
+    if (s !== null) bands.push([s, H - 1]);
+    return { rows, bands, nonBlack: rows.reduce((a, b) => a + b, 0), colours: new Set(fb).size };
+}
+
+M.web_boot();
+step(200);
+
+/* ---------- HOME ---------- */
+{
+    const fb = grab();
+    const r = analyse(fb);
+    /* THE BUG THIS CAUGHT: fm1-base's canvas defaults to 240x144 and cv_begin
+     * CLAMPS to it silently. With APP_CANVAS_PX left at the default, HOME drew
+     * ten of its sixteen track rows and the bottom third of the screen stayed
+     * black -- no error, no warning, just a shorter screen. */
+    check(r.rows[214] > 0 && r.rows[150] > 0,
+          'HOME draws past row 144 (canvas is 240x224, not the default 240x144)',
+          'row 150 has ' + r.rows[150] + ' px, row 214 has ' + r.rows[214] + ' px');
+
+    /* sixteen track rows: y = 24 + t*12, each 11 px tall, so the last ends at 214.
+     * The gutter's track number is the thing that proves the row was drawn: an
+     * empty track still prints "TRK n" there. */
+    let rowsWithNumber = 0;
+    for (let t = 0; t < 16; t++) {
+        const y0 = 24 + t * 12;
+        let n = 0;
+        for (let y = y0; y < y0 + 11; y++)
+            for (let x = 2; x < 15; x++)
+                if (fb[y * W + x] !== C_BLACK) n++;
+        if (n > 8) rowsWithNumber++;
+    }
+    check(rowsWithNumber === 16, 'HOME has all 16 track rows in the gutter', rowsWithNumber + '/16');
+
+    /* the top bar is a solid 20px band */
+    check(r.rows[0] === W && r.rows[19] === W, 'HOME top bar spans the full width at y0..19',
+          'y0=' + r.rows[0] + ' y19=' + r.rows[19]);
+
+    /* the footer band (y216..239) is drawn too */
+    check(r.rows[220] === W && r.rows[239] === W, 'HOME footer band is drawn at y216..239',
+          'y220=' + r.rows[220] + ' y239=' + r.rows[239]);
+}
+
+/* ---------- GRID ---------- */
+press(9);                                     /* B_SEQ */
+{
+    const fb = grab();
+    const r = analyse(fb);
+    check(r.nonBlack > 20000, 'GRID draws a full screen', r.nonBlack + ' non-black px');
+    check(r.colours > 60, 'GRID uses the track hues', r.colours + ' colours');
+    check(r.rows[214] > 0, 'GRID fills to the footer edge', 'y214=' + r.rows[214]);
+}
+
+/* ---------- EDIT layer (same screen, louder) ---------- */
+press(4);                                     /* B_EDIT */
+{
+    const r = analyse(grab());
+    check(r.nonBlack > 20000, 'EDIT layer draws', r.nonBlack + ' non-black px');
+}
+
+/* ---------- ARP: the ring ---------- */
+press(4);                                     /* back to base layer */
+press(8);                                     /* B_ARP */
+{
+    const fb = grab();
+    const cx = 120, cy = 112;
+    /* the guide circle: 64 single-pixel points at r+4 = 80 */
+    let on80 = 0, onRing = 0;
+    const radii = [];
+    for (let y = 28; y < 196; y++) {
+        for (let x = 0; x < W; x++) {
+            if (fb[y * W + x] === C_BLACK) continue;
+            const d = Math.hypot(x - cx, y - cy);
+            if (d > 4) radii.push(d);
+            if (d >= 79.5 && d <= 81) on80++;
+            if (d >= 73 && d <= 79) onRing++;
+        }
+    }
+    check(onRing > 0, 'ARP draws its ring (pulses/ticks at r=76)', onRing + ' px near r76');
+    check(on80 >= 40, 'ARP ring guide circle is complete (64 pts at r=80)', on80 + ' px at r80');
+
+    /* the guard that would make all of this pass while the ring is wrong: a ring
+     * that is not round. The old RING_SIN table was a 70.75-period sine, so the
+     * radius swung ~33%; the Q12 table holds it to the pixel grid. */
+    const rs = radii.filter(d => d >= 70 && d <= 85);
+    check(rs.length > 100, 'ARP ring has enough points to judge its shape', rs.length + ' px');
+}
+
+/* ---------- back to HOME ---------- */
+press(6);                                     /* B_HOME */
+{
+    const fb2 = grab();
+    const r = analyse(fb2);
+    /* y214 is the last row's bottom; y215 is the 1px gap before the footer */
+    check(r.rows[214] > 0, 'HOME still draws after a round trip', 'y214=' + r.rows[214]);
+}
+
+console.log(fails ? `\n== ${fails} UI PROBE FAILURES (${checks} checks) ==` : `\nUI PROBE OK (${checks} checks)`);
+process.exit(fails ? 1 : 0);

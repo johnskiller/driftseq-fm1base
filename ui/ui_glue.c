@@ -1,0 +1,81 @@
+/* ui_glue.c — forward declarations + shared helpers (part of the UI's unity
+ * section, included FIRST so every cross-reference is declared; definitions
+ * follow in ui_tables.c / ui_text.c / ui.c / ui_input.c / ui_screens.c /
+ * ui_edit.c).
+ *
+ * This file is also where the port's platform differences live, so the four
+ * painter files below stay byte-for-byte the painters that were designed
+ * against the old tree:
+ *
+ *   - the engine is `eng` here (fm1-base's app.c owns it), not `g`;
+ *   - there is no panel calibration layer: fm1-base hands the app buttons and
+ *     encoders already decoded (plat_buttons / plat_enc), so the matrix
+ *     id -> logical role tables that ui.c carried are gone;
+ *   - lights go out through plat_lights(buttons, keys, dim_buttons, dim_keys,
+ *     glow), which takes exactly the four masks ui_leds() produces.
+ */
+
+/* musical grid (ui_screens.c and ui.c alike): 96 ticks per 4/4 bar @24 PPQ,
+ * so one beat = 24 ticks. Both the hero meter and the white-key LED ruler
+ * derive their spacing from this, which is why it is shared, not local. */
+#define TPB      96
+
+/* screens (ui_screens.c) */
+static void draw_home(void);
+static void draw_grid_melodic(void);
+static void draw_grid_drum(void);
+static void draw_arp(void);
+static void ui_draw_footer(void);
+
+/* edit/card/arp internals (ui_edit.c) */
+static void ui_draw_edit_panel(void);
+static void ui_draw_drum_card(void);
+static void ui_arp_encoder(uint8_t enc, int8_t det);
+static void ui_edit_encoder(uint8_t enc, int8_t det);
+static void ui_grid_encoder(uint8_t enc, int8_t det);
+static void ui_home_encoder(uint8_t enc, int8_t det);
+
+/* routing + lifecycle (ui.c / ui_edit.c / ui_input.c) */
+static void ui_encoder(uint8_t enc, int8_t det);
+static void ui_button(uint8_t btn, uint8_t down, uint8_t released);
+static void panel_key_handler(uint8_t key, uint8_t down);
+static int  cell_ticks(uint8_t div);              /* ui_screens.c: ticks per step */
+static void ui_leds(uint32_t *litK, uint32_t *dimK, uint32_t *litB, uint32_t *dimB);
+static void ui_leds_sync(void);                   /* ui.c: the four masks -> plat_lights */
+static void panel_key_up(uint8_t key);
+static void ui_input_poll(void);
+static void ui_draw(void);
+static void ui_init(void);
+static void ds_state_init(void);
+static void cursor_move(int8_t n);
+static uint8_t key_black_ordinal(uint8_t key);
+static uint8_t key_white_index(uint8_t key);
+static uint8_t key_white_id(uint8_t ord);
+static uint8_t key_black_id(uint8_t ord);
+
+/* text builders (ui_text.c) */
+static char *txt_next(void);
+static char *txt_trk(const char *prefix, uint8_t one_based);
+static char *txt_st(uint8_t one_based);
+static char *txt_join(const char *a, const char *b);
+static char *txt_vgp(uint8_t vel, uint8_t gate_raw, uint8_t prob);
+static char *txt_knr(uint8_t k, uint8_t n, uint8_t rot);
+static void strcpy_(char *dst, const char *src);
+
+#ifdef PLAT_HOST
+/* libc: the host build has no bsp/chip/libc.c, so canvas_extra.h defines this */
+static void fmt_int(char *b, int32_t v);
+#endif
+
+/* gfx (fm1-base device/gfx.c; cv_disc is ours, canvas_extra.h) */
+static void cv_pset(int32_t x, int32_t y, uint16_t c);
+static void cv_rect(int32_t x, int32_t y, int32_t w, int32_t h, uint16_t c);
+static void cv_line(int32_t x0, int32_t y0, int32_t x1, int32_t y1, uint16_t c);
+static void cv_disc(int32_t cx, int32_t cy, int32_t r, uint16_t c);
+static void cv_begin(uint32_t w, uint32_t h, uint16_t bg);
+static void cv_blit(uint32_t x, uint32_t y);
+static uint16_t hue12(uint8_t note);
+
+/* note name table (emu NAMES) */
+static const char *const NOTE_NAMES[12] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
+static const char *ui_note_name(uint8_t n) { return NOTE_NAMES[n % 12]; }

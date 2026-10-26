@@ -57,11 +57,16 @@ static void cv_disc(int32_t cx, int32_t cy, int32_t r, uint16_t c)
     }
 }
 
-/* Signed decimal into b, no padding. Returns the length written.
- * Replaces Felucca libc.c's fmt_int (void return): callers here use it as a
- * statement, so either signature compiles, but returning the length lets the
- * text builders append without a strlen. */
-static int32_t fmt_int(char *b, int32_t v)
+/* Signed decimal into b, no padding.
+ *
+ * The device build already has this: bsp/chip/libc.c defines fmt_int (void
+ * return) and it is visible in the unity build, so defining it again there is a
+ * conflicting-types error. The --web build has no libc.c at all, so it needs
+ * one. PLAT_HOST is what fm1-base defines for every hosted build. */
+#ifndef PLAT_HOST
+/* (the platform's own) */
+#else
+static void fmt_int(char *b, int32_t v)
 {
     char t[12];
     int32_t n = 0, i;
@@ -75,5 +80,5 @@ static int32_t fmt_int(char *b, int32_t v)
     for (i = 0; i < n; i++)
         b[i] = t[n - 1 - i];
     b[n] = 0;
-    return n;
 }
+#endif
