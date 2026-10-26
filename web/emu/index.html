@@ -661,6 +661,23 @@ async function switchOn() {
   go.disabled = true;
   go.textContent = "Starting…";
   status.textContent = "Starting…";
+
+  /* FIRST statement: build the context, synchronously, inside this click.
+   * Everything below awaits, and a context created after an await is not
+   * considered gesture-initiated on iOS -- it comes up suspended and refuses to
+   * start. Nothing may go before this line. */
+  let ac = null;
+  try {
+    if (!window.AudioContext) throw new Error("this browser has no Web Audio.");
+    ac = new AudioContext({ sampleRate: 44100, latencyHint: "interactive" });
+    ac.resume().catch(() => {});              /* still inside the gesture */
+  } catch (err) {
+    go.disabled = false;
+    go.textContent = "Switch on";
+    status.textContent = "Off.";
+    showAlert("Could not start: " + (err && err.message || err));
+    return;
+  }
   try {
     /* This build draws from inside an AudioWorklet, and AudioContext.audioWorklet
      * is only exposed in a SECURE CONTEXT: https, or localhost/127.0.0.1. Opening
@@ -668,14 +685,8 @@ async function switchOn() {
      *
      *   undefined is not an object (evaluating 'ac.audioWorklet.addModule')
      *
-     * because the property does not exist. Check the environment before building
-     * an audio graph that cannot work. */
-    if (!window.AudioContext) throw new Error("this browser has no Web Audio.");
-    /* audioWorklet is a getter on BaseAudioContext, which is on the prototype
-     * chain, so nothing has to be instantiated to look for it. Creating a
-     * context just to inspect it would leave an extra audio graph behind on a
-     * phone, which is the last thing this page needs. */
-    if (!("audioWorklet" in AudioContext.prototype)) {
+     * because the property does not exist. */
+    if (!ac.audioWorklet) {
       const insecure = !window.isSecureContext;
       throw new Error(insecure
         ? `this page must be served over HTTPS (or opened on the machine itself, as localhost). ${location.origin} is not a secure context, so the browser hides AudioWorklet — which is what draws this screen. See tools/serve-https.py.`
@@ -685,34 +696,35 @@ async function switchOn() {
     /* The app's own part of the page (APP_DIR/web/emu/app.js), if it has one:
      * attach({ node, ac, status }), and message(m) for the worklet's messages. */
     appPart = await import("./app.js").catch(() => null);
-    await buildAudio();                        /* returns with the panel live */
+    await buildAudio(ac);                      /* returns with the panel live */
     $("start").hidden = true;
     readerOn();
     knobs.MASTER.hit.focus();                  // the switch is gone: on to the panel
   } catch (err) {
     node = null;
     audioCtx = null;
+    try { ac.close(); } catch {}
     go.disabled = false;
     go.textContent = "Switch on";
     status.textContent = "Off.";
-    showAlert("Could not start: " + (err && err.message || err) + ". Chrome, Edge, Firefox and Safari should all work.");
+    showAlert("Could not start: " + (err && err.message || err));
   }
 }
 
-/* Build the audio graph: context, worklet, node, gain, and the wasm inside it.
+/* Build the audio graph: worklet, node, gain, and the wasm inside it, around a
+ * context the caller has ALREADY created.
  *
- * Separate from switchOn because iOS cannot always be talked out of a suspended
- * AudioContext. resume() on a context the system interrupted may never resolve
- * and never start process(), and then nothing in the page can fix it -- the only
- * way back is a new context, which means the whole graph again. John hit exactly
- * that: after switching apps, "tap to resume" did nothing.
+ * The context is not created here on purpose. iOS decides whether a new
+ * AudioContext is allowed to run by looking at whether it was constructed inside
+ * a user gesture, and every `await` leaves that gesture behind. Building it here
+ * means building it after the wasm fetch, and the result is a context that stays
+ * suspended however often you call resume() -- which is exactly the failure John
+ * saw: "the audio graph did not start".
  *
- * Built inside a click's call stack, so this must not be called from anywhere
- * but a user gesture. */
-async function buildAudio() {
-  const ac = new AudioContext({ sampleRate: 44100, latencyHint: "interactive" });
+ * So the context comes in from the click handler, made as the handler's first
+ * statement. */
+async function buildAudio(ac) {
   audioCtx = ac;
-  ac.resume().catch(() => {});                 /* still inside the gesture */
   if (speakMode() === "voice") voiceOn();
 
   await Promise.all([
@@ -786,11 +798,42 @@ let rebuilding = false;
 async function rcResume() {
   if (!audioCtx || rebuilding) return;
   if (audioCtx.state === "running") { showResume(false); return; }
-  try { await audioCtx.resume(); } catch { /* fall through to the rebuild */ }
-  if (audioCtx.state === "running") { showResume(false); return; }
 
-  /* Still suspended: rebuild. This runs inside the tap, so the new context is
-   * created from a gesture, which is what iOS wants. */
+  /* Make the replacement context FIRST, before any await.
+   *
+   * This function runs inside the tap, and that gesture is the only thing that
+   * lets iOS start a fresh AudioContext. An earlier version awaited resume() and
+   * close() first, which threw the gesture away: the new context came up
+   * suspended and process() never ran -- "the audio graph did not start".
+   *
+   * Making it here is speculative: if resume() below turns out to work, this
+   * one is closed again. A wasted context is much cheaper than a dead app. */
+  let ac = null;
+  try {
+    ac = new AudioContext({ sampleRate: 44100, latencyHint: "interactive" });
+    ac.resume().catch(() => {});
+  } catch { ac = null; }
+
+  if (!ac) {
+    /* no second context available: resume is all that is left */
+    try { await audioCtx.resume(); } catch {}
+    showResume(audioCtx.state !== "running");
+    return;
+  }
+
+  /* cheap path: maybe the old context just needed a nudge */
+  let revived = false;
+  try {
+    await audioCtx.resume();
+    revived = audioCtx.state === "running";
+  } catch {}
+  if (revived) {
+    try { ac.close(); } catch {}
+    showResume(false);
+    return;
+  }
+
+  /* Still suspended: swap in the context made above. */
   rebuilding = true;
   const old = { ac: audioCtx, n: node };
   try {
@@ -798,14 +841,17 @@ async function rcResume() {
     node = null;
     audioCtx = null;
     try { if (old.n) old.n.disconnect(); } catch {}
-    try { await old.ac.close(); } catch {}
-    await buildAudio();
+    await buildAudio(ac);
     showResume(false);
   } catch (err) {
+    try { ac.close(); } catch {}
     showResume(true);
     status.textContent = "Still paused.";
-    showAlert("Could not restart the audio: " + (err && err.message || err) + ". Reloading the page will fix it.");
+    showAlert("Could not restart the audio: " + (err && err.message || err) + " Reloading the page will fix it.");
   } finally {
+    /* the old graph is dead the moment the new one is live; closing it after
+     * the fact is fine and keeps the phone from accumulating audio graphs */
+    try { await old.ac.close(); } catch {}
     rebuilding = false;
   }
 }

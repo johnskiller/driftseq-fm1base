@@ -93,7 +93,9 @@ check(/audioCtx = ac;/.test(html), 'keeps the context for the heartbeat');
 console.log('the rebuild path is present in the built page:');
 check(/async function buildAudio/.test(html), 'buildAudio exists (the graph is rebuildable)');
 check(/wasmBytes = await fetch\(.app\.wasm.\)/.test(html), 'the wasm bytes are kept for a rebuild');
-check(/await old\.ac\.close\(\)/.test(html), 'the old context is closed before rebuilding');
+check(/async function buildAudio\(ac\)/.test(html), 'the context comes in from the gesture, not from inside buildAudio');
+check(/let ac = null;\n  try {\n    if \(!window\.AudioContext\)/.test(html) || /ac = new AudioContext\(\{ sampleRate: 44100/.test(html), 'a context is created in the click handler');
+check(/try { await old\.ac\.close\(\); } catch {}/.test(html), 'the old context is closed once the new one is live');
 check(/if \(audioCtx\.state === .running.\)/.test(html), 'a running context is left alone (no needless rebuild)');
 check(/rebuilding = true/.test(html), 'a rebuild cannot start twice at once');
 
@@ -101,15 +103,23 @@ check(/rebuilding = true/.test(html), 'a rebuild cannot start twice at once');
  * it out with the names it closes over, and drive both outcomes. */
 async function driveRcResume(state) {
     const src = grab('rcResume');
-    const calls = { rebuilt: 0, showed: 0 };
+    const calls = { rebuilt: 0, showed: 0, closed: 0, made: 0 };
     const body = `
         let audioCtx = { get state() { return ${JSON.stringify(state)}; },
                          resume() { return Promise.resolve(); },
-                         close() { return Promise.resolve(); } };
+                         close() { calls.closed++; return Promise.resolve(); } };
         let node = null, rebuilding = false;
         const status = { textContent: '' }, showAlert = () => {};
-        const buildAudio = async () => { calls.rebuilt++; };
-        const showResume = () => { calls.showed++; };
+        const buildAudio = async (ac) => { calls.rebuilt++; };
+        const showResume = (on) => { calls.showed++; calls.lastShown = on; };
+        /* the page's AudioContext: counts constructions, and a fresh one may
+           be suspended or running depending on the test */
+        function AudioContext() {
+            calls.made++;
+            return { get state() { return globalThis.__newState || 'running'; },
+                     resume() { return Promise.resolve(); },
+                     close() { calls.closed++; return Promise.resolve(); } };
+        }
         ${src}
         return rcResume;`;
     const fn = new Function('calls', body)(calls);
@@ -117,10 +127,18 @@ async function driveRcResume(state) {
     return calls;
 }
 {
+    /* a running context: nothing to do, and no second context is wasted */
+    globalThis.__newState = 'running';
     const running = await driveRcResume('running');
-    check(running.rebuilt === 0, 'a running context does not trigger a rebuild');
+    check(running.rebuilt === 0 && running.made === 0, 'a running context does nothing at all');
+
+    /* suspended, and resume() cannot revive it: rebuild with the context that
+       was made before any await */
+    globalThis.__newState = 'running';
     const suspended = await driveRcResume('suspended');
     check(suspended.rebuilt === 1, 'a suspended context DOES trigger a rebuild');
+    check(suspended.made === 1, 'the replacement context is made before any await');
+    check(suspended.closed >= 1, 'the old context is closed afterwards');
 }
 
 console.log(bad ? `\n== ${bad} FAILURES ==` : `\nRESUME LOGIC OK (${ok} checks)`);
