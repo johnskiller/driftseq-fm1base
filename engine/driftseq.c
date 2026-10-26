@@ -222,36 +222,50 @@ uint8_t ds_step_active(const ds_track *t, uint32_t step) {
  * rot shifts pulses later: on(i) = pat[(rel - rot) mod n], rel from loop_start.
  * Fill writes ONLY en bits (voices/vel/gate/prob untouched — re-fill idempotent). */
 static void bjorklund(int n, int k, uint8_t *out) {
-    static uint8_t A[64][64], B[64][64];            /* static: 8 KiB not on the fw stack */
-    static uint8_t nA[64][64], nB[64][64];
-    int alen[64], blen[64], nal[64], nbl[64];
+    /* Flat, not [64][64], and still static. The buckets' item counts always sum
+     * to n <= 64, so every bucket list together occupies at most 64 bytes and a
+     * flat array plus per-bucket offsets holds exactly the same thing. The 2-D
+     * version was 64*64 for each of A, B, nA and nB = 16 KiB of .bss, which the
+     * FM-1's 96 KiB of RAM cannot spare next to the BLE stack (it overflowed by
+     * 20 KB). Kept static rather than moved to the stack because this function
+     * is reached from the fill path and the device's stack is not the place for
+     * 1.3 KiB of scratch. Same algorithm, same output -- the golden stream is
+     * the check. */
+    static uint8_t A[64], B[64], nA[64], nB[64];
+    static int aoff[65], boff[65], naoff[65], nboff[65], alen[64], blen[64], nal[64], nbl[64];
     int na = k, nb = n - k, i, j;
     if (k <= 0) { for (i = 0; i < n; i++) out[i] = 0; return; }
     if (k >= n) { for (i = 0; i < n; i++) out[i] = 1; return; }
-    for (i = 0; i < na; i++) { A[i][0] = 1; alen[i] = 1; }
-    for (i = 0; i < nb; i++) { B[i][0] = 0; blen[i] = 1; }
+    for (i = 0; i < na; i++) { aoff[i] = i; A[i] = 1; alen[i] = 1; }
+    for (i = 0; i < nb; i++) { boff[i] = i; B[i] = 0; blen[i] = 1; }
     while (nb > 1) {
-        int m = na < nb ? na : nb, nna = m, nnb = 0;
+        int m = na < nb ? na : nb, nna = m, nnb = 0, w = 0;
         for (i = 0; i < m; i++) {                    /* pair: A[i] then B[i] */
-            for (j = 0; j < alen[i]; j++) nA[i][j] = A[i][j];
-            for (j = 0; j < blen[i]; j++) nA[i][alen[i] + j] = B[i][j];
+            naoff[i] = w;
+            for (j = 0; j < alen[i]; j++) nA[w + j] = A[aoff[i] + j];
+            for (j = 0; j < blen[i]; j++) nA[w + alen[i] + j] = B[boff[i] + j];
+            w += alen[i] + blen[i];
             nal[i] = alen[i] + blen[i];
         }
         for (i = m; i < na; i++) {                   /* leftover A waits in the B list */
-            for (j = 0; j < alen[i]; j++) nB[nnb][j] = A[i][j];
+            nboff[nnb] = w;
+            for (j = 0; j < alen[i]; j++) nB[w + j] = A[aoff[i] + j];
+            w += alen[i];
             nbl[nnb++] = alen[i];
         }
         for (i = m; i < nb; i++) {                   /* leftover B waits too */
-            for (j = 0; j < blen[i]; j++) nB[nnb][j] = B[i][j];
+            nboff[nnb] = w;
+            for (j = 0; j < blen[i]; j++) nB[w + j] = B[boff[i] + j];
+            w += blen[i];
             nbl[nnb++] = blen[i];
         }
-        for (i = 0; i < nna; i++) { for (j = 0; j < nal[i]; j++) A[i][j] = nA[i][j]; alen[i] = nal[i]; }
-        for (i = 0; i < nnb; i++) { for (j = 0; j < nbl[i]; j++) B[i][j] = nB[i][j]; blen[i] = nbl[i]; }
+        for (i = 0; i < nna; i++) { aoff[i] = naoff[i]; for (j = 0; j < nal[i]; j++) A[naoff[i] + j] = nA[naoff[i] + j]; alen[i] = nal[i]; }
+        for (i = 0; i < nnb; i++) { boff[i] = nboff[i]; for (j = 0; j < nbl[i]; j++) B[nboff[i] + j] = nB[nboff[i] + j]; blen[i] = nbl[i]; }
         na = nna; nb = nnb;
     }
     {   int w = 0;                                   /* paper: output = A buckets ++ B buckets */
-        for (i = 0; i < na; i++) for (j = 0; j < alen[i]; j++) out[w++] = A[i][j];
-        for (i = 0; i < nb; i++) for (j = 0; j < blen[i]; j++) out[w++] = B[i][j];
+        for (i = 0; i < na; i++) for (j = 0; j < alen[i]; j++) out[w++] = A[aoff[i] + j];
+        for (i = 0; i < nb; i++) for (j = 0; j < blen[i]; j++) out[w++] = B[boff[i] + j];
     }
 }
 

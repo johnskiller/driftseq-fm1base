@@ -1,11 +1,47 @@
 /* SPDX-License-Identifier: MPL-2.0
- * Copyright (C) 2026 Charles Vestal */
-/* The template app: every control on the screen as it arrives, by the name the app knows it by (plat.h B_*, EN_*,
- * the keys), and a few of them doing something: the keys play a voice and go out over USB-MIDI (MIDI in plays it
- * too), OCT- / OCT+ set the octave, PRESET the wave, MASTER the volume, SAVE stores the settings; the keys are
- * played with velocity and pressure (lib/touch.h), shown on them. One of each thing the platform offers, kept short. Part of the unity build (device/unity.c, host/plat_host.c), after the platform:
- * gfx.c and announce.c are in scope. */
+ * Copyright (C) 2026 Charles Vestal, johnskiller */
+/* DriftSeq on fm1-base.
+ *
+ * The sequencer is engine/driftseq.c: it owns the pattern, the clock and the
+ * bytes to send, and it does not know about the platform at all. This file is
+ * the other half of that contract -- it hands the engine real delta time from
+ * plat_ticks() and puts engine->out on the wire. Everything the panel and the
+ * screen do arrives here through plat.h (B_*, EN_*, the keys).
+ *
+ * MIDI out goes to USB and to both Bluetooth ports, which is what a sequencer
+ * wants: no thru, nothing echoed back where it came from (plat.h says call
+ * plat_midi_in_from() right after plat_midi_in for that).
+ *
+ * The template app's voice/wave/octave demo is GONE -- DriftSeq is a MIDI
+ * sequencer, it plays whatever is downstream, so there is nothing here to
+ * synthesise. */
 #include "fastmath.h"
+/* fm1-base is a unity build: device/unity.c includes app.c and nothing else of
+ * ours, so the engine's translation unit comes in here. driftseq.c is pure C99
+ * and has no platform dependencies, which is why it moves between projects
+ * unchanged. */
+/* The engine can carry the 16-pattern bank inline, which is 323 KB. The FM-1
+ * has 96 KiB of RAM, so the firmware build leaves it out and keeps the live
+ * pattern plus saved patterns in flash -- the same switch the old firmware's
+ * tools/build.py passed as -DDS_PATTERN_BANK_IN_STATE=0. fm1-base has no
+ * defines knob in fm1.toml, and this has to be set before the header is read,
+ * so it is defined here. Nothing reads the bank but ds_init's clearing loop,
+ * so the golden MIDI stream is identical either way. */
+#define DS_PATTERN_BANK_IN_STATE 0
+/* DRIFTSEQ_FW tells the engine it is on the bare toolchain, which has no libc
+ * headers: it then declares memset itself instead of including <string.h>.
+ * Same switch the old firmware's build passed as -DDRIFTSEQ_FW. It must NOT be
+ * set for the --web build, which compiles these same sources with emcc and has
+ * a real <string.h> -- declaring memset there conflicts with the system one
+ * ("conflicting types for 'memset'"). PLAT_HOST is what fm1-base defines for
+ * every hosted build (host tests and emscripten alike). */
+#ifndef PLAT_HOST
+#define DRIFTSEQ_FW 1
+#endif
+#include "engine/driftseq.h"
+#include "engine/driftseq.c"
+#include "engine/demo_pattern.h"
+#include "engine/demo_pattern.c"
 
 #define SET_MAGIC 0x54504C31u            /* "TPL1": the settings record; another magic loads defaults */
 typedef struct {
@@ -97,11 +133,71 @@ static void settings_defaults(void)
     set.ble_off = 0;
 }
 
+/* ---------------------------------------------------------------- engine --- */
+/* The sequencer. Seed from the clock so two units do not start identical, and
+ * never reseed: the pattern is the user's, not the boot's. */
+static ds_state eng;
+static uint32_t eng_last_ms;
+static uint32_t eng_sent;                          /* bytes put on the wire, for the host test */
+
+/* DriftSeq's clock is the real delta between frames, not a frame count: the
+ * FM-1's frame period wobbles, and a sequencer that counts frames drifts
+ * against everything it is playing with.
+ *
+ * plat_ms() and not plat_ticks24(): on the device both are the crystal, but on
+ * the host emulator plat_ticks24() reads CLOCK_MONOTONIC -- real wall time --
+ * while frames advance the emulated now_ms. Driving the engine from wall time
+ * there means the sequencer sees a fraction of the time the frame loop thinks
+ * has passed, and it stalls after a bar. plat_ms() is the emulator's clock on
+ * both, and 1 ms is well inside a 16th at any tempo this runs at. */
+static void engine_tick(void)
+{
+    uint32_t now = plat_ms(), el = now - eng_last_ms;
+    eng_last_ms = now;
+    ds_tick(&eng, (double)el / 1000.0);
+    if (eng.out_len) {
+        uint32_t i;
+        for (i = 0; i < eng.out_len; ) {
+            /* one packet per message: status|d1|d2 is 3 bytes for the messages
+             * this engine sends (note on/off, CC), 2 for a program change */
+            uint8_t st = eng.out[i];
+            uint32_t n = ((st & 0xF0u) == 0xC0u || (st & 0xF0u) == 0xD0u) ? 2u : 3u;
+            uint32_t pkt = (uint32_t)st << 8;
+            if (n >= 2 && i + 1 < eng.out_len) pkt |= (uint32_t)eng.out[i + 1] << 16;
+            if (n >= 3 && i + 2 < eng.out_len) pkt |= (uint32_t)eng.out[i + 2] << 24;
+            if (!plat_midi_out_room(TO_USB | TO_BLE))
+                break;                             /* full: keep it for the next frame */
+            plat_midi_send(pkt, TO_USB | TO_BLE);
+            eng_sent += n;
+            i += n;
+        }
+        if (i) {                                   /* drop what went out */
+            uint32_t k;
+            for (k = 0; k + i < eng.out_len; k++)
+                eng.out[k] = eng.out[k + i];
+            eng.out_len -= i;
+        }
+    }
+}
+
+static void engine_init(void)
+{
+    ds_init(&eng, (uint64_t)plat_ticks24() * 2654435761u);
+    /* A sequencer that comes up empty is indistinguishable from a broken one on
+     * a screen that does not draw notes yet, and the first thing anyone does is
+     * press PLAY. Start on the demo song (engine/demo_pattern.c, the same one
+     * the golden test locks). */
+    ds_load_demo(&eng);
+    eng_last_ms = plat_ms();
+    eng.out_len = 0;
+}
+
 void app_init(void)
 {
     if (plat_store_load(OBJ_SETTINGS, &set, sizeof set) != (int)sizeof set || set.magic != SET_MAGIC
         || set.octave < -2 || set.octave > 2 || set.wave > 1u || set.ble_off > 1u)
         settings_defaults();
+    engine_init();
 }
 
 /* --------------------------------------------------------------------- UI --- */
@@ -295,6 +391,13 @@ static void input(void)
             octave_step(-1);
         else if (k == B_OCTUP)
             octave_step(1);
+        else if (k == B_PLAY) {                  /* the sequencer's transport */
+            if (eng.playing)
+                ds_stop(&eng);
+            else
+                ds_play(&eng);
+            ui.redraw = 1;
+        }
         else if (k == B_REC && FM1B_BLE)
             ui.rec_t = plat_ms();                /* a press: on release (a hold switches Bluetooth) */
         else if (k == B_SAVE) {
@@ -463,6 +566,7 @@ void app_frame(void)
     static uint32_t last_pct, lit_until, last_ble, last_midi;
     uint32_t i, now = plat_ms(), pct = plat_master() * 100u / 4096u;
     input();
+    engine_tick();                           /* the sequencer runs on real delta time */
     speak();
     for (i = 0; i < NE; i++)                 /* an encoder's light goes out */
         if (ui.turned_at[i] && now - ui.turned_at[i] < 400u && now > lit_until)

@@ -22,6 +22,13 @@ vendored = ["eas/", "eas_inc/"]
 words = "words.tsv"
 ble = true                     # Bluetooth MIDI: the reason for this port
 ble_central = true             # and the FM-1 may connect to BLE MIDI devices
+# DriftSeq is a MIDI sequencer: it sends messages and makes no sound of its
+# own, so the USB audio class is dead weight. Those two buffers are {abuf,
+# st_buf} = 8 KB of the 96 KB of RAM, and RAM is what this port is short of
+# once the BLE stack takes 76 KB of it. Turning both off keeps the app a plain
+# USB-MIDI device, which is exactly what it wants to be.
+usb_audio_in = false
+usb_audio_out = false
 tagline = "a polymetric sequencer for the FM-1"
 repo = "https://github.com/johnskiller/driftseq"
 # LICENCE. MPL-2.0 is the reason this project exists: per-file copyleft (§3.3)
