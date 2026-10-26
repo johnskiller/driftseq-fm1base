@@ -390,7 +390,7 @@ static void ui_draw_header(const hdr_t *h)
     b = txt_next();
     fmt_int(b, sel_track + 1);
     ndig = (sel_track >= 9) ? 2 : 1;
-    cv_round_rect(6, pill_y, pill_w, pill_h, 3, TRACK_HUE(sel_track));
+    cv_round_rect(6, pill_y, pill_w, pill_h, 4, TRACK_HUE(sel_track));
     cv_text(6 + (pill_w - ndig * 7) / 2, 5, &FONT_S, b, TB_BG);
 
     /* context, then the right cluster */
