@@ -106,6 +106,7 @@ kbd { font: 600 .85em ui-monospace, Menlo, monospace; background: var(--card); b
 <div class="bar">
   <span id="status" role="status">Off. Sound starts when you switch it on.</span>
   <span id="alert" role="alert"></span>
+  <button id="resume" type="button" hidden>Tap to resume</button>
   <button id="mute" type="button" aria-pressed="false">Mute</button>
   <label class="keys"><input type="checkbox" id="shortcuts" checked> Keyboard shortcuts</label>
   <span class="cpu" id="cpu"></span>
@@ -631,6 +632,30 @@ function saveStore(store) {
 const status = $("status"), cpu = $("cpu");
 let appPart = null;
 function showAlert(t) { $("alert").textContent = t; }
+
+/* Wait for the audio context to actually run. Resolves on timeout too: a page
+ * that gives up is worse than one that lets you try. */
+function waitRunning(ac, ms) {
+  if (ac.state === "running") return Promise.resolve(true);
+  return new Promise((res) => {
+    const done = (v) => { ac.removeEventListener("statechange", tick); clearTimeout(t); res(v); };
+    const tick = () => { if (ac.state === "running") done(true); };
+    const t = setTimeout(() => done(false), ms);
+    ac.addEventListener("statechange", tick);
+  });
+}
+/* Wait for one real frame from the worklet. It listens on the port rather than
+ * replacing node.port.onmessage: the page already has a handler there and
+ * chaining it by hand is one refactor away from dropping frames. */
+function waitFrame(node, ms) {
+  return new Promise((res) => {
+    const done = (v) => { node.port.removeEventListener("message", tick); clearTimeout(t); res(v); };
+    const tick = (e) => { if (e.data && e.data.type === "frame") done(true); };
+    const t = setTimeout(() => done(false), ms);
+    node.port.addEventListener("message", tick);
+    node.port.start();
+  });
+}
 async function switchOn() {
   const go = $("go");
   go.disabled = true;
@@ -638,6 +663,12 @@ async function switchOn() {
   status.textContent = "Starting…";
   try {
     const ac = new AudioContext({ sampleRate: 44100, latencyHint: "interactive" });
+    audioCtx = ac;
+    /* Resume inside the click's own call stack. iOS only lets a page unlock
+     * audio from a user gesture, and every `await` below leaves that gesture
+     * behind; resuming later works on desktop and is the kind of thing that
+     * fails on a phone. It is harmless to call twice. */
+    ac.resume().catch(() => {});
     if (speakMode() === "voice") voiceOn();
     /* This build draws from inside an AudioWorklet, and AudioContext.audioWorklet
      * is only exposed in a SECURE CONTEXT: https, or localhost/127.0.0.1. Opening
@@ -666,6 +697,7 @@ async function switchOn() {
         const m = e.data;
         if (m.type === "ready") res();
         else if (m.type === "frame") {
+          lastFrameAt = Date.now();
           if (m.fb) drawScreen(m.fb);
           drawLights(m.buttons, m.keys);
           if (m.said) onSaid(m.said);
@@ -680,9 +712,20 @@ async function switchOn() {
     appPart = await import("./app.js").catch(() => null);
     if (appPart && appPart.attach) appPart.attach({ node, ac, status: (t) => showAlert(t) });
     node.port.postMessage({ type: "load", wasm, store: loadStore(), master }, [wasm]);
-    await ready;
-    await ac.resume();
+    await ready;                                   /* the wasm is in and web_boot has run */
+    /* iOS needs the audio graph to be RUNNING before the panel is worth
+     * touching, and the page can look ready long before it is: web_boot has
+     * already produced a frame, so the screen paints, while process() is not
+     * being called at all and nothing polls the buttons. A tap that goes down
+     * and up between two polls leaves no edge behind, so it is lost silently.
+     *
+     * The unlock itself has to happen in the click's call stack, which is why
+     * resume() is called up there too; this just waits for the state to settle
+     * and for one real frame to come back before the panel goes live. */
+    status.textContent = "Warming up…";
     $("start").hidden = true;
+    await waitRunning(ac, 4000);
+    await waitFrame(node, 4000);
     controls.inert = false;
     status.textContent = ac.sampleRate === 44100 ? "On." : `On (the browser runs audio at ${ac.sampleRate} Hz).`;
     syncButtons(); syncKeys();
@@ -690,6 +733,7 @@ async function switchOn() {
     knobs.MASTER.hit.focus();                  // the switch is gone: on to the panel
   } catch (err) {
     node = null;
+    audioCtx = null;
     go.disabled = false;
     go.textContent = "Switch on";
     status.textContent = "Off.";
@@ -697,6 +741,44 @@ async function switchOn() {
   }
 }
 $("go").addEventListener("click", switchOn);
+
+/* Coming back from another app, or from a locked screen.
+ *
+ * iOS suspends an AudioContext when the page goes away and does NOT resume it on
+ * return. While it is suspended process() is not called, so the worklet stops
+ * advancing the device: the screen freezes on its last frame and nothing polls
+ * the panel, while the page's own CSS feedback (a knob turning, a button
+ * lighting) keeps working because it never goes near wasm. That reads as "the
+ * emulator is broken" -- John hit it by switching apps.
+ *
+ * resume() on visibilitychange alone is not enough: Safari often ignores it
+ * without a gesture. So ask for one, loudly, and take it as the gesture. */
+let audioCtx = null;
+function showResume(on) {
+  const b = $("resume");
+  b.hidden = !on;
+  if (on) status.textContent = "Paused (the phone suspended the audio). Tap to resume.";
+}
+async function rcResume() {
+  if (!audioCtx) return;
+  try { await audioCtx.resume(); } catch { /* the tap below will try again */ }
+  showResume(audioCtx.state !== "running");
+}
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") rcResume();
+});
+$("resume").addEventListener("click", rcResume);
+
+/* A heartbeat, so a suspension that slipped past both of the above still says so
+ * instead of looking like a crash. The worklet publishes ~30 frames a second;
+ * three seconds of silence is a stall, not a slow moment. */
+let lastFrameAt = Date.now();
+setInterval(() => {
+  if (!audioCtx) return;
+  if (audioCtx.state !== "running") { showResume(true); return; }
+  if (Date.now() - lastFrameAt > 3000) showResume(true);
+  else showResume(false);
+}, 1000);
 $("mute").addEventListener("click", () => {
   const on = $("mute").getAttribute("aria-pressed") !== "true";
   $("mute").setAttribute("aria-pressed", on ? "true" : "false");
