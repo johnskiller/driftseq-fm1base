@@ -731,12 +731,19 @@ static void draw_grid_drum(void)
             }
         }
     }
-    if (eng.playing) {                                 /* playhead: column + 16% veil */
+    /* the playhead: 1px white, nothing else.
+     *
+     * There used to be a 13px "veil" column under it (blend(WHITE, BLACK, 219),
+     * i.e. 14% white). Two things were wrong with it. It was painted AFTER the
+     * cells, so it darkened the hits it was pointing at -- the current step's
+     * drum measured RGB(32,32,32) while its neighbour stayed legible -- and even
+     * moved beneath them it left a 1px+2px grey stripe in the cell gaps, which
+     * reads as a second, fainter bar next to the line. John: "整列都不画 veil,
+     * 只留 1px 白线". The melodic grid never had a veil; now neither does this
+     * one, and the line says the same thing in both. */
+    if (eng.playing && pos >= page * 16 && pos < page * 16 + 16) {
         int px = x0 + (pos - page * 16) * cw;
-        if (pos >= page * 16 && pos < page * 16 + 16) {
-            cv_rect(px, y0, cw, NDRUM * lh, blend(C_WHITE, C_BLACK, 219));
-            cv_rect(px, y0, 1, NDRUM * lh, C_WHITE);
-        }
+        cv_rect(px, y0, 1, NDRUM * lh, C_WHITE);
     }
     cv_blit(0, 0);
     ui_draw_drum_card();                             /* 100px single-drum card */

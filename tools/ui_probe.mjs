@@ -120,6 +120,43 @@ press(9);                                     /* B_SEQ */
     check(r.rows[214] > 0, 'GRID fills to the footer edge', 'y214=' + r.rows[214]);
 }
 
+/* ---------- the playhead: 1px white, nothing beside it ----------
+ *
+ * Track 0 is ch9, so B_SEQ lands on the drum grid. Its playhead used to be a
+ * line PLUS a 13px veil column (blend(WHITE, BLACK, 219)); painted after the
+ * cells it darkened the very hits it pointed at, and even moved underneath them
+ * it left a grey 1px+2px stripe in the cell gaps -- John saw it as "竖线旁边好像
+ * 有一条一格宽的灰色bar". It is gone: the melodic grid never had one.
+ *
+ * The assertion has to wait for the head to be on page 0 and it has to look for
+ * the veil's exact colour, not "any grey", so it cannot drift. */
+{
+    const x0 = 30, cw = 13, VEIL = 0x0421;   /* blend(0xFFFF, 0, 219) */
+    press(10);                                /* B_PLAY */
+    let found = -1, veilPx = 0;
+    for (let k = 0; k < 200 && found < 0; k++) {
+        step(20);
+        const fb = grab();
+        /* the head is the only column that is white for the full lane block
+         * (y16..114); it sits at x0 + col*cw, so it can be x0 itself when the
+         * page is at column 0 -- that is the head, not a border */
+        for (let x = x0; x < x0 + 16 * cw && found < 0; x++) {
+            let white = 0;
+            for (let y = 16; y < 115; y++) if (fb[y * W + x] === 0xFFFF) white++;
+            if (white > 80) found = x;
+        }
+        if (found >= 0) {
+            for (let y = 16; y < 115; y++)
+                for (let x = Math.max(0, found - 1); x <= Math.min(W - 1, found + cw); x++)
+                    if (fb[y * W + x] === VEIL) veilPx++;
+        }
+    }
+    check(found >= 0, 'GRID playhead is a 1px white column', found >= 0 ? 'x=' + found : 'never found');
+    check(veilPx === 0, 'GRID playhead has no veil beside it', veilPx + ' veil px');
+    press(10);                                /* B_PLAY again: stop */
+    step(40);
+}
+
 /* ---------- EDIT layer (same screen, louder) ---------- */
 press(4);                                     /* B_EDIT */
 {
