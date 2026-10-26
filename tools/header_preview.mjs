@@ -27,8 +27,15 @@ const textWidth = (s) => [...s].reduce((a, c) => a + T.adv[gi(c.charCodeAt(0))],
 /* ---- a tiny framebuffer, in the panel's own RGB565 vocabulary -------------- */
 const W = 240, H = 64;                      /* the header plus room to breathe */
 const fb = new Uint16Array(W * H);
-const rgb565 = (r, g, b) => ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3);
-const toRGB = (c) => [((c >> 11) & 31) * 255 / 31 | 0, ((c >> 5) & 63) * 255 / 63 | 0, (c & 31) * 255 / 31 | 0];
+/* The panel's framebuffer is big-endian 565: gfx.c writes cv_px through swap16(), so
+ * a uint16 read out of wasm memory has its bytes reversed. Everything in this file is
+ * kept in THAT order -- rgb565() returns a swapped value and toRGB() accepts one -- so
+ * a pixel captured from the wasm and a pixel drawn here are the same kind of thing.
+ * Swap is its own inverse, so one helper serves both directions. */
+const swap16 = (c) => ((c & 0xff) << 8) | ((c >> 8) & 0xff);
+const rgb565 = (r, g, b) => swap16(((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3));
+const toRGB = (c0) => { const c = swap16(c0);
+    return [((c >> 11) & 31) * 255 / 31 | 0, ((c >> 5) & 63) * 255 / 63 | 0, (c & 31) * 255 / 31 | 0]; };
 const px = (x, y, c) => { if (x >= 0 && x < W && y >= 0 && y < H) fb[y * W + x] = c; };
 const rect = (x, y, w, h, c) => { for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) px(x + i, y + j, c); };
 

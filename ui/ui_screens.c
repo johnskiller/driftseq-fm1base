@@ -130,6 +130,39 @@ static char *chord_name(uint8_t t, uint8_t s)
     return b;
 }
 
+/* ---- "the knob you are turning says its value" -------------------------
+ *
+ * John: "每个旋钮改变时在旋钮位置显示value，停下来后恢复旋钮提示".
+ *
+ * The footer already prints one name per knob at fixed columns, so the value
+ * goes where the name was: the eye is at the footer when the hand is at the
+ * knob, and a readout that jumps to the header (where S1 used to live) makes
+ * the player look away from the thing they are turning.
+ *
+ * Any detent from any encoder re-stamps the timer, and the footer falls back
+ * to names when it expires. At 60 fps that is 0.65 s: long enough to read a
+ * number, short enough that the footer is not stuck showing a value while the
+ * player has moved on.
+ *
+ * Only K1..K4 have a footer column. SELECT/ALGO/PRESET have none, so they are
+ * ignored rather than aliased onto a column that means something else.
+ */
+#define KN_FRAMES 40
+static uint8_t  kn_i;        /* which knob (0..3 = K1..K4), valid if kn_ttl > 0 */
+static uint8_t  kn_ttl;      /* frames left */
+
+/* defined at the end of the file: it reads hero_bars, div_str and the per-mode
+ * step fields, which are declared further down than the footer that calls it */
+static const char *kn_value_text(void);
+
+static void kn_poke(uint8_t enc)
+{
+    if (enc < EN_K1 || enc > EN_K4)
+        return;                              /* no footer column for this one */
+    kn_i = (uint8_t)(enc - EN_K1);
+    kn_ttl = KN_FRAMES;
+}
+
 /* ---- footer (prefix-free, fixed columns, 10px) ----
  * The footer is the contract "手不用看旋钮就知道在改什么" (03 §0), so the GLO
  * layer gets its own row of names: while GLO is held the four big boxes are
@@ -165,6 +198,19 @@ static void ui_draw_footer(void)
         const char *const *f = (ui_mode == M_HOME) ? FOOT_HOME : FOOT_GRID;
         for (k = 0; k < 4; k++)
             cv_text(FX[k], 6, &FONT_T, f[k], FOOT_GRAY);
+    }
+    /* The knob in hand overrides its own column: same slot, same place, but the
+     * number instead of the name, in the bar's own text colour so it reads as a
+     * live readout and not as another label. Drawn as a box covering the label
+     * because a value is not always as wide as the word it replaces ("MUTE"
+     * vs "ON", "LEN" vs "4") and a partially overwritten label is worse than
+     * either. */
+    if (kn_ttl) {
+        int x = FX[kn_i];
+        const char *v = kn_value_text();
+        kn_ttl--;
+        cv_rect(x - 3, 0, 52, 24, TB_BG);        /* the column plus its gap */
+        cv_text(x, 6, &FONT_T, v, TB_TX);
     }
     cv_blit(0, 216);
 }
@@ -288,34 +334,112 @@ static int next_event_run(uint8_t t, uint8_t s, uint8_t len, uint8_t start)
     }
     return (int)len - rel;
 }
+/* Number of pages the 5-dot indicator shows. */
+#define HDR_DOTS 5
+
+/* The one header bar every page shares.
+ *
+ * Why this exists: the bar used to be drawn inline by each painter, and they
+ * disagreed -- HOME was 20px with glyphs at y=4, GRID was 16px with glyphs at
+ * y=2, ARP/EDIT were 16px at a third offset. Changing page moved the bar and
+ * the text, which John called out as the reason the header looked bad before
+ * any question of bitmaps came up. One function, one geometry.
+ *
+ * 24px is what fits: HOME's 16 rows at 12px pitch allow up to 24, ARP's ring
+ * starts at y=32, and GRID-drum's nine lanes plus its 100px card force the
+ * lane pitch down to 10px so the bar can reach 24 (see draw_grid_drum).
+ *
+ * Type is FONT_S, 11px caps in a 16px cell -- 38% taller glyphs than FONT_T,
+ * which is what makes a single line read at arm's length. The cost of the
+ * larger face is horizontal room, paid by deleting the word "TRACK": the pill
+ * is already the track colour, so "TRACK 1" was a label restating its own
+ * colour. A bare digit in a filled pill says the same thing in 17px instead
+ * of 33px.
+ */
+/* Baseline of the bar's single line. FONT_S puts 11px of caps 2 rows into its
+ * 16px cell, so y=5 lands the caps at rows 7..17 of the 24px bar: 6px above and
+ * 6px below. Every element in the bar uses it, which is why the pill, the
+ * context and the right cluster cannot drift apart vertically. */
+#define HDR_TY 5
+
+typedef struct {
+    const char *ctx;     /* KCK / 4 BAR -- whatever this page is looking at */
+    const char *right;   /* S1, or MUTE */
+    uint16_t    right_c; /* colour for `right` */
+    uint8_t     dots;    /* 1 = draw the page indicator */
+    uint8_t     page;    /* which dot is lit */
+} hdr_t;
+
+static void ui_draw_header(const hdr_t *h)
+{
+    const ds_track *tr = TRK();
+    /* Pill geometry. The width is FIXED at two digits, not fitted to the
+     * number: John's point is that the header must not move when the selection
+     * crosses from track 9 to track 10. A fitted pill would grow 7px there and
+     * shove every readout to its right, which reads as the whole bar twitching
+     * on a knob twist. One digit is centred in the same box, so the bar is
+     * identical on all 16 tracks. */
+    const int pill_w = 24, pill_h = 18, pill_y = 3;
+    int x, i, ndig;
+    char *b;
+
+    cv_rect(0, 0, 240, 24, TB_BG);
+    cv_rect(0, 23, 240, 1, RGB565(42, 42, 52));      /* floor: the bar owns y0..23 */
+
+    /* track number, knocked out of its own colour */
+    b = txt_next();
+    fmt_int(b, sel_track + 1);
+    ndig = (sel_track >= 9) ? 2 : 1;
+    cv_round_rect(6, pill_y, pill_w, pill_h, 3, TRACK_HUE(sel_track));
+    cv_text(6 + (pill_w - ndig * 7) / 2, 5, &FONT_S, b, TB_BG);
+
+    /* context, then the right cluster */
+    x = 6 + pill_w + 8;
+    x = cv_text(x, HDR_TY, &FONT_S, h->ctx, TB_TX);
+
+    if (h->dots) {
+        for (i = 0; i < HDR_DOTS; i++) {
+            int dx = 211 + i * 6;
+            if (i == (int)h->page)
+                cv_rect(dx, 10, 3, 3, TB_TX);
+            else {
+                cv_rect(dx, 10, 3, 3, RGB565(58, 58, 70));
+            }
+        }
+    }
+    if (h->right) {
+        int rx = (h->dots ? 211 : 240 - 6) - 8 - (int)cv_text_w(&FONT_S, h->right);
+        cv_text(rx, HDR_TY, &FONT_S, h->right, h->right_c);
+    }
+}
+
 static void draw_home(void)
 {
     uint8_t t;
+    hdr_t h;
     cv_begin(240, 224, C_BLACK);
-    cv_rect(0, 0, 240, 20, TB_BG);
-    {   char *b = txt_next();
-        strcpy_(b, "TRK ");
-        fmt_int(txt_end(b), sel_track + 1);
-        strcpy_(txt_end(b), "-PTN 01-");
-        fmt_int(txt_end(b), (int32_t)(eng.bpm + 0.5));
-        strcpy_(txt_end(b), "-");
-        strcpy_(txt_end(b), div_str(TRK()->division));
-        cv_text(6, 4, &FONT_T, b, TB_TX);
-    }
-    cv_text(204, 4, &FONT_T, txt_join("S", txt_num(0, TRK()->loop_start)),
-            TRK()->mute ? MUTE_GRAY : GREEN_OK);
-    {   /* zoom readout: say how many BARS the window shows, in bars (rev.25).
-         * John: "顶部直接写1 bar 4bar这样，明确表示目前hero显示出几个bar".
-         * The old "x4b" was a detent label wearing a unit: nobody reads
-         * "x4b" as "four bars". The ladder is still 1/2/4/8, but the
-         * number is now the span itself. Lower case folds to upper case in
-         * FONT_T, so this prints as "4 BAR". Space before "BAR" keeps the
-         * digits and the unit from reading as one token. */
+    {   /* Context line: how many BARS the hero shows (rev.25: "顶部直接写1 bar
+         * 4bar这样，明确表示目前hero显示出几个bar"), then the pattern's tempo and
+         * division. These three were three separate text runs stranded at
+         * x=6/168/204 with a 66px hole between them; the hole was the header's
+         * real problem, not the absence of a bitmap. */
         char *b = txt_next();
         fmt_int(b, (int32_t)hero_bars);
-        strcpy_(txt_end(b), " BAR");
-        cv_text(168, 4, &FONT_T, b, RGB565(122, 122, 136));
+        strcpy_(txt_end(b), " BAR  ");
+        fmt_int(txt_end(b), (int32_t)(eng.bpm + 0.5));
+        strcpy_(txt_end(b), "  ");
+        strcpy_(txt_end(b), div_str(TRK()->division));
+        h.ctx = b;
     }
+    /* No loop-start readout here any more (John: "S1表示loop开头似乎没有必要").
+     * START is K1's label in the footer and now shows its number while the knob
+     * turns, which is where the player is already looking; a second copy in the
+     * header was a number with no context that never changed by itself. */
+    h.right = (char *)0;
+    h.right_c = TB_TX;
+    h.dots = 1;
+    h.page = 0;
+    ui_draw_header(&h);
     for (t = 0; t < 16; t++) {
         ds_track *tr = &eng.pat.track[t];
         int y = 24 + (int)t * 12;
@@ -546,7 +670,15 @@ static void draw_home(void)
         }
 outline:
         if (t == sel_track) {                        /* selected: green outline at 46 / 239 */
-            cv_rect(HX0 - 1, y - 1, (HX1 - HX0) + 2, 1, RGB565(127, 217, 74));
+            /* The top edge of row 0 would land on y=23, which is the header's
+             * floor rule. Under the old 20px bar there were three blank rows
+             * between the bar and the first track row, so y-1 was free; with a
+             * 24px bar the first row starts right under the rule and the
+             * outline has to stay inside the row it belongs to. Clamping keeps
+             * the box closed on rows 1..15 and draws the top edge one pixel
+             * lower on row 0, where the rule already provides the line. */
+            int ty = (y - 1 < 24) ? 24 : y - 1;
+            cv_rect(HX0 - 1, ty, (HX1 - HX0) + 2, 1, RGB565(127, 217, 74));
             cv_rect(HX0 - 1, y + 11, (HX1 - HX0) + 2, 1, RGB565(127, 217, 74));
             cv_rect(HX0 - 1, y, 1, 11, RGB565(127, 217, 74));
             cv_rect(HX1, y, 1, 11, RGB565(127, 217, 74));
@@ -557,11 +689,15 @@ outline:
 }
 
 /* "EDIT" badge at the top-bar right corner — the loud layer flag (r16j has
- * footer color only; John asked for a醒目标记). Yellow box, black text. */
+ * footer color only; John asked for a醒目标记). Yellow box, black text.
+ *
+ * Centred in the shared 24px bar: the badge is 12px tall, so y=6 leaves 6px
+ * above and 5px below. It covers the page dots while the layer is open, which
+ * is the intent — a modal layer outranks "which page am I on". */
 static void ui_draw_edit_badge(void)
 {
-    cv_rect(196, 2, 40, 12, YELLOW);
-    cv_text(201, 4, &FONT_T, "EDIT", C_BLACK);
+    cv_rect(196, 6, 40, 12, YELLOW);
+    cv_text(201, 7, &FONT_T, "EDIT", C_BLACK);
 }
 
 /* ---- MELODY GRID (r16j drawGrid verbatim) ----
@@ -588,17 +724,27 @@ static void draw_grid_melodic(void)
     if (pmax == pmin) pmax = (uint8_t)(pmin + 1);
 
     cv_begin(240, 224, C_BLACK);
-    cv_rect(0, 0, 240, 16, TB_BG);
-    cv_text(6, 2, &FONT_T, txt_join("SEQ TRK", txt_num(0, sel_track + 1)), TB_TX);
-    /* DIV readout (rev.22): GLO+K3 changes the division on this page, so the
-     * value has to be visible here — otherwise the twist has no feedback until
-     * the user walks back to HOME. Column 96 for BOTH grid pages: same value,
-     * same place — the eye should not have to hunt per track type. */
-    cv_text(96, 2, &FONT_T, div_str(tr->division), RGB565(122, 122, 136));
-    {   /* r16j: `st${cursor+1}${cn?' '+cn:''}` — chord quality on the right */
+    {   /* The bar is shared, but what it reports is not: the melodic grid cares
+         * about the step under the cursor and its chord quality, and the DIV
+         * readout has to stay here because GLO+K3 changes it on this page.
+         * Those three were text runs at x=6/96/150 with no relation between
+         * them; now the number is the pill and the rest follows it. */
+        hdr_t h;
         char *cn = chord_name(sel_track, cursor);
-        cv_text(150, 2, &FONT_T, txt_join2(txt_st(cursor + 1), *cn ? txt_join("", cn) : (char *)0),
-                tr->mute ? MUTE_GRAY : GREEN_OK);
+        char *b = txt_next();
+        strcpy_(b, div_str(tr->division));
+        strcpy_(txt_end(b), "  ");
+        strcpy_(txt_end(b), txt_st(cursor + 1));
+        if (*cn) {
+            strcpy_(txt_end(b), " ");
+            strcpy_(txt_end(b), cn);
+        }
+        h.ctx = b;
+        h.right = (char *)0;                 /* loop start lives on K1's footer slot now */
+        h.right_c = TB_TX;
+        h.dots = 1;
+        h.page = 1;
+        ui_draw_header(&h);
     }
     if (key_shift != 0)
         cv_text(120, 2, &FONT_T, key_shift > 0 ? "+" : "-", YELLOW);
@@ -659,7 +805,7 @@ static void draw_grid_melodic(void)
 static void draw_grid_drum(void)
 {
     uint8_t page = cursor >> 4;
-    int li, c, x0 = 30, y0 = 16, lh = 11, gap = 4;
+    int li, c, x0 = 30, y0 = 24, lh = 10, gap = 3;
     int cw = (240 - x0) / 16;                        /* 13 */
     uint8_t lane_in_use[NDRUM];
     int pos = (int)eng.pos16[sel_track];
@@ -673,12 +819,25 @@ static void draw_grid_drum(void)
         }
     }
     cv_begin(240, 160, C_BLACK);
-    cv_rect(0, 0, 240, 16, TB_BG);
-    cv_text(6, 2, &FONT_T, txt_join(txt_trk("DRUM TRK", sel_track + 1),
-             txt_join("P", txt_join(txt_num(0, page + 1), "/4"))), TB_TX);
-    cv_text(96, 2, &FONT_T, div_str(TRK()->division), RGB565(122, 122, 136));
-    cv_text(150, 2, &FONT_T, txt_join(txt_st(cursor + 1), GM_SHORT[drum_sel]),
-            TRK()->mute ? MUTE_GRAY : GREEN_OK);
+    {   /* Drum page: the context is the drum under the cursor and the lane grid
+         * page (1/4 .. 4/4), which is the only place that number is shown.
+         * The bar is 24px here too, which is why the lane pitch below drops to
+         * lh=10 / gap=3: nine lanes must still end above the 100px card at
+         * y=115. cellh = lh - gap stays 7px, so the cells are the same size as
+         * before and only 1px of row spacing pays for the taller bar. */
+        hdr_t h;
+        char *b = txt_next();
+        strcpy_(b, div_str(TRK()->division));
+        strcpy_(txt_end(b), "  P");
+        fmt_int(txt_end(b), page + 1);
+        strcpy_(txt_end(b), "/4");
+        h.ctx = b;
+        h.right = GM_SHORT[drum_sel];            /* which drum the cursor is on */
+        h.right_c = TRACK_HUE(sel_track);
+        h.dots = 1;
+        h.page = 1;
+        ui_draw_header(&h);
+    }
     if (focus_layer)
         ui_draw_edit_badge();
     /* GRID metric ruler (rev.31), drawn once for the whole lane block: in the
@@ -748,4 +907,85 @@ static void draw_grid_drum(void)
     cv_blit(0, 0);
     ui_draw_drum_card();                             /* 100px single-drum card */
     ui_draw_footer();
+}
+
+/* ---- the live value behind the knob in hand ------------------------------
+ *
+ * This lives at the bottom of the file on purpose: it reads hero_bars and
+ * div_str and the per-mode step fields, all of which are declared later than
+ * the footer that calls it. Moving it up top to sit next to kn_poke() looked
+ * tidier and did not compile.
+ *
+ * Each branch mirrors the page's own encoder handler, because the number shown
+ * must be the number that just changed. EDIT melodic has PIT/GAT/VEL/PROB (note
+ * is PIT and moves in octaves, so it is shown as a MIDI note rather than a
+ * step count); EDIT drum has VEL/GAT/PROB on the voice under the cursor; GRID
+ * bare is step/prob; ARP is K/N/ROT/LINK.
+ */
+static const char *kn_value_text(void)
+{
+    ds_track *tr = TRK();
+    ds_step *st = &tr->steps[cursor];
+    char *b = txt_next();
+    if (ui_mode == M_ARP) {
+        /* matches FOOT_ARP = {K, N, ROT, LINK} and ui_arp_encoder */
+        if (kn_i == 0)      fmt_int(b, tr->eu_k);
+        else if (kn_i == 1) fmt_int(b, tr->eu_n ? tr->eu_n : 16);
+        else if (kn_i == 2) fmt_int(b, tr->eu_rot);
+        else                strcpy_(b, tr->eu_on ? "LINK" : "FREE");
+        return b;
+    }
+    if (ui_mode == M_GRID && focus_layer) {
+        if (is_drum_trk()) {
+            int hit = -1, vi;
+            for (vi = 0; vi < st->nvoices; vi++)
+                if (st->v[vi].note == GM_DRUMS[drum_sel]) hit = vi;
+            if (kn_i == 0)      fmt_int(b, hit < 0 ? 0 : st->v[hit].vel);
+            else if (kn_i == 1) fmt_int(b, hit < 0 ? 0 : st->v[hit].gate);
+            else                fmt_int(b, st->prob);
+        } else {
+            int vo = edit_voice;
+            if (kn_i == 0)      fmt_int(b, (vo < st->nvoices) ? st->v[vo].note : 0);
+            else if (kn_i == 1) fmt_int(b, (vo < st->nvoices) ? st->v[vo].gate : 0);
+            else if (kn_i == 2) fmt_int(b, (vo < st->nvoices) ? st->v[vo].vel : 0);
+            else                fmt_int(b, st->prob);
+        }
+        return b;
+    }
+    /* HOME and bare GRID. The labels differ per page and so does the meaning:
+     *
+     *   HOME      START  LEN   MUTE  PROB
+     *   GRID      STEP   LEN   MUTE  PROB
+     *   GRID+GLO  START  ZOOM  DIV   PROB
+     *
+     * (FOOT_HOME / FOOT_GRID / FOOT_GLO_* in ui_draw_footer, and the matching
+     * branches in ui_home_encoder / ui_grid_encoder.) This function has to
+     * follow those, not its own idea of the knob.
+     *
+     * Two display conventions matter here:
+     *  - positions are 1-based. loop_start is 0..63 and cursor is 0..63, but
+     *    the player counts steps from 1 (the grid draws ST1 first), so both
+     *    print +1. John: "k1应该从1开始".
+     *  - K2 is the track's loop_len on both bare pages, NOT hero_bars. The row
+     *    gutter's LEN column is its other readout and it moved correctly while
+     *    this value did not, which is exactly what John saw. hero_bars is the
+     *    zoom ladder and only appears under GLO.
+     */
+    if (glo_held) {
+        if (kn_i == 0)       fmt_int(b, (int32_t)tr->loop_start + 1);   /* START */
+        else if (kn_i == 1)  fmt_int(b, (int32_t)hero_bars);            /* ZOOM  */
+        else if (kn_i == 2)  strcpy_(b, div_str(tr->division));         /* DIV   */
+        else                 fmt_int(b, st->prob);                      /* PROB  */
+    } else if (ui_mode == M_GRID) {
+        if (kn_i == 0)       fmt_int(b, (int32_t)cursor + 1);           /* STEP  */
+        else if (kn_i == 1)  fmt_int(b, tr->loop_len);                  /* LEN   */
+        else if (kn_i == 2)  strcpy_(b, tr->mute ? "MUTE" : "ON");      /* MUTE  */
+        else                 fmt_int(b, st->prob);                      /* PROB  */
+    } else {
+        if (kn_i == 0)       fmt_int(b, (int32_t)tr->loop_start + 1);   /* START */
+        else if (kn_i == 1)  fmt_int(b, tr->loop_len);                  /* LEN   */
+        else if (kn_i == 2)  strcpy_(b, tr->mute ? "MUTE" : "ON");      /* MUTE  */
+        else                 fmt_int(b, st->prob);                      /* PROB  */
+    }
+    return b;
 }

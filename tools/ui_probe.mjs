@@ -101,9 +101,14 @@ step(200);
     }
     check(rowsWithNumber === 16, 'HOME has all 16 track rows in the gutter', rowsWithNumber + '/16');
 
-    /* the top bar is a solid 20px band */
-    check(r.rows[0] === W && r.rows[19] === W, 'HOME top bar spans the full width at y0..19',
-          'y0=' + r.rows[0] + ' y19=' + r.rows[19]);
+    /* The top bar is one 24px band on every page, and every page draws it.
+     * This used to check y0..19 only, which passed on HOME's old 20px bar while
+     * GRID and ARP were 16px -- the probe was asserting the very inconsistency
+     * that made the header look wrong. Now it measures the bar on all four
+     * pages and requires the same height, so a page that drifts fails. */
+    check(r.rows[0] === W && r.rows[23] === W && r.rows[24] !== W,
+          'HOME top bar spans y0..23 and stops there (24px)',
+          `y0=${r.rows[0]} y23=${r.rows[23]} y24=${r.rows[24]}`);
 
     /* the footer band (y216..239) is drawn too */
     check(r.rows[220] === W && r.rows[239] === W, 'HOME footer band is drawn at y216..239',
@@ -190,6 +195,50 @@ press(8);                                     /* B_ARP */
      * radius swung ~33%; the Q12 table holds it to the pixel grid. */
     const rs = radii.filter(d => d >= 70 && d <= 85);
     check(rs.length > 100, 'ARP ring has enough points to judge its shape', rs.length + ' px');
+}
+
+/* ---------- the header must be the same height on every page ---------- */
+/* This is the check that had to exist: the old bar was 20px on HOME, 16px on
+ * GRID and 16px on ARP, and nothing noticed because each page was measured on
+ * its own with its own number baked into the assertion.
+ *
+ * Measure the painter's floor rule, not "how far down is it full width": HOME's
+ * hero band starts right below the bar and is also full width, so a width test
+ * runs straight past the bar and reported 36. The rule at y=23 is drawn by the
+ * shared painter and by nothing else, so it is the honest boundary. */
+const SEP_ROW = 0x2946;        /* RGB565(42,42,52) = 0x2946, as the C macro computes it */
+const swap16 = (c) => ((c & 0xff) << 8) | ((c >> 8) & 0xff);
+/* the canvas stores swapped values (gfx.c writes every pixel through swap16),
+ * so compare against the swapped constant */
+const SEP_IN_FB = swap16(SEP_ROW);
+function barBottom(fbv) {
+    for (let y = 0; y < 40; y++) {
+        if (fbv[y * W] !== SEP_IN_FB) continue;
+        let uniform = true;
+        for (let x = 1; x < W; x++) if (fbv[y * W + x] !== SEP_IN_FB) { uniform = false; break; }
+        if (uniform) return y;          /* the floor rule: bar is 0..y */
+    }
+    return -1;
+}
+const bottoms = {};
+{
+    bottoms.HOME = barBottom(grab());
+    press(9); bottoms.GRID_MEL = barBottom(grab());
+    press(8); bottoms.ARP = barBottom(grab());
+    press(6);                                       /* back to HOME */
+}
+const bv = Object.entries(bottoms);
+const agree = bv.every(([, v]) => v === 23);
+check(agree, 'every page closes its header with the same rule at y=23 (bar = 24px)',
+      bv.map(([k, v]) => `${k}=${v < 0 ? 'none' : v}`).join(' '));
+
+/* and nothing may paint over that rule: the first track row's selection
+ * outline used to be drawn at y-1 and landed on it */
+{
+    const fb2 = grab();
+    let clean = true;
+    for (let x = 0; x < W; x++) if (fb2[23 * W + x] !== SEP_IN_FB) { clean = false; break; }
+    check(clean, 'nothing paints over the header floor rule', clean ? 'y=23 uniform' : 'y=23 has a foreign pixel');
 }
 
 /* ---------- back to HOME ---------- */

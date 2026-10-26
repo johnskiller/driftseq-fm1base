@@ -157,25 +157,29 @@ static void draw_arp(void)
     int pos = (int)eng.pos16[sel_track];
     uint8_t is_drum = (tr->channel == 9);
     uint16_t tcol = TRACK_HUE(sel_track % 11);
-    int sx = 47, sw = 192, sy = 16, sh = 12;         /* rev.18: hero grammar = 64 x 3px (2+1) = 192 */
+    int sx = 47, sw = 192, sy = 24, sh = 12;         /* rev.18: hero grammar = 64 x 3px (2+1) = 192
+                                                      * sy was 16 under the 16px bar; the shared bar is
+                                                      * 24px now, and the strip must start under it. */
 
     cv_begin(240, 224, C_BLACK);
-    cv_rect(0, 0, 240, 16, TB_BG);
-    /* rev.25: topbar text sits at y=4 like HOME's. It was y=2 here — FONT_T is
-     * 8px tall, so inside a 16px bar y=4 is centred and y=2 is visibly high.
-     * Caught by the probe that compares the ARP readout band with HOME's
-     * pixel for pixel: same string, different baseline, so it failed. */
-    cv_text(6, 4, &FONT_T, txt_join("ARP TRK", txt_num(0, sel_track + 1)), TB_TX);
-    /* zoom, same readout grammar as HOME: the strip below is the same time
-     * axis, so its scale must be readable here too (rev.21). rev.25: same
-     * "N BAR" wording as HOME — two views of one axis must not describe the
-     * same span in two different notations. */
-    {   char *b = txt_next();
+    {   /* Shared bar, so this page's readouts line up with HOME's and the two
+         * grids'. rev.25 had already forced the baseline to match HOME's by
+         * hand; with one painter that class of bug is gone.
+         *
+         * The context keeps the "N BAR" wording because the strip below is the
+         * same time axis as HOME's hero, and two views of one axis must not
+         * describe the same span in two notations (rev.25). */
+        hdr_t h;
+        char *b = txt_next();
         fmt_int(b, (int32_t)hero_bars);
         strcpy_(txt_end(b), " BAR");
-        cv_text(112, 4, &FONT_T, b, RGB565(122, 122, 136));
+        h.ctx = b;
+        h.right = eu ? "LINK" : "FREE";
+        h.right_c = eu ? GREEN_OK : RGB565(106, 106, 118);
+        h.dots = 1;
+        h.page = 2;
+        ui_draw_header(&h);
     }
-    cv_text(192, 4, &FONT_T, eu ? "*LINK" : "FREE", eu ? GREEN_OK : RGB565(106, 106, 118));
     if (!eu && k0 == 0 && n0 == 0) {                 /* fresh track: hint page */
         cv_text(70, 112, &FONT_XS, "K4 - generate", RGB565(85, 85, 95));
         cv_text(64, 202, &FONT_XS, "K -  N -  ROT -", RGB565(138, 138, 153));
@@ -511,13 +515,19 @@ static void ui_encoder(uint8_t enc, int8_t det)
     }
     if (enc == EN_ALGO || enc == EN_PRESET)
         return;                                  /* BPM=ALGO: batch 3 (BPM→GLO 页待拍板) */
-    if (ui_mode == M_ARP) { ui_arp_encoder(enc, det); return; }
-    if (ui_mode == M_GRID) {
+    if (ui_mode == M_ARP)
+        ui_arp_encoder(enc, det);
+    else if (ui_mode == M_GRID) {
         if (focus_layer) ui_edit_encoder(enc, det);
         else ui_grid_encoder(enc, det);
-        return;
+    } else {
+        ui_home_encoder(enc, det);
     }
-    ui_home_encoder(enc, det);
+    /* Stamp the knob that just moved so the footer can show its value in place
+     * of its name. Done here rather than in each page's handler because every
+     * detent from every page comes through this one function, and a per-handler
+     * version is a thing to forget whenever a new encoder path is added. */
+    kn_poke(enc);
 }
 
 static void ui_button(uint8_t btn, uint8_t down, uint8_t released)

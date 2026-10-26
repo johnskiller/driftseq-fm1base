@@ -57,6 +57,50 @@ static void cv_disc(int32_t cx, int32_t cy, int32_t r, uint16_t c)
     }
 }
 
+/* A filled rounded rectangle, corners cut by `cut` px. cut == 0 is cv_rect.
+ * The header's track-number pill is the only caller: 18px tall with a 3px cut
+ * reads as rounded without eating the digits, and it is cheaper than a real
+ * arc rasteriser on a chip where every byte of .ram_text counts. */
+static void cv_round_rect(int32_t x, int32_t y, int32_t w, int32_t h, int32_t cut, uint16_t c)
+{
+    int32_t i;
+    if (w <= 0 || h <= 0)
+        return;
+    if (cut <= 0 || cut * 2 >= h || cut * 2 >= w) {
+        cv_rect(x, y, w, h, c);
+        return;
+    }
+    cv_rect(x + cut, y, w - cut * 2, h, c);                     /* body */
+    cv_rect(x, y + cut, cut, h - cut * 2, c);                   /* left edge */
+    cv_rect(x + w - cut, y + cut, cut, h - cut * 2, c);         /* right edge */
+    for (i = 0; i < cut; i++) {                                 /* the four corners */
+        int32_t d = cut - i - 1;
+        cv_rect(x + i, y + d, 1, 1, c);
+        cv_rect(x + w - 1 - i, y + d, 1, 1, c);
+        cv_rect(x + i, y + h - 1 - d, 1, 1, c);
+        cv_rect(x + w - 1 - i, y + h - 1 - d, 1, 1, c);
+    }
+}
+
+/* Width of `s` in font `f`, in pixels, using the same advance table cv_text
+ * walks. Needed because cv_text returns the end x but callers that lay out
+ * right-aligned or centred text have to know the width before drawing.
+ * Lower case folds to upper case exactly as glyph() in gfx.c does, so the two
+ * cannot disagree about which slot to read. */
+static int32_t cv_text_w(const felucca_font_t *f, const char *s)
+{
+    int32_t w = 0;
+    for (; *s; s++) {
+        uint32_t ch = (uint8_t)*s;
+        if (ch >= 'a' && ch <= 'z' && f->last < 'a')
+            ch -= 32u;
+        if (ch < f->first || ch > f->last || (ch >= 127u && ch < 160u))
+            ch = '?';
+        w += f->adv[ch - f->first];
+    }
+    return w;
+}
+
 /* Signed decimal into b, no padding.
  *
  * The device build already has this: bsp/chip/libc.c defines fmt_int (void
