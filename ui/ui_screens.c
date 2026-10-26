@@ -824,13 +824,21 @@ static void draw_grid_drum(void)
          * The bar is 24px here too, which is why the lane pitch below drops to
          * lh=10 / gap=3: nine lanes must still end above the 100px card at
          * y=115. cellh = lh - gap stays 7px, so the cells are the same size as
-         * before and only 1px of row spacing pays for the taller bar. */
+         * before and only 1px of row spacing pays for the taller bar.
+         *
+         * `ST n` is the cursor's step number and it is not decoration: the grid
+         * is 16 cells wide and the cursor is a 1px yellow outline, so without
+         * the number there is no way to tell step 7 from step 8 by reading. The
+         * old 20px bar carried it and the 24px rewrite dropped it -- this puts
+         * it back in the same order the old bar had (page, then step). */
         hdr_t h;
         char *b = txt_next();
         strcpy_(b, div_str(TRK()->division));
         strcpy_(txt_end(b), "  P");
         fmt_int(txt_end(b), page + 1);
         strcpy_(txt_end(b), "/4");
+        strcpy_(txt_end(b), "  ");
+        strcpy_(txt_end(b), txt_st(cursor + 1));
         h.ctx = b;
         h.right = GM_SHORT[drum_sel];            /* which drum the cursor is on */
         h.right_c = TRACK_HUE(sel_track);
