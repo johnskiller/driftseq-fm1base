@@ -42,6 +42,11 @@
 #include "engine/driftseq.c"
 #include "engine/demo_pattern.h"
 #include "engine/demo_pattern.c"
+/* the sparse save format for the pattern bank (engine/pack.h). Included here
+ * rather than left as a separate translation unit because fm1-base builds the
+ * app as one unity unit -- a .c file that nothing includes is not compiled at
+ * all, which is how a format can look finished and never be built. */
+#include "engine/pack.c"
 
 #define SET_MAGIC 0x54504C31u            /* "TPL1": the settings record; another magic loads defaults */
 typedef struct {
