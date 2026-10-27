@@ -138,7 +138,7 @@ static void panel_key_handler(uint8_t key, uint8_t down)
             if (note < 0) note = 0;
             if (note > 127) note = 127;
         }
-        if (down) ds_live_on(&eng, sel_track, (uint8_t)note, 100);
+        if (down) ds_live_on(&eng, sel_track, (uint8_t)note, midi_vel);
         else ds_live_off(&eng, sel_track, (uint8_t)note);
         return;
     }
@@ -158,7 +158,7 @@ static void panel_key_handler(uint8_t key, uint8_t down)
                  * printed key would be worse than doing nothing. */
                 if (bi < NDRUM) {
                     drum_sel = bi;                /* pick instrument */
-                    ds_live_on(&eng, sel_track, GM_DRUMS[bi], 100);   /* hear it */
+                    ds_live_on(&eng, sel_track, GM_DRUMS[bi], midi_vel);
                 }
                 return;
             }
@@ -173,10 +173,10 @@ static void panel_key_handler(uint8_t key, uint8_t down)
                     if (found)
                         ds_voice_remove(tr, s, GM_DRUMS[drum_sel]);
                     else {
-                        ds_voice_add(tr, s, GM_DRUMS[drum_sel], 100, 1);
+                        ds_voice_add(tr, s, GM_DRUMS[drum_sel], midi_vel, 1);
                         tr->steps[s].on = 1;      /* bare write revives the gate */
                     }
-                    ds_live_on(&eng, sel_track, GM_DRUMS[drum_sel], 100);  /* audition (r16j) */
+                    ds_live_on(&eng, sel_track, GM_DRUMS[drum_sel], midi_vel);  /* audition (r16j) */
                 }
             }
         }
@@ -228,7 +228,7 @@ static void edit_key_handler(uint8_t key, uint8_t down)
     }
     if (down) {                                            /* hear + write */
         uint8_t vi, hit = 0xFF;
-        ds_live_on(&eng, sel_track, (uint8_t)note, 100);
+        ds_live_on(&eng, sel_track, (uint8_t)note, midi_vel);
         for (vi = 0; vi < st->nvoices; vi++)
             if (st->v[vi].note == note) hit = vi;
         if (hit != 0xFF) {                                 /* same note = delete */
