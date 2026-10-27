@@ -563,7 +563,24 @@ static void ui_button(uint8_t btn, uint8_t down, uint8_t released)
         break;
     case B_OCTUP:
         if (ui_mode == M_GRID && glo_held) {
-            /* GLO+OCT+ = rest/tie cycle — v1.1; no-op now */
+            /* GLO+OCT+ = the rest/tie cycle on the cursor step (03 §2.3).
+             * Three states, in the order the spec names them:
+             *   play  -> tie    : stop attacking, extend the note before it
+             *   tie   -> rest   : silence the step outright
+             *   rest  -> play   : revive, if it still holds a note to revive
+             * Nothing here invents or destroys a voice; that is the keybed's job.
+             * A rest with no voice left has nothing to revive, so it stays put
+             * instead of pretending to. */
+            ds_step *st = &TRK()->steps[cursor];
+            if (st->tie) {
+                st->tie = 0;
+                st->on = 0;                        /* tie -> rest */
+            } else if (st->on) {
+                st->on = 0;
+                st->tie = 1;                       /* play -> tie */
+            } else if (st->nvoices) {
+                st->on = 1;                        /* rest -> play */
+            }
         } else if (ui_mode == M_GRID && focus_layer) {
             if (cursor < 63) cursor++;             /* EDIT layer: cursor fwd (emu) */
         } else {

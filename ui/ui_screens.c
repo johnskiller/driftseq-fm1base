@@ -31,6 +31,47 @@ static uint16_t hue12(uint8_t note)
  * sort_vs is DECLARED in ui.c (edit_key_handler consumes it before this
  * definition appears in the unity include order). */
 static uint8_t sort_n;
+/* ---- a tie's pitch is not its own ----
+ * A tie step carries no attack. The note that sounds through it belongs to the
+ * previous attacking step, so that is the pitch the cell must draw -- drawing
+ * the tie step's own stored note (it may still hold one, from before it was
+ * tied) would claim a pitch that nobody hears.
+ *
+ * "Previous attacking step" walks backwards within the loop window and wraps,
+ * skipping tie steps. Two ties in a row both resolve to the same attack, which
+ * is what makes a tied run read as one long note. Returns -1 when the walk
+ * finds no attack at all (an orphan tie: the loop is entirely ties), in which
+ * case the cell draws no pitch line. */
+static int prev_attacking_step(const ds_track *t, uint8_t s)
+{
+    uint32_t start = t->loop_start, len = t->loop_len, rel, d;
+    if (!len) return -1;
+    rel = (s + 64u - start) & 63u;
+    if (rel >= len) return -1;                       /* outside the window */
+    for (d = 1; d < len; d++) {
+        uint32_t p = (start + rel + 64u - d) & 63u;   /* walk back, wrapping */
+        const ds_step *st = &t->steps[p];
+        if (st->tie) continue;
+        if (st->on && st->nvoices) return (int)p;
+        return -1;                                   /* hit a non-tie that does not attack */
+    }
+    return -1;
+}
+/* the pitch a tie cell should draw: the lowest voice of the step it extends.
+ * The engine holds every voice of an attack for the same gate, so the lowest is
+ * the stable choice -- and it matches the line the attack itself drew lowest. */
+static uint8_t tie_pitch_of(const ds_track *t, uint8_t s)
+{
+    const ds_step *st = &t->steps[s];
+    uint8_t vi, best = 0xFF;
+    for (vi = 0; vi < st->nvoices; vi++) {
+        uint8_t n = st->v[vi].note;
+        if (n == 0xFF) continue;
+        if (best == 0xFF || n < best) best = n;
+    }
+    return best;
+}
+
 static void voices_sorted(uint8_t t, uint8_t s)
 {
     uint8_t nv = eng.pat.track[t].steps[s].nvoices, i, j;
@@ -579,6 +620,34 @@ static void draw_home(void)
             int rel_end = (int)tr->loop_len - (int)s;   /* steps left in loop */
             if (x >= HX0 + wpx)
                 continue;                    /* outside the window: nothing */
+            if (st->tie) {
+                /* A tie step draws the note it extends, at that note's pitch,
+                 * edge to edge across the cell, 1px into the gap before it --
+                 * so consecutive ties fuse into one bar and the reading is
+                 * "joined means held", same as the GRID. An orphan tie (no
+                 * attack before it) has nothing to draw and draws nothing. */
+                int prev = prev_attacking_step(tr, si);
+                uint8_t pmin2 = 127, pmax2 = 0;
+                uint8_t rr, vv;
+                if (prev >= 0) {
+                    uint8_t pv = tie_pitch_of(tr, (uint8_t)prev);
+                    int py;
+                    for (rr = 0; rr < 64; rr++)
+                        for (vv = 0; vv < tr->steps[rr].nvoices; vv++) {
+                            uint8_t nn = tr->steps[rr].v[vv].note;
+                            if (nn == 0xFF) continue;
+                            if (nn < pmin2) pmin2 = nn;
+                            if (nn > pmax2) pmax2 = nn;
+                        }
+                    if (pmin2 > pmax2) { pmin2 = 48; pmax2 = 72; }
+                    if (pmax2 == pmin2) pmax2 = (uint8_t)(pmin2 + 1);
+                    py = y + 10 - (((int)pv - (int)pmin2) * 9) / ((int)pmax2 - (int)pmin2);
+                    if (py < y) py = y;
+                    if (py > y + 10) py = y + 10;
+                    cv_rect(x - 1, py, bw + 1, 1, hue12(pv));
+                }
+                continue;
+            }
             if (!st->on || !st->nvoices)
                 continue;
             if (is_drum) {
@@ -776,6 +845,26 @@ static void draw_grid_melodic(void)
                     int span = pmax - pmin;
                     int frac = span ? ((int)sort_vs[vi][0] - pmin) * 256 / span : 128;
                     int lineY = y + 4 + ((256 - frac) * (chh - 11) + 128) / 256 + vi;
+                    if (st->tie) {
+                        /* A tie does not attack: the note already sounding runs
+                         * through this cell. Draw it at the pitch of the step it
+                         * extends, in that note's own hue, as a line that fills
+                         * the cell edge to edge and reaches 1px PAST the left
+                         * edge -- so it visually joins the cell before it. An
+                         * attack keeps a 2px margin on both sides, so "joined or
+                         * not" is the entire reading, with no extra glyph. */
+                        int prev = prev_attacking_step(tr, s);
+                        if (prev >= 0) {
+                            uint8_t pv = tie_pitch_of(tr, (uint8_t)prev);
+                            if (pv != 0xFF) {
+                                int pspan = pmax - pmin;
+                                int pfrac = pspan ? ((int)pv - pmin) * 256 / pspan : 128;
+                                int pY = y + 4 + ((256 - pfrac) * (chh - 11) + 128) / 256;
+                                cv_rect(x - 1, pY, cw + 1, 1, hue12(pv));
+                            }
+                        }
+                        continue;                    /* no pitch line of its own */
+                    }
                     if (!st->on)
                         cv_rect(x + 3, lineY, cw - 6, 1, RGB565(102, 102, 114));
                     else
