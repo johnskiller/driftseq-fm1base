@@ -36,27 +36,27 @@ static void ui_draw_edit_panel(void)
             /* one BIG state glyph, where "v1..v4" used to sit (John: the
              * ordinal is redundant -- row order IS the ordinal, high first).
              * The glyph is the STEP state, shared by all four voice rows:
-             *   ring = attacks (play)   dash = rest (data dormant, revivable)
+             *   triangle = attacks (play, the usual PLAY glyph)
+             *   dash = rest (data dormant, revivable)
              *   bar-pair = tied into the previous note (yellow: the one
              *              state that changes what the OTHER rows' g means)
              * Drawn as PRIMITIVES, not font characters (John: "o/-/= 用的是
-             * 符号吗？偏小，上下没有居中" -- a glyph hole is not a 1px dot
-             * at text baseline; cv_rect shapes center on the 23px card).
-             * All three fit a 11x11 box at (7, y+6): the ring is a 3px
-             * stroke, the dash one 11x3 bar, the tie two 11x3 bars with a
-             * 2px gap. Same box, same weight, so the STATE reads at a
-             * glance and only the shape differs. */
+             * 符号吗？偏小，上下没有居中"; then "空心圆环有点奇怪，不如改为
+             * 通常表示play的三角"). All three fill the same 11x11 box at
+             * (7, y+6): the triangle is a stack of centered bars (apex on
+             * the right, like every transport), the dash one 11x3 bar, the
+             * tie two 11x3 bars with a 2px gap. Same box, same weight. */
             {
                 const int gx = 7, gy = y + 6;            /* 11x11 glyph box */
                 uint16_t gc = st->tie ? YELLOW : tcol;
                 if (st->tie) {                           /* '=': two bars */
                     cv_rect(gx, gy + 1, 11, 3, gc);
                     cv_rect(gx, gy + 7, 11, 3, gc);
-                } else if (st->on) {                     /* 'o': ring, not disc */
-                    cv_rect(gx + 2, gy, 7, 1, gc); cv_rect(gx + 2, gy + 10, 7, 1, gc);
-                    cv_rect(gx, gy + 2, 11, 7, gc);      /* band to hollow out */
-                    cv_rect(gx + 2, gy + 2, 7, 5, RGB565(22, 22, 27));
-                    cv_rect(gx + 3, gy + 3, 5, 3, gc);
+                } else if (st->on) {                     /* '>': right-pointing triangle */
+                    cv_rect(gx, gy + 2, 5, 7, gc);       /* spine */
+                    cv_rect(gx + 3, gy + 3, 3, 5, gc);   /* mid */
+                    cv_rect(gx + 5, gy + 4, 3, 3, gc);   /* near the apex */
+                    cv_rect(gx + 7, gy + 5, 2, 1, gc);   /* apex */
                 } else {                                 /* '-': one bar */
                     cv_rect(gx, gy + 4, 11, 3, gc);
                 }
