@@ -770,7 +770,7 @@ static void ui_draw_edit_badge(void)
 }
 
 /* ---- MELODY GRID (r16j drawGrid verbatim) ----
- * 4x24px rows (y16..112), cell bg = loop in/out (#2a2a33 / #16161c),
+ * 4x22px rows (y24..111), cell bg = loop in/out (#2a2a33 / #16161c),
  * pitch line = hue12(note), rest = gray dashed, bare gate = bottom bar,
  * yellow cursor, white playhead ring, P1-P4 labels, EDIT panel at 112. */
 static void draw_grid_melodic(void)
@@ -820,13 +820,25 @@ static void draw_grid_melodic(void)
     if (focus_layer)
         ui_draw_edit_badge();
     {
-        const int x0 = 18, cw = 13, chh = 24;        /* r16j: x0=18, cw=(240-18-16)/16=13 */
+        /* Vertical budget: 240 = 24 header + 96 grid + 100 EDIT panel + 4 gap
+         * + 24 footer. The header owns y0..23 (its floor line is at y=23), so
+         * the grid MUST start at 24 -- it used to start at 16, which was the
+         * 16px-header era, and after the bar grew to 24 the P1 row and its
+         * "P1" label were painted straight through it (measured: rows 17..23
+         * were cell background, not header).
+         *
+         * 96px / 4 rows = 24, but a row holds one 1-2px pitch line, so the
+         * height is not doing work: 22 is plenty and buys the 8px back without
+         * touching the EDIT panel, which is 4x25 dense text and cannot shrink
+         * as cheaply. 4x22 = 88, so the grid ends at y=111 exactly as it did
+         * before -- only the row height changed, not the space it occupies. */
+        const int x0 = 18, cw = 13, chh = 22, gy0 = 24;  /* r16j: x0=18, cw=(240-18-16)/16=13 */
         const int nct = cell_ticks(tr->division);    /* one lookup for the grid */
         for (r = 0; r < 4; r++)
             for (c = 0; c < 16; c++) {
                 uint8_t s = (uint8_t)(r * 16 + c);
                 ds_step *st = &tr->steps[s];
-                int x = x0 + c * cw, y = 16 + r * chh;
+                int x = x0 + c * cw, y = gy0 + r * chh;
                 uint8_t rel = (uint8_t)((s + 64 - start) & 63);
                 uint8_t inWin = rel < len;
                 uint8_t vi;

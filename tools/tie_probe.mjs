@@ -46,7 +46,7 @@ const exp = (c0) => { const c = ((c0 & 0xff) << 8) | ((c0 >> 8) & 0xff);
 const rgb = (fb, x, y) => exp(fb[y * W + x]);
 
 /* ---- the melodic GRID geometry, from ui_screens.c draw_grid_melodic ---- */
-const X0 = 18, CW = 13, CHH = 24, GY = 16;
+const X0 = 18, CW = 13, CHH = 22, GY = 24;
 const cellX = (s) => X0 + (s % 16) * CW;
 const cellY = (s) => GY + Math.floor(s / 16) * CHH;
 
