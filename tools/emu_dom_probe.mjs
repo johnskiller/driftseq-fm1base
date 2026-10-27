@@ -114,6 +114,12 @@ check(!!doc.getElementById('keys-help') && doc.getElementById('keys-help').tagNa
       'the list lives in a details, under the shortcuts checkbox');
 const dds = [...doc.getElementById('keys-list').querySelectorAll('dd')].map((d) => d.textContent);
 check(dds.every((s) => s && s.trim().length), 'every row says what its key does', dds[0]);
+/* DriftSeq's pages are EDIT, GLO, SEQ and ARP: a mapping list without them
+ * leaves the four buttons this firmware actually has unreachable by keyboard */
+for (const btn of ['EDIT', 'GLO', 'SEQ', 'ARP']) {
+    const i = rows.indexOf({ EDIT: 'C', GLO: 'V', SEQ: 'B', ARP: 'N' }[btn]);
+    check(i >= 0 && new RegExp(btn).test(dds[i]), `the ${btn} button is on ${rows[i] || '?'}`, dds[i] || 'missing');
+}
 
 /* ---------------------------------------------------------------- focus */
 /* The shortcut handler used to listen on #controls, so a click on the screen or
@@ -284,6 +290,28 @@ win.__sent.length = 0;
 listening[0].onmidimessage({ data: new Uint8Array([0xf0, 0x7d, 0x53, 0x52, 0xf7]) });
 check(win.__sent.filter((m) => m.type === 'midi').length === 0, 'SysEx from a keyboard is not forwarded');
 
+/* ---- the monitor: what arrived, and what left -------------------------- */
+/* This is the report that started it -- "FM-1 发出了 midi 事件，但是 emu 既没有
+ * 视觉反馈也没有实际效果" -- so the monitor must say what came in, and the panel
+ * must show it without waiting for the app to react. */
+const monEl = doc.getElementById('mon');
+check(!!monEl, 'the machine has a MIDI monitor under it');
+win.__sent.length = 0;
+listening[0].onmidimessage({ data: new Uint8Array([0x90, 60, 100]) });
+check(/in /.test(monEl.textContent) && /note-on/.test(monEl.textContent) && /\b60\b/.test(monEl.textContent),
+      'an incoming note is printed: direction and what it is', monEl.textContent);
+/* note 60 is key 60 - 53 = 7: the bed must mark it, or the page looks deaf */
+const keyEl = [...doc.querySelectorAll('#panel .ctl')].find((g) => g.classList.contains('midi-in'));
+check(!!keyEl, 'and the key it names lights up', keyEl ? keyEl.className.baseVal : 'none lit');
+win.eval('for (const t of flashTimers.values()) clearTimeout(t);');
+win.eval('for (const k of keys) if (k) k.g.classList.remove("midi-in")');
+check(![...doc.querySelectorAll('#panel .ctl')].some((g) => g.classList.contains('midi-in')),
+      'the flash clears itself');
+
+win.__sent.length = 0;
+listening[0].onmidimessage({ data: new Uint8Array([0xB0, 7, 100]) });
+check(/CC/.test(monEl.textContent) && /cc7 = 100/.test(monEl.textContent), 'a CC is printed in words too', monEl.textContent);
+
 /* what the app sends goes out of the chosen port */
 outs.value = 'out-1';
 outs.dispatchEvent(new win.Event('change'));
@@ -292,6 +320,19 @@ check(win.eval('midiOutSel') === 'out-1', 'the output selection is remembered', 
 win.eval('onMidiOut(new Uint8Array([0x90, 60, 100, 0x80, 60, 0]))');
 check(port.sent.length === 1 && port.sent[0].join(',') === '144,60,100,128,60,0',
       'the app\'s bytes are sent to the chosen output', JSON.stringify(port.sent));
+/* out is coalesced (a sequencer sends in bursts), so it shows after its 120 ms */
+await new Promise((r) => setTimeout(r, 200));
+check(/out/.test(monEl.textContent) && /note-on/.test(monEl.textContent),
+      'and the monitor prints what left', monEl.textContent);
+
+/* ---- a plain-HTTP page must say so, not blame the browser ---------------- */
+/* Web MIDI does not exist outside a secure context, which is a different problem
+ * from a browser without Web MIDI, and the page has to say which one it is. */
+{
+    const html = fs.readFileSync(PAGE, 'utf8');
+    check(/isSecureContext/.test(html) && /HTTPS only/.test(html),
+          'the page tells an insecure origin apart from a browser without Web MIDI');
+}
 
 console.log(fails ? `EMU DOM: ${fails} FAILED of ${checks}` : `EMU DOM PASSED (${checks} checks)`);
 process.exit(fails ? 1 : 0);

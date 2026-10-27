@@ -44,6 +44,11 @@ a { color: var(--accent); }
 .lit .btnface { fill: #f28a5a; }
 .lit text.btn { fill: #2a140a; }
 .held .btnface, .held .keyface { stroke: #f28a5a; stroke-width: 3; }
+/* a note from outside (a MIDI keyboard, the sequencer's own echo): the key fills,
+   which the panel's own "held" ring does not do -- an incoming note has to be
+   obvious at a glance or the emulator reads as deaf */
+.midi-in .keyface { fill: #f28a5a; }
+.midi-in .keyface.black { fill: #4cc3b6; }
 .latched .btnface, .latched .keyface { stroke: #6fc3ff; stroke-width: 3; }
 .keyface { transition: fill .06s; }
 .lit .keyface.white { fill: #f6b48e; }
@@ -94,6 +99,13 @@ kbd { font: 600 .85em ui-monospace, Menlo, monospace; background: var(--card); b
 #keys-help dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: .3rem 1.2rem; margin: .4rem 0 0; align-items: baseline; }
 #keys-help dt { white-space: nowrap; }
 #keys-help dd { margin: 0; color: var(--muted); }
+/* the MIDI monitor, under the machine: the old emu had one, and it is the only
+   way to see that a message arrived when nothing on the screen reacts to it */
+#mon { max-width: 1040px; margin: .9rem auto 0; padding: .4rem .7rem; background: #1b1d20; color: #9fd9b0;
+       font: 400 12px/1.55 ui-monospace, Menlo, Consolas, monospace; border-radius: 8px; min-height: 1.6em;
+       overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+#mon .t { color: #6a7d6e; }
+#mon .n { color: #6a7d6e; }
 </style>
 </head>
 <body>
@@ -114,6 +126,9 @@ kbd { font: 600 .85em ui-monospace, Menlo, monospace; background: var(--card); b
 <p id="panel-keys" class="sr">Tab moves through the knobs, the buttons, the black keys and the white keys. Arrow keys turn a knob,
   Page Up and Page Down faster. Space or Enter holds a button or key down while you hold it; Shift and Enter keeps it down
   until you press it again (with a mouse: Shift-click or right-click).</p>
+
+<!-- the machine's MIDI, both directions, as it happens -->
+<div id="mon" role="log" aria-live="off"><span class="t">midi</span> — switch on, then play</div>
 
 <div class="bar">
   <span id="status" role="status">Off. Sound starts when you switch it on.</span>
@@ -502,7 +517,13 @@ WHITE_ROW1.split("").forEach((c, i) => KEYMAP["Key" + c.toUpperCase()] = { key: 
 WHITE_ROW2.split("").forEach((c, i) => KEYMAP["Key" + c.toUpperCase()] = { key: WHITE_K[8 + i] });
 BLACK_ROW.split("").forEach((c, i) => KEYMAP["Digit" + c] = { key: BLACK_K[i] });
 KEYMAP.Minus = { key: BLACK_K[10] };
-Object.assign(KEYMAP, { KeyP: { btn: BTN.PLAY }, KeyO: { btn: BTN.REC }, Escape: { btn: BTN.HOME }, KeyZ: { btn: BTN["OCT-"] }, KeyX: { btn: BTN["OCT+"] } });
+/* The four page buttons DriftSeq's firmware actually uses, on the keys left free
+ * by the piano: C V B N, the block under the right hand next to Z/X (OCT). */
+Object.assign(KEYMAP, {
+  KeyP: { btn: BTN.PLAY }, KeyO: { btn: BTN.REC }, Escape: { btn: BTN.HOME },
+  KeyZ: { btn: BTN["OCT-"] }, KeyX: { btn: BTN["OCT+"] },
+  KeyC: { btn: BTN.EDIT }, KeyV: { btn: BTN.GLO }, KeyB: { btn: BTN.SEQ }, KeyN: { btn: BTN.ARP },
+});
 const shortcuts = $("shortcuts");
 if (prefs.shortcuts === false) shortcuts.checked = false;
 shortcuts.addEventListener("change", () => { prefs.shortcuts = shortcuts.checked; savePrefs(); });
@@ -516,7 +537,7 @@ shortcuts.addEventListener("change", () => { prefs.shortcuts = shortcuts.checked
     for (const b of Object.values(buttons)) if (b.bit === m.btn) return `the ${b.name} button`;
     return "";
   };
-  const LABEL = { KeyP: "P", KeyO: "O", Escape: "Esc", KeyZ: "Z", KeyX: "X" };
+  const LABEL = { KeyP: "P", KeyO: "O", Escape: "Esc", KeyC: "C", KeyV: "V", KeyB: "B", KeyN: "N", KeyZ: "Z", KeyX: "X" };
   const rows = [
     [K(WHITE_ROW1), "the first eight white keys (F3 up to C4)"],
     [K(WHITE_ROW2), "the last eight white keys (C#4 up to G5)"],
@@ -750,14 +771,35 @@ function onMidiIn(e) {
       if (d[i] >= 0xf8) continue;                      // clock inside the message: not a data byte
       msg.push(d[i]);
     }
-    if (msg.length === want) send({ type: "midi", port: PORT_USB, pkt: midiPacket(msg, 0) });
+    if (msg.length === want) {
+      send({ type: "midi", port: PORT_USB, pkt: midiPacket(msg, 0) });
+      monLine("in ", msg);
+      /* The flash is the answer to "did the emulator hear it": the app's own
+       * reaction to a note depends on the page (a melodic page writes it into the
+       * pattern, HOME only sounds it), so the panel has to say "the message got
+       * here" on its own or a working page looks dead. Key 0 is F3 = note 53. */
+      if (t === 0x90 || t === 0x80) flashKey(msg[1] - 53, t === 0x90 && msg[2] > 0);
+    }
   }
+}
+
+/* light a key for a moment: the same .lit class a physical press uses, so it
+ * looks like the machine's own light. A MIDI note outside the 27-key bed is
+ * shown nowhere -- the bed is what it is. */
+const flashTimers = new Map();
+function flashKey(idx, on) {
+  if (!(idx >= 0 && idx < keys.length) || !keys[idx]) return;
+  const k = keys[idx];
+  clearTimeout(flashTimers.get(idx));
+  k.g.classList.add("midi-in");
+  flashTimers.set(idx, setTimeout(() => k.g.classList.remove("midi-in"), on ? 140 : 90));
 }
 
 /* What the app sent, from the worklet (msg.midi, already unpacked to bytes).
  * Send it on to the chosen output, and -- when nothing is chosen -- play it here,
  * so a sequencer in a browser makes a sound without any external gear. */
 function onMidiOut(bytes) {
+  monOut(bytes);
   if (midiOutSel && midiAccess) {
     const out = midiAccess.outputs.get(midiOutSel);
     if (out) {
@@ -827,6 +869,47 @@ function previewMidi(bytes) {
 
 const midiState = (t) => { $("midi-state").textContent = t; };
 
+/* ---- the monitor ----------------------------------------------------------
+ * One line, last message wins, in and out marked: the old emu's, and the reason
+ * it exists is this report -- "FM-1 发出了 midi 事件，但是 emu 既没有视觉反馈也没有
+ * 实际效果". Without it there is no way to tell "the page never got it" from
+ * "the page got it and the app did nothing with it".
+ *
+ * It is not a live region: a note every 80 ms read aloud would be unusable. */
+const mon = { el: null, count: 0, lastAt: 0, pending: null };
+function monLine(dir, bytes, note) {
+  const st = bytes[0], t = st & 0xf0, ch = (st & 0x0f) + 1;
+  const hex = (b) => b.toString(16).padStart(2, "0").toUpperCase();
+  let what;
+  if (t === 0x90 && bytes[2] > 0) what = `note-on  ch${ch} ${bytes[1]} vel ${bytes[2]}`;
+  else if (t === 0x80 || (t === 0x90 && bytes[2] === 0)) what = `note-off ch${ch} ${bytes[1]}`;
+  else if (t === 0xc0) what = `PC       ch${ch} prog ${bytes[1]}`;
+  else if (t === 0xb0) what = `CC       ch${ch} cc${bytes[1]} = ${bytes[2]}`;
+  else if (t === 0xe0) what = `bend     ch${ch} ${((bytes[2] << 7) | bytes[1]) - 8192}`;
+  else if (t === 0xa0) what = `after    ch${ch} ${bytes[1]} ${bytes[2]}`;
+  else what = [st, ...bytes.slice(1)].map(hex).join(" ");
+  const stamp = new Date().toISOString().slice(14, 22);
+  if (!mon.el) mon.el = $("mon");
+  mon.el.textContent = "";
+  const t1 = document.createElement("span");
+  t1.className = "t";
+  t1.textContent = `${stamp} ${dir} `;
+  const t2 = document.createElement("span");
+  t2.className = "n";
+  t2.textContent = `${++mon.count}  `;
+  mon.el.append(t1, t2, what + (note ? "  " + note : ""));
+  mon.lastAt = performance.now();
+}
+/* Out is fast (a sequencer sends in bursts); redrawing one line per message is a
+ * layout per message, so a burst is shown as its last message, not as 400 of
+ * them. In is never coalesced: a message the user just played is the one they
+ * are looking for. */
+function monOut(bytes) {
+  mon.lastOut = bytes;
+  if (mon.pending) return;
+  mon.pending = setTimeout(() => { mon.pending = null; if (mon.lastOut) monLine("out", mon.lastOut); }, 120);
+}
+
 /* Fill the two pickers. Kept as their own function because onstatechange fires
  * for both directions and either one can add or remove a port. */
 function fillMidi(acc) {
@@ -845,28 +928,40 @@ function fillMidi(acc) {
   fill($("midiins"), ins, midiInSel, ins.length ? "— all inputs —" : "— no inputs —");
   fill($("midiouts"), outs, midiOutSel, outs.length ? "— none (play here) —" : "— no outputs —");
   bindMidiIn(acc);
+  const one = ins.find((p) => p.id === midiInSel);
   midiState(ins.length || outs.length
-    ? `${ins.length} in, ${outs.length} out`
+    ? `${ins.length} in${one ? ` (${one.name || one.id})` : ""}, ${outs.length} out`
     : "no MIDI ports: plug a keyboard in and it appears here");
 }
 
-/* Attach (or detach) the input handlers according to the selection. */
+/* Attach (or detach) the input handlers according to the selection.
+ *
+ * Ports also close: an input that is gone keeps its last handler, and assigning
+ * onmidimessage to a closed port throws. The try/catch is not defensive noise --
+ * it is what an unplugged MIDI keyboard does. */
 function bindMidiIn(acc) {
   for (const p of acc.inputs.values()) {
     const want = midiInSel === "" || p.id === midiInSel;
-    p.onmidimessage = want ? onMidiIn : null;
+    try { p.onmidimessage = want ? onMidiIn : null; } catch { /* the port closed under us */ }
   }
 }
 
 async function midiStart() {
-  if (!navigator.requestMIDIAccess) {                    // Firefox and Safari before 18
+  if (!navigator.requestMIDIAccess) {
+    // Two different reasons, and only one of them is the browser's fault. Web MIDI,
+    // like AudioWorklet, is only exposed in a SECURE CONTEXT: over plain http on a
+    // LAN address the property does not exist at all, and a page that says "this
+    // browser has no Web MIDI" sends you looking for the wrong problem.
+    const insecure = !window.isSecureContext;
     for (const id of ["midiins", "midiouts"]) {
       const s = $(id);
       s.textContent = "";
-      s.add(new Option("This browser has no Web MIDI", ""));
+      s.add(new Option(insecure ? "HTTPS only" : "This browser has no Web MIDI", ""));
       s.disabled = true;
     }
-    midiState("This browser has no Web MIDI (Chrome, Edge and Safari 18+ do). The keyboard and the mouse still work.");
+    midiState(insecure
+      ? `MIDI needs a secure page: ${location.origin} over plain HTTP hides Web MIDI (and AudioWorklet). Open the HTTPS address — tools/serve-https.py, port 8933 — and accept the certificate.`
+      : "This browser has no Web MIDI (Chrome, Edge and Safari 18+ do). The keyboard and the mouse still work.");
     return;
   }
   if (!midiAccess) {
