@@ -19,10 +19,21 @@ static uint32_t ui_prev_keys;
  * differs from the previous call, not from the previous frame. */
 static void ui_input_poll(void)
 {
-    uint32_t btn = plat_buttons(), keys = plat_keys();
+    uint32_t keys, btn = plat_buttons();
     uint32_t press = btn & ~ui_prev_btn, release = ui_prev_btn & ~btn;
-    uint32_t kdown = keys & ~ui_prev_keys, kup = ui_prev_keys & ~keys;
+    uint32_t kdown, kup;
     uint32_t i;
+
+    /* APP_TOUCH is on (app.h): the 20 analog keys' presses carry a real
+     * velocity. The key mask is touch_keys(), not plat_keys(): a sensed key's
+     * bit only sets when its VELOCITY EVENT arrived, so the edge below never
+     * runs ahead of the reading (raw plat_keys fires the edge first and
+     * touch_vel would answer 100 — the template's input() has this same
+     * shape). Top-row keys have no converter: plat_keys passes through. */
+    touch_poll();
+    keys = touch_keys();
+    kdown = keys & ~ui_prev_keys;
+    kup = ui_prev_keys & ~keys;
 
     ui_prev_btn = btn;
     ui_prev_keys = keys;
@@ -59,8 +70,15 @@ static void ui_input_poll(void)
 
     for (i = 0; i < NKEYS; i++) {
         uint32_t bit = 1u << i;
-        if (kdown & bit)
+        if (kdown & bit) {
+            /* the key's own velocity when the hardware sensed it (the 7
+             * top-row keys have no converter: touch_vel reads their last
+             * press too, from the LED-line probe); fall back to 100 */
+            uint8_t v = touch_vel(i);
+            if (!v) v = 100;
+            midi_vel = v;
             panel_key_handler((uint8_t)i, 1);
+        }
         if (kup & bit)
             panel_key_up((uint8_t)i);
     }

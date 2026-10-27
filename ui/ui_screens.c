@@ -270,6 +270,43 @@ static void kn_poke(uint8_t enc)
     kn_ttl = KN_FRAMES;
 }
 
+/* ---- the SAVE menu: MERGE / REPLACE / NEW TRK / CLEAR ----
+ * Every SAVE press opens this footer menu (John: "save时最好可选：merge，
+ * replace，new trk") — no default action, because a silent default is how a
+ * take gets merged twice. K1..K4 rotate the highlight, SAVE confirms, HOME
+ * closes, and 3 s of no input closes it (the footer is a readout, not a
+ * resident layer). The engine call sits in jam_menu_act(); the menu itself
+ * only moves a cursor so probes can assert on state, not pixels alone.
+ * State + JAM_MENU_FRAMES live in ui_glue.c (declared before both callers). */
+static const char *const JAM_MENU_LABELS[4] = {"MERGE", "REPLACE", "NEW TRK", "CLEAR"};
+
+/* the menu's actions, in jam_menu_sel order. NEW TRK also selects the track
+ * it landed on (the player's eye is already on the grid). */
+static void jam_menu_act(uint8_t which)
+{
+    if (which == 3) {
+        ds_jam_reset(&eng);
+        app_say("JAM", "CLEARED");
+        return;
+    }
+    if (which == 0) {
+        ds_jam_save_merge(&eng, sel_track);
+        app_say("JAM", "MERGED");
+    } else if (which == 1) {
+        app_say("JAM", ds_jam_save_replace(&eng, sel_track) == 1 ? "RING EMPTY" : "REPLACED");
+    } else {
+        uint8_t t;
+        if (ds_jam_save_new(&eng, &t) == 0) {
+            sel_track = t;
+            app_say("JAM", txt_trk("TO ", (uint8_t)(t + 1)));
+        } else {
+            app_say("JAM", "NO FREE TRK");       /* ring survives (engine kept it) */
+        }
+    }
+}
+
+static void jam_menu_close(void) { jam_menu = 0; jam_menu_ttl = 0; }
+
 /* ---- footer (prefix-free, fixed columns, 10px) ----
  * The footer is the contract "手不用看旋钮就知道在改什么" (03 §0), so the GLO
  * layer gets its own row of names: while GLO is held the four big boxes are
@@ -288,6 +325,16 @@ static void ui_draw_footer(void)
     static const uint8_t FX[5] = {8, 64, 120, 176, 204};
     uint8_t k;
     cv_begin(240, 24, TB_BG);
+    if (jam_menu) {                              /* the SAVE menu owns the footer */
+        for (k = 0; k < 4; k++) {
+            if (k == jam_menu_sel)
+                cv_rect(FX[k] - 3, 0, 56, 24, TB_TX);       /* highlight: inverted box */
+            cv_text(FX[k], 6, &FONT_T, JAM_MENU_LABELS[k],
+                    k == jam_menu_sel ? TB_BG : FOOT_GRAY);
+        }
+        cv_blit(0, 216);
+        return;
+    }
     if (ui_mode == M_GRID && is_drum_trk() && focus_layer) {
         for (k = 0; k < 3; k++)
             cv_text(FX[k], 6, &FONT_T, FOOT_DRUM[k], C_AMB);

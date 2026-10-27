@@ -70,6 +70,7 @@ void ds_init(ds_state *s, uint64_t seed) {
     s->bpm = 120.0;
     s->global_swing = 0;
     ds_rng_seed(&s->rng, seed);
+    ds_jam_reset(s);                         /* the jam ring starts empty and armed */
 }
 
 /* ---------- transport ---------- */
@@ -79,6 +80,10 @@ void ds_play(ds_state *s) {
     s->playing = 1;
     s->tick_acc = 0.0;
     ds_gates_reset(s);
+    ds_jam_close_held(s);                    /* a hold across PLAY finalizes at the old counter */
+    /* the ring is NOT cleared here: "jam over the demo, then PLAY to hear the
+     * two together, then SAVE" is the main line. The player's take survives;
+     * only its phase re-anchors so ring step 0 = the next bar line. */
     for (i = 0; i < DS_TRACKS; i++) {
         s->pc_sent[i] = 0;
         s->pos16[i] = s->pat.track[i].loop_start;  /* each track launches on its own start */
@@ -141,6 +146,7 @@ void ds_set_bpm(ds_state *s, double bpm) { if (bpm >= 20.0 && bpm <= 300.0) s->b
  * loop end, resolved at emit time so live edits take effect immediately. */
 typedef struct { uint8_t trk, note; double t; } ds_gate_ev;
 static double cell_seconds(double bpm, int div);   /* defined below */
+static void jam_advance(ds_state *s, double dt);   /* jam ring clock (defined below) */
 
 void ds_gates_reset(ds_state *s) { s->gates_n = 0; }
 static void gate_schedule(ds_state *s, const ds_track *t, uint8_t trk,
@@ -372,6 +378,9 @@ static void land(ds_state *s, ds_track *t, int trk, uint32_t pos) {
 void ds_tick(ds_state *s, double dt_seconds) {
     int trk, i;
     int live_emitted = 0;
+    jam_advance(s, dt_seconds);              /* the jam ring's clock never stops: PLAY keeps
+                                              * it on the bar line (same rate as tick_acc),
+                                              * stop walks it free at the current BPM */
     /* live held notes: schedule note-off after ~2 cells of the track's division.
      * note-offs are appended to out[]; JS drains out every tick even when
      * stopped, so key-offs land regardless of transport state. When stopped we
@@ -427,4 +436,193 @@ void ds_tick(ds_state *s, double dt_seconds) {
             land(s, t, trk, next);
         }
     }
+}
+
+/* ---------- realtime jam: the always-armed scratch ring ----------
+ *
+ * "选了空白轨就能 jam，不按 REC" — recording is not a mode, so nothing gates
+ * the capture: every audition the player hears lands in the ring quantized to
+ * the ring's own division (1/16, unchanged by the tracks). The ring is one
+ * ds_track, so SAVE is a plain copy/merge of tracks and the painter can draw
+ * it like any other. Position = an absolute 1/16 counter since the last page
+ * turn (PLAY from stop, SAVE success, CLEAR); while the transport runs the
+ * counter rides the same clock as tick_acc so step 0 stays on the bar line,
+ * and while stopped it walks on its own at the current BPM.
+ */
+static void jam_advance(ds_state *s, double dt)
+{
+    s->jam_acc += dt / cell_seconds(s->bpm, s->jam.division);
+    if (s->jam_acc >= 1.0) {
+        uint32_t n = (uint32_t)s->jam_acc;
+        s->jam_acc -= (double)n;
+        s->jam_abs = (s->jam_abs + n) & 0xFFFFu;         /* 64-wide wrap, no head/tail */
+    }
+}
+uint32_t ds_jam_pos(const ds_state *s) { return s->jam_abs & 63u; }
+
+void ds_jam_reset(ds_state *s)
+{
+    ds_clear_track(&s->jam);                 /* division back to DS_DIV_16, the ring's grid */
+    s->jam.loop_len = 64;
+    s->jam_held_n = 0;
+    s->jam_abs = 0;
+    s->jam_acc = 0.0;
+}
+
+/* find the voice a held note landed on and finalize its gate */
+static void jam_set_gate(ds_track *t, uint8_t note, uint32_t on_abs, uint8_t gate)
+{
+    uint32_t pos = on_abs & 63u;
+    uint8_t vi;
+    for (vi = 0; vi < t->steps[pos].nvoices; vi++)
+        if (t->steps[pos].v[vi].note == note) { t->steps[pos].v[vi].gate = gate; return; }
+}
+
+void ds_jam_capture(ds_state *s, uint8_t note, uint8_t vel, uint8_t down)
+{
+    int i;
+    if (down) {
+        ds_voice_add(&s->jam, ds_jam_pos(s), note, vel, 1);   /* same-note dedupe: -2 ignored */
+        for (i = 0; i < s->jam_held_n; i++)
+            if (s->jam_held[i].note == note) { s->jam_held[i].on = s->jam_abs; return; }
+        if (s->jam_held_n < 8) {
+            s->jam_held[s->jam_held_n].note = note;
+            s->jam_held[s->jam_held_n].on = s->jam_abs;
+            s->jam_held_n++;
+        }
+    } else {
+        for (i = 0; i < s->jam_held_n; i++) {
+            if (s->jam_held[i].note != note)
+                continue;
+            {   /* the note ends where the finger lifted: whole cells between the
+                 * slots, plus the fraction of the cell we are inside now,
+                 * rounded — a 2.5-cell hold notates as 3 so the sound stops
+                 * when the player's finger actually came up. */
+                double len = (double)(s->jam_abs - s->jam_held[i].on) + s->jam_acc + 0.5;
+                uint32_t g = (uint32_t)len;
+                if (g > 64u) g = 64u;
+                jam_set_gate(&s->jam, note, s->jam_held[i].on, (uint8_t)(g ? g : 1));
+            }
+            for (; i + 1 < s->jam_held_n; i++) s->jam_held[i] = s->jam_held[i + 1];
+            s->jam_held_n--;
+            return;
+        }
+    }
+}
+
+void ds_jam_close_held(ds_state *s)
+{
+    int i;
+    for (i = 0; i < s->jam_held_n; i++) {
+        double len = (double)(s->jam_abs - s->jam_held[i].on) + s->jam_acc + 0.5;
+        uint32_t g = (uint32_t)len;
+        if (g > 64u) g = 64u;
+        jam_set_gate(&s->jam, s->jam_held[i].note, s->jam_held[i].on,
+                     (uint8_t)(g ? g : 1));
+    }
+    s->jam_held_n = 0;
+}
+
+static uint8_t jam_ct(uint8_t div)
+{
+    static const uint8_t CT[5] = {12, 8, 6, 4, 3};       /* cell_ticks(DS_DIV_*) */
+    return CT[div <= DS_DIV_32 ? div : DS_DIV_16];
+}
+
+/* the ring is always 1/16 (6 ticks); a target track's cells may be 12/8/4/3
+ * ticks. A ring gate of N sixteenths is N*6 ticks = (N*6)/cell_ticks(target)
+ * target cells, rounded to at least 1 — the same length in SECONDS. */
+static uint8_t jam_gate_rescale(uint8_t gate16, uint8_t target_div)
+{
+    uint32_t ticks = (uint32_t)gate16 * 6u;
+    uint32_t ct = jam_ct(target_div);
+    uint32_t g = (ticks + ct - 1u) / ct;                 /* ceil: a held note stays held */
+    return (uint8_t)(g ? g : 1);
+}
+
+/* merge: ring notes never overwrite — they land only where ds_voice_add
+ * accepts them (same cell + same pitch is -2, the target wins). Target
+ * settings (division, channel, prog, loop) are the target's. Ring positions
+ * are 1/16 slots: on a coarser target they land on the containing cell. */
+int ds_jam_save_merge(ds_state *s, uint8_t trk)
+{
+    ds_track *t;
+    uint32_t i;
+    uint8_t vi;
+    if (trk >= DS_TRACKS) return -1;
+    t = &s->pat.track[trk];
+    for (i = 0; i < DS_STEPS; i++) {
+        const ds_step *js = &s->jam.steps[i];
+        uint32_t dst = (i * 6u) / jam_ct(t->division);   /* ring tick -> target cell */
+        for (vi = 0; vi < js->nvoices; vi++)
+            ds_voice_add(t, dst, js->v[vi].note, js->v[vi].vel,
+                         jam_gate_rescale(js->v[vi].gate, t->division));
+        if (js->nvoices && !t->steps[dst].on) t->steps[dst].on = 1;   /* revive silent cells */
+    }
+    ds_jam_reset(s);
+    return 0;
+}
+
+int ds_jam_save_replace(ds_state *s, uint8_t trk)
+{
+    ds_track *t;
+    if (trk >= DS_TRACKS) return -1;
+    if (!ds_jam_holds_notes(s))
+        return 1;                            /* an empty ring replaces nothing: MERGE may have
+                                              * just landed notes here, and "REPLACE" with
+                                              * nothing would silently erase them */
+    t = &s->pat.track[trk];
+    {   /* the target's identity (channel/prog/route/mute/swing/voice_mode)
+         * survives; only the note content is the ring's. division follows the
+         * RING: the player played what they heard, not the target's grid. */
+        uint8_t keep_channel = t->channel, keep_prog = t->prog, keep_route = t->route,
+               keep_mute = t->mute, keep_voice_mode = t->voice_mode, keep_swing = t->swing_amt;
+        ds_track fresh;
+        uint32_t i;
+        uint8_t vi;
+        ds_clear_track(&fresh);
+        fresh.channel = keep_channel; fresh.prog = keep_prog; fresh.route = keep_route;
+        fresh.mute = keep_mute; fresh.voice_mode = keep_voice_mode;
+        fresh.swing_amt = keep_swing;
+        fresh.division = s->jam.division;                /* the ring's grid: what was played is what is kept */
+        fresh.loop_len = 64;
+        for (i = 0; i < DS_STEPS; i++) {
+            const ds_step *js = &s->jam.steps[i];
+            for (vi = 0; vi < js->nvoices; vi++)
+                ds_voice_add(&fresh, i, js->v[vi].note, js->v[vi].vel, js->v[vi].gate);
+        }
+        *t = fresh;
+    }
+    ds_jam_reset(s);
+    return 0;
+}
+
+int ds_jam_save_new(ds_state *s, uint8_t *out_trk)
+{
+    uint8_t t;
+    for (t = 1; t < DS_TRACKS; t++) {
+        uint32_t i;
+        uint8_t empty = 1;
+        if (s->pat.track[t].channel == 9)
+            continue;                                /* drums are the kit, not a jam target */
+        for (i = 0; i < DS_STEPS && empty; i++)
+            if (s->pat.track[t].steps[i].nvoices) empty = 0;
+        if (!empty)
+            continue;
+        *out_trk = t;
+        return ds_jam_save_replace(s, t);
+    }
+    return -1;                                       /* every melodic track has content */
+}
+
+uint8_t ds_jam_holds_notes(const ds_state *s)
+{
+    uint32_t i;
+    uint8_t vi;
+    for (i = 0; i < DS_STEPS; i++) {
+        const ds_step *st = &s->jam.steps[i];
+        for (vi = 0; vi < st->nvoices; vi++)
+            if (st->v[vi].note != 0xFF) return 1;    /* count real notes, not gate skeletons */
+    }
+    return 0;
 }

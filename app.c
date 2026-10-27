@@ -433,6 +433,9 @@ static void ble_device_button(void)
  * are the painters that were designed against the old tree.
  */
 #include "canvas_extra.h"                /* cv_disc, the one primitive fm1-base's gfx.c lacks */
+#ifdef APP_TOUCH
+#include "touch.h"                       /* the keys' velocity readings (ui_input.c polls them) */
+#endif
 #include "ui/ui_glue.c"
 #include "ui/ui_tables.c"
 #include "ui/ui_text.c"

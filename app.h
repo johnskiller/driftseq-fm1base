@@ -15,7 +15,8 @@
  * than failing, so a wrong value here does not error -- it just stops drawing
  * at row 144 and leaves the bottom of the screen black. */
 #define APP_CANVAS_PX (240u * 224u)
-#define APP_TOUCH                        /* velocity and pressure from the keys (lib/touch.h) */
+#define APP_TOUCH                          /* velocity and pressure from the keys (lib/touch.h) */
+#define APP_KEY_SENSE                      /* the keys' readings reach app_host_key: web_key's vel lands in the queue */
 #define APP_BTDEV                        /* Bluetooth MIDI devices (lib/btdev.h) */
 #define APP_BLE_AT_BOOT (!template_ble_off())   /* Bluetooth at power-on: as the player left it (REC held) */
 int template_ble_off(void);

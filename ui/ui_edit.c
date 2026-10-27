@@ -541,6 +541,18 @@ static void ui_arp_encoder(uint8_t enc, int8_t det)
  * EN_ALGO=1, EN_PRESET=2, EN_K1..K4=3..6. */
 static void ui_encoder(uint8_t enc, int8_t det)
 {
+    /* the SAVE menu swallows the four knobs: K1..K4 all rotate the highlight
+     * (one list, four entries — which knob you grab should not matter) */
+    if (jam_menu) {
+        if (enc >= EN_K1 && enc <= EN_K4) {
+            int sel = (int)jam_menu_sel + (det > 0 ? 1 : -1);
+            if (sel < 0) sel = 3;
+            if (sel > 3) sel = 0;
+            jam_menu_sel = (uint8_t)sel;
+            jam_menu_ttl = JAM_MENU_FRAMES;      /* touching the menu re-arms the timeout */
+        }
+        return;
+    }
     /* r16j panelEnc: SELECT is context-aware, not global —
      * ARP page + non-EDIT = track; EDIT layer (melodic) = active voice.
      * (drum EDIT resolves its voice by drum_sel, never via SELECT) */
@@ -573,6 +585,15 @@ static void ui_button(uint8_t btn, uint8_t down, uint8_t released)
     (void)down;
     if (!released)
         return;                                   /* everything fires on the release edge */
+    if (jam_menu) {                               /* the menu owns SAVE/HOME until it closes */
+        if (btn == B_SAVE) {
+            jam_menu_act(jam_menu_sel);
+            jam_menu_close();
+        } else if (btn == B_HOME) {
+            jam_menu_close();
+        }
+        return;
+    }
     switch (btn) {
     case B_HOME:                                  /* emu: HOME toggles HOME <-> GRID */
         ui_mode = (ui_mode == M_HOME) ? M_GRID : M_HOME;
@@ -584,6 +605,11 @@ static void ui_button(uint8_t btn, uint8_t down, uint8_t released)
     case B_PLAY:
         if (eng.playing) ds_stop(&eng);
         else ds_play(&eng);
+        break;
+    case B_SAVE:
+        jam_menu = 1;                             /* every SAVE opens the choice (no silent default) */
+        jam_menu_sel = 0;
+        jam_menu_ttl = JAM_MENU_FRAMES;
         break;
     case B_REC:                                    /* v1: REC = cursor step toggle (emu) */
         {   uint8_t on = TRK()->steps[cursor].on;
@@ -639,4 +665,5 @@ static void ui_init(void)
     key_shift = 0;
     glo_held = 0;
     sel_track = 0;
+    jam_menu_close();                        /* boot: no menu, no ttl */
 }

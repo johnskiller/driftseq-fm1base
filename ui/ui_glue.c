@@ -53,6 +53,15 @@ static uint8_t key_white_index(uint8_t key);
 static uint8_t key_white_id(uint8_t ord);
 static uint8_t key_black_id(uint8_t ord);
 
+/* the SAVE (jam) menu lives in ui_screens.c next to the footer that draws it;
+ * ui.c's ui_draw ticks its timeout and ui_edit.c's routing opens/works it */
+#define JAM_MENU_FRAMES 180u
+static uint8_t jam_menu;
+static uint8_t jam_menu_sel;
+static uint16_t jam_menu_ttl;
+static void jam_menu_act(uint8_t which);
+static void jam_menu_close(void);
+
 /* text builders (ui_text.c) */
 static char *txt_next(void);
 static char *txt_trk(const char *prefix, uint8_t one_based);

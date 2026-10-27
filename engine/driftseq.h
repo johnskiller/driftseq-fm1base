@@ -118,6 +118,19 @@ typedef struct {
      * (host tests run two states side by side). */
     struct { uint8_t trk, note; double t; } gates[DS_GATES];
     uint8_t     gates_n;
+
+    /* realtime jam capture: always armed. The ring IS a ds_track (64 steps of
+     * quantized notes, ~1.1 KB in the pool next to pat), written by every
+     * audition the player hears but did not deliberately step-record; SAVE
+     * merges it into a real track. jam_abs is the absolute step counter since
+     * the last reset (the wrap is jam_abs & 63), jam_acc the sub-step rest.
+     * melodic notes land at key-DOWN with a provisional gate of 1 and are
+     * closed at key-UP; jam_held is the pool of notes still waiting. */
+    ds_track    jam;
+    uint32_t    jam_abs;
+    double      jam_acc;
+    struct { uint8_t note; uint32_t on; } jam_held[8];
+    uint8_t     jam_held_n;
 } ds_state;
 
 /* rng */
@@ -150,5 +163,17 @@ int      ds_voice_remove(ds_track *t, uint32_t step, uint8_t note);
 void     ds_euclid_fill(ds_track *t);           /* (re)paint steps from eu meta, only 'on' bits */
 void     ds_bjorklund(int n, int k, uint8_t *out);  /* painter access (ARP ring/strip) */
 uint8_t  ds_step_active(const ds_track *t, uint32_t step);  /* inside window AND has voices */
+
+/* realtime jam (always armed): capture uses the jam ring's own division;
+ * save_* merge/copy it into a real track and reset it. ds_jam_reset is also
+ * the "turn the page" action: PLAY from stop and SAVE success call it. */
+void     ds_jam_capture(ds_state *s, uint8_t note, uint8_t vel, uint8_t down);
+uint32_t ds_jam_pos(const ds_state *s);
+void     ds_jam_reset(ds_state *s);
+void     ds_jam_close_held(ds_state *s);        /* key-up: finalize the held notes' gates */
+int      ds_jam_save_merge(ds_state *s, uint8_t trk);       /* 0 ok, -1 bad track */
+int      ds_jam_save_replace(ds_state *s, uint8_t trk);
+int      ds_jam_save_new(ds_state *s, uint8_t *out_trk);    /* first empty melodic track */
+uint8_t  ds_jam_holds_notes(const ds_state *s);             /* ring has uncaptured content? */
 
 #endif

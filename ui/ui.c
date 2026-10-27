@@ -45,6 +45,8 @@ static void cv_frame_begin(void)
 
 static void ui_draw(void)
 {
+    if (jam_menu && jam_menu_ttl && --jam_menu_ttl == 0)
+        jam_menu_close();                        /* 3 s idle: the footer is a readout again */
     cv_begin(240, 224, C_BLACK);              /* painters blit their own bands */
     if (ui_mode == M_HOME) draw_home();
     else if (ui_mode == M_GRID) {
@@ -138,8 +140,13 @@ static void panel_key_handler(uint8_t key, uint8_t down)
             if (note < 0) note = 0;
             if (note > 127) note = 127;
         }
-        if (down) ds_live_on(&eng, sel_track, (uint8_t)note, midi_vel);
-        else ds_live_off(&eng, sel_track, (uint8_t)note);
+        if (down) {
+            ds_live_on(&eng, sel_track, (uint8_t)note, midi_vel);
+            ds_jam_capture(&eng, (uint8_t)note, midi_vel, 1);   /* always armed: jam is not a mode */
+        } else {
+            ds_live_off(&eng, sel_track, (uint8_t)note);
+            ds_jam_capture(&eng, (uint8_t)note, midi_vel, 0);
+        }
         return;
     }
     if (focus_layer) {                            /* EDIT layer: voice add/del (r16j rev.14a) */
@@ -315,10 +322,13 @@ static void ui_midi_note(int32_t note, uint8_t down, uint8_t vel)
         int32_t key = note - 53 - key_shift;
         if (key >= 0 && key < 27)
             panel_key_handler((uint8_t)key, down);          /* the whole grid behaviour */
-        else if (down)
+        else if (down) {
             ds_live_on(&eng, sel_track, (uint8_t)note, midi_vel);
-        else
+            ds_jam_capture(&eng, (uint8_t)note, midi_vel, 1);   /* out-of-bed notes jam too */
+        } else {
             ds_live_off(&eng, sel_track, (uint8_t)note);
+            ds_jam_capture(&eng, (uint8_t)note, midi_vel, 0);
+        }
     }
 }
 
@@ -457,6 +467,7 @@ static void ui_leds(uint32_t *litK, uint32_t *dimK, uint32_t *litB, uint32_t *di
      * cursor-step toggle, not an armed mode, so it has no idle light) */
     if (eng.playing)   *litB |= 1u << B_PLAY;
     if (focus_layer) *litB |= 1u << B_EDIT;
+    if (jam_menu) *litB |= 1u << B_SAVE;     /* the SAVE menu is open: SAVE is live */
 }
 
 /* Push the masks above onto the panel. fm1-base already keys its light map the
