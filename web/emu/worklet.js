@@ -61,6 +61,8 @@ class Fm1 extends AudioWorkletProcessor {
       this.ex.web_enc(m.role, m.n | 0);
     } else if (m.type === "master") {
       this.ex.web_master(m.value | 0);
+    } else if (m.type === "midi") {                     // a Web MIDI input, as the firmware's packet
+      this.ex.web_midi_in(m.port >>> 0, m.pkt >>> 0);
     } else if (m.type === "sysex") {                  // a screen reader's frame: the bytes between F0 and F7
       const b = Uint8Array.from(m.bytes).subarray(0, 64);
       new Uint8Array(this.mem.buffer, this.ex.web_sysex_buf(), b.length).set(b);
@@ -89,6 +91,29 @@ class Fm1 extends AudioWorkletProcessor {
       this.sentBlits = blits;
       msg.fb = new Uint16Array(this.mem.buffer, ex.web_fb(), 240 * 240).slice();
       transfer.push(msg.fb.buffer);
+    }
+    // What the app sent: its USB-MIDI packets, as plain bytes for a Web MIDI
+    // output. The length matters more than it looks: a receiver walks this
+    // stream from status byte to status byte, so one wrong length shifts every
+    // message after it. Program change and channel pressure are 2 bytes, system
+    // real-time (clock, start, stop) is 1.
+    const nOut = ex.web_out_n();
+    if (nOut) {
+      const pk = new Uint32Array(this.mem.buffer, ex.web_out_pkts(), nOut);
+      const bytes = [];
+      for (const p of pk) {
+        const st = (p >>> 8) & 0xFF, t = st & 0xF0;
+        bytes.push(st);
+        if (st < 0xF0) {                            // a channel message: 2 or 3 bytes
+          bytes.push((p >>> 16) & 0xFF);
+          if (t !== 0xC0 && t !== 0xD0) bytes.push((p >>> 24) & 0xFF);
+        } else if (st === 0xF2) {                   // song position: two data bytes
+          bytes.push((p >>> 16) & 0xFF, (p >>> 24) & 0xFF);
+        }                                           // everything else: its one byte and no more
+      }
+      ex.web_out_clear();
+      msg.midi = Uint8Array.from(bytes);
+      transfer.push(msg.midi.buffer);
     }
     const writes = ex.web_store_writes();
     if (writes !== this.sentWrites) {

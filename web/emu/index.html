@@ -82,6 +82,18 @@ a { color: var(--accent); }
 .help p, .help ul { margin: 0; max-width: 60ch; }
 .help ul { padding-left: 1.1rem; }
 kbd { font: 600 .85em ui-monospace, Menlo, monospace; background: var(--card); border: 1px solid var(--rule); border-radius: 4px; padding: 0 .3em; color: var(--ink); }
+/* the MIDI pickers sit in the bar; the mapping list sits under the shortcuts checkbox */
+.bar select { font: inherit; color: var(--ink); background: var(--card); border: 1px solid var(--muted); border-radius: 8px;
+              padding: .25em .5em; min-height: 2.2em; max-width: 12rem; }
+.bar .midi { display: inline-flex; gap: .4rem; align-items: center; }
+.bar select:disabled { opacity: .55; }
+#keys-help { margin: 1rem 0 0; padding: .8rem 1.1rem; background: var(--card); border: 1px solid var(--rule); border-radius: 12px; font-size: .94rem; }
+#keys-help summary { cursor: pointer; font-weight: 600; }
+#keys-help[open] summary { margin: 0 0 .4rem; }
+#keys-help p { margin: 0 0 .5rem; color: var(--muted); max-width: 62ch; }
+#keys-help dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: .3rem 1.2rem; margin: .4rem 0 0; align-items: baseline; }
+#keys-help dt { white-space: nowrap; }
+#keys-help dd { margin: 0; color: var(--muted); }
 </style>
 </head>
 <body>
@@ -110,9 +122,27 @@ kbd { font: 600 .85em ui-monospace, Menlo, monospace; background: var(--card); b
   <button id="mute" type="button" aria-pressed="false">Mute</button>
   <label class="keys"><input type="checkbox" id="shortcuts" checked> Keyboard shortcuts</label>
   <span class="cpu" id="cpu"></span>
+  <span class="midi">
+    <label for="midiins">MIDI in</label>
+    <select id="midiins" disabled><option value="">Switch on first</option></select>
+    <label for="midiouts">MIDI out</label>
+    <select id="midiouts" disabled><option value="">Switch on first</option></select>
+  </span>
+  <span id="midi-state"></span>
   <button id="reset" type="button" aria-describedby="reset-why">Factory reset</button>
   <span id="reset-why" class="sr">Forget what was saved and start again from the factory settings</span>
 </div>
+
+<!-- every shortcut, built from the same KEYMAP the handler uses (see the script): a list written by hand drifts -->
+<details id="keys-help">
+  <summary>Keyboard mappings</summary>
+  <p>These work while the panel has focus, and anywhere on the page that is not a text field. Click anywhere on the
+    panel to focus it. Turn them off with the checkbox above.</p>
+  <dl id="keys-list"></dl>
+  <p>Knobs: <kbd>↑</kbd>/<kbd>↓</kbd> when a knob has focus (or <kbd>↑</kbd>/<kbd>↓</kbd> anywhere in the panel turns
+    SELECT), <kbd>PgUp</kbd>/<kbd>PgDn</kbd> for big steps. <kbd>Space</kbd>/<kbd>Enter</kbd> holds the focused button
+    or key; <kbd>Shift</kbd>+<kbd>Enter</kbd> latches it.</p>
+</details>
 
 <details class="speak" id="speak">
   <summary><h2>Screen Reader</h2></summary>
@@ -435,19 +465,84 @@ for (const [c, kind] of [...Object.values(buttons).map((b) => [b, "btn"]), ...ke
   });
 }
 
-// shortcuts: single letters, only while the panel has focus, and they can be turned off
+// ---------------------------------------------------------------- focus
+// John, 2026-10-19: "点击emu内部还不够，必须点击 emu内的键盘才行" -- a click on the
+// device's screen, its case or the gaps between its keys left the focus on
+// <body>, so the arrow keys scrolled the page instead of turning SELECT and no
+// shortcut fired at all. The panel is one object to whoever is using it: a click
+// anywhere on it should mean "I am working on the FM-1 now".
+//
+// Every control still focuses itself on pointerdown (hit(), above), so a click on
+// a button focuses that button. This is the fallback for everything else: focus
+// the control that was used last, or MASTER when there has been none -- the same
+// control the panel focuses when it is switched on.
+let lastFocused = null;
+controls.addEventListener("focusin", (e) => { if (e.target.classList.contains("hit")) lastFocused = e.target; });
+// mousedown, not pointerdown: the browser moves the focus to <body> on mousedown of
+// anything not focusable, and a focus() set before that would be thrown away.
+// preventDefault stops that move; the click still arrives.
+device.addEventListener("mousedown", (e) => {
+  const t = e.target;
+  if (t.closest && t.closest(".hit")) return;                // a control focuses itself
+  e.preventDefault();
+  (lastFocused || knobs.MASTER.hit).focus({ preventScroll: true });
+});
+
+// shortcuts: single letters, everywhere on the page except where you type, and they can be turned off
+//
+// They used to live on #controls alone, so they only worked after a click had put
+// the focus on a control -- clicking the panel's screen, its plastic or its keys'
+// gaps did nothing and the keyboard looked dead (John: "点击emu内部还不够"). The
+// listener is on the document now: a shortcut needs no focus, and a click anywhere
+// on the device still moves the focus to the control you last used (below), which
+// is what the arrow keys and Space follow.
+const WHITE_ROW1 = "qwertyui", WHITE_ROW2 = "asdfghjk", BLACK_ROW = "1234567890";
 const KEYMAP = {};
-"qwertyui".split("").forEach((c, i) => KEYMAP["Key" + c.toUpperCase()] = { key: WHITE_K[i] });
-"asdfghjk".split("").forEach((c, i) => KEYMAP["Key" + c.toUpperCase()] = { key: WHITE_K[8 + i] });
-"1234567890".split("").forEach((c, i) => KEYMAP["Digit" + c] = { key: BLACK_K[i] });
+WHITE_ROW1.split("").forEach((c, i) => KEYMAP["Key" + c.toUpperCase()] = { key: WHITE_K[i] });
+WHITE_ROW2.split("").forEach((c, i) => KEYMAP["Key" + c.toUpperCase()] = { key: WHITE_K[8 + i] });
+BLACK_ROW.split("").forEach((c, i) => KEYMAP["Digit" + c] = { key: BLACK_K[i] });
 KEYMAP.Minus = { key: BLACK_K[10] };
 Object.assign(KEYMAP, { KeyP: { btn: BTN.PLAY }, KeyO: { btn: BTN.REC }, Escape: { btn: BTN.HOME }, KeyZ: { btn: BTN["OCT-"] }, KeyX: { btn: BTN["OCT+"] } });
 const shortcuts = $("shortcuts");
 if (prefs.shortcuts === false) shortcuts.checked = false;
 shortcuts.addEventListener("change", () => { prefs.shortcuts = shortcuts.checked; savePrefs(); });
-controls.addEventListener("keydown", (e) => {
-  if (!node || !shortcuts.checked || e.metaKey || e.ctrlKey || e.altKey) return;
-  if (e.code === "ArrowUp" || e.code === "ArrowDown") { turn(knobs.SELECT, e.code === "ArrowUp" ? 1 : -1); e.preventDefault(); return; }
+
+// the list of them, built from the same KEYMAP the handler reads: a table typed
+// twice is a table that disagrees with itself within a month
+(function keysHelp() {
+  const K = (s) => s.split("").map((c) => `<kbd>${c.toUpperCase()}</kbd>`).join(" ");
+  const name = (m) => {
+    if (m.btn === undefined) return `white key ${WHITE_K.indexOf(m.key) + 1}`;
+    for (const b of Object.values(buttons)) if (b.bit === m.btn) return `the ${b.name} button`;
+    return "";
+  };
+  const LABEL = { KeyP: "P", KeyO: "O", Escape: "Esc", KeyZ: "Z", KeyX: "X" };
+  const rows = [
+    [K(WHITE_ROW1), "the first eight white keys (F3 up to C4)"],
+    [K(WHITE_ROW2), "the last eight white keys (C#4 up to G5)"],
+    [K(BLACK_ROW), "the eleven black keys"],
+    ["<kbd>−</kbd>", "the last black key"],
+    ...Object.keys(LABEL).map((c) => [`<kbd>${LABEL[c]}</kbd>`, name(KEYMAP[c])]),
+    ["<kbd>↑</kbd> <kbd>↓</kbd>", "turn SELECT when the panel has the focus (and <kbd>PgUp</kbd>/<kbd>PgDn</kbd> on a knob turn it further)"],
+  ];
+  $("keys-list").innerHTML = rows.map(([k, what]) => `<dt>${k}</dt><dd>${what}</dd>`).join("");
+})();
+
+// where a shortcut must not fire: typing
+function typingIn(t) {
+  if (!t || !t.tagName) return false;
+  if (t.isContentEditable || t.tagName === "TEXTAREA" || t.tagName === "SELECT") return true;
+  return t.tagName === "INPUT" && !/^(checkbox|radio|button|submit|range)$/i.test(t.type);
+}
+document.addEventListener("keydown", (e) => {
+  if (!node || !shortcuts.checked || e.metaKey || e.ctrlKey || e.altKey || typingIn(e.target)) return;
+  // the arrow keys keep scrolling the page unless the panel has the focus: they are
+  // the only shortcuts that would otherwise steal the browser's own keys
+  if ((e.code === "ArrowUp" || e.code === "ArrowDown") && controls.contains(document.activeElement)) {
+    turn(knobs.SELECT, e.code === "ArrowUp" ? 1 : -1);
+    e.preventDefault();
+    return;
+  }
   const m = KEYMAP[e.code];
   if (!m) return;
   e.preventDefault();
@@ -612,6 +707,190 @@ document.querySelectorAll('input[name="speak"]').forEach((r) => r.addEventListen
 $("where").addEventListener("click", () => sysex(SR_WHERE));
 $("again").addEventListener("click", () => last && speak(last.text, true, last.keep));
 
+// ---------------------------------------------------------------- Web MIDI
+// The device is a class-compliant USB-MIDI and BLE-MIDI box: a keyboard plugged
+// into it plays it, and what the sequencer sends leaves through it. In the
+// browser both halves are Web MIDI, and neither was here before -- the wasm has
+// exported web_midi_in/web_out_pkts all along (platform/web/emu/emu_web.c), the
+// page simply never called them (John: "插上FM-1没反应，因为emu根本不去找MIDI设备").
+//
+// Port numbering is the firmware's: PORT_USB 0, PORT_BLE 1, PORT_TRS 2
+// (plat.h). A Web MIDI input is a USB cable, so it goes in on 0. The one thing
+// this cannot be is "all inputs" -- each message must say which port it came in
+// on, because the firmware echoes nothing back to where it came from.
+const PORT_USB = 0;
+let midiAccess = null, midiInSel = "", midiOutSel = "", midiBound = false;
+
+/* pack one MIDI message as the firmware's 4-byte USB-MIDI packet: the cable's
+ * code index in byte 0, then status, data 1, data 2 (mk_pkt in plat_host.c).
+ * The port is NOT in the packet: web_midi_in(port, pkt) takes it separately. */
+function midiPacket(bytes, i) {
+  const st = bytes[i], d1 = bytes[i + 1] ?? 0, d2 = bytes[i + 2] ?? 0;
+  const cin = st >= 0xf0 ? 0x0f : st >> 4;
+  return (cin | st << 8 | d1 << 16 | d2 << 24) >>> 0;
+}
+
+/* Split a Web MIDI event's data into messages and hand each to the wasm. One
+ * event is normally one message, but real-time bytes (clock, start, stop) can sit
+ * ANYWHERE -- including between a message's own data bytes. They are dropped and
+ * the message is assembled around them; reading three consecutive bytes instead
+ * would put a clock byte in the velocity (a note at velocity 248, and every
+ * message after it shifted by one). */
+function onMidiIn(e) {
+  if (!node) return;
+  const d = e.data;
+  for (let i = 0; i < d.length; ) {
+    const st = d[i];
+    if (st >= 0xf8) { i++; continue; }                 // real-time: the firmware drops it anyway
+    if (st < 0x80) { i++; continue; }                  // running status: wait for a real status byte
+    if (st >= 0xf0) return;                            // SysEx and system common: this page's SysEx is the reader's
+    const t = st & 0xf0, want = t === 0xc0 || t === 0xd0 ? 2 : 3;
+    const msg = [st];
+    for (i++; msg.length < want && i < d.length; i++) {
+      if (d[i] >= 0xf8) continue;                      // clock inside the message: not a data byte
+      msg.push(d[i]);
+    }
+    if (msg.length === want) send({ type: "midi", port: PORT_USB, pkt: midiPacket(msg, 0) });
+  }
+}
+
+/* What the app sent, from the worklet (msg.midi, already unpacked to bytes).
+ * Send it on to the chosen output, and -- when nothing is chosen -- play it here,
+ * so a sequencer in a browser makes a sound without any external gear. */
+function onMidiOut(bytes) {
+  if (midiOutSel && midiAccess) {
+    const out = midiAccess.outputs.get(midiOutSel);
+    if (out) {
+      try { out.send(bytes); } catch { /* the port went away between the check and the send */ }
+    }
+  }
+  if (!midiOutSel) previewMidi(bytes);
+}
+
+/* A very small stand-in for what the FM-1 would drive: one oscillator per
+ * channel/note, a square with a 10 ms envelope. It is a monitoring aid -- it is
+ * NOT the FM-1's sound and makes no claim to be -- so it only runs when no MIDI
+ * output is selected, and MASTER does not touch it. */
+const preview = { ctx: null, gain: null, voices: new Map() };
+function previewSilence(now) {
+  for (const [id, v] of preview.voices) {
+    v.g.gain.setTargetAtTime(0.0001, now, 0.02);
+    v.o.stop(now + 0.2);
+    setTimeout(() => { try { v.o.disconnect(); v.g.disconnect(); } catch { /* already gone */ } }, 300);
+  }
+  preview.voices.clear();
+}
+function previewMidi(bytes) {
+  if (midiOutSel) return;
+  const ac = audioCtx;
+  if (!ac || ac.state !== "running" || $("mute").getAttribute("aria-pressed") === "true") return;
+  // the graph is rebuilt when the phone suspends the audio (rcResume), which
+  // makes a gain made against the old context a silent dead end: follow the context
+  if (preview.ctx !== ac) {
+    previewSilence(ac.currentTime);
+    preview.ctx = ac;
+    preview.gain = ac.createGain();
+    preview.gain.gain.value = 0.16;
+    preview.gain.connect(ac.destination);
+  }
+  const now = ac.currentTime;
+  for (let i = 0; i < bytes.length; ) {
+    const st = bytes[i], t = st & 0xf0;
+    const len = st >= 0xf0 ? (st === 0xf2 ? 3 : 1) : t === 0xc0 || t === 0xd0 ? 2 : 3;
+    const d1 = bytes[i + 1] ?? 0, d2 = bytes[i + 2] ?? 0;
+    i += len;
+    if (st >= 0xf0) continue;                                                  // clock, start, stop: nothing to play
+    if (t === 0x90 && d2 > 0) {
+      const id = st + ":" + d1;
+      const old = preview.voices.get(id);
+      if (old) { old.g.gain.setTargetAtTime(0.0001, now, 0.01); old.o.stop(now + 0.1); preview.voices.delete(id); }
+      const o = ac.createOscillator(), g = ac.createGain();
+      o.type = "square";
+      o.frequency.value = 440 * Math.pow(2, (d1 - 69) / 12);
+      g.gain.value = 0.0001;
+      g.gain.setTargetAtTime(Math.min(0.5, d2 / 127), now, 0.01);   // ~10 ms attack
+      o.connect(g).connect(preview.gain);
+      o.start(now);
+      preview.voices.set(id, { o, g });
+    } else if (t === 0x80 || (t === 0x90 && d2 === 0)) {
+      const id = st + ":" + d1, v = preview.voices.get(id);
+      if (v) {
+        v.g.gain.setTargetAtTime(0.0001, now, 0.02);
+        v.o.stop(now + 0.2);
+        preview.voices.delete(id);
+      }
+    } else if (t === 0xb0 && (d1 === 123 || d1 === 120)) {                     // all notes / all sound off
+      previewSilence(now);
+    }
+  }
+}
+
+const midiState = (t) => { $("midi-state").textContent = t; };
+
+/* Fill the two pickers. Kept as their own function because onstatechange fires
+ * for both directions and either one can add or remove a port. */
+function fillMidi(acc) {
+  const ins = [...acc.inputs.values()], outs = [...acc.outputs.values()];
+  const fill = (sel, ports, keep, allLabel) => {
+    const sig = ports.map((p) => p.id + ":" + p.name).join("|");
+    if (sel.dataset.sig !== sig) {
+      sel.dataset.sig = sig;
+      sel.textContent = "";
+      sel.add(new Option(allLabel, ""));
+      for (const p of ports) sel.add(new Option(p.name || p.id, p.id));
+    }
+    sel.value = ports.some((p) => p.id === keep) ? keep : "";
+    sel.disabled = ports.length === 0;
+  };
+  fill($("midiins"), ins, midiInSel, ins.length ? "— all inputs —" : "— no inputs —");
+  fill($("midiouts"), outs, midiOutSel, outs.length ? "— none (play here) —" : "— no outputs —");
+  bindMidiIn(acc);
+  midiState(ins.length || outs.length
+    ? `${ins.length} in, ${outs.length} out`
+    : "no MIDI ports: plug a keyboard in and it appears here");
+}
+
+/* Attach (or detach) the input handlers according to the selection. */
+function bindMidiIn(acc) {
+  for (const p of acc.inputs.values()) {
+    const want = midiInSel === "" || p.id === midiInSel;
+    p.onmidimessage = want ? onMidiIn : null;
+  }
+}
+
+async function midiStart() {
+  if (!navigator.requestMIDIAccess) {                    // Firefox and Safari before 18
+    for (const id of ["midiins", "midiouts"]) {
+      const s = $(id);
+      s.textContent = "";
+      s.add(new Option("This browser has no Web MIDI", ""));
+      s.disabled = true;
+    }
+    midiState("This browser has no Web MIDI (Chrome, Edge and Safari 18+ do). The keyboard and the mouse still work.");
+    return;
+  }
+  if (!midiAccess) {
+    try {
+      // no sysex: the emulator's SysEx is the screen reader's, and it must not ask
+      // for a permission the page does not need
+      midiAccess = await navigator.requestMIDIAccess({ sysex: false });
+    } catch (err) {
+      midiState("MIDI access was refused: " + (err && err.message || err) + " The keyboard and the mouse still work.");
+      return;
+    }
+    midiAccess.onstatechange = () => midiAccess && fillMidi(midiAccess);
+  }
+  if (!midiBound) {
+    midiBound = true;
+    $("midiins").addEventListener("change", (e) => { midiInSel = e.target.value; if (midiAccess) bindMidiIn(midiAccess); });
+    $("midiouts").addEventListener("change", (e) => {
+      midiOutSel = e.target.value;
+      if (audioCtx) previewSilence(audioCtx.currentTime);       // leaving the local sound behind: stop its notes
+    });
+  }
+  fillMidi(midiAccess);
+}
+
 // ---------------------------------------------------------------- storage
 function loadStore() {
   try {
@@ -745,6 +1024,7 @@ async function buildAudio(ac) {
         if (m.fb) drawScreen(m.fb);
         drawLights(m.buttons, m.keys);
         if (m.said) onSaid(m.said);
+        if (m.midi) onMidiOut(m.midi);
         window.emuLast = m;
         if (m.load !== undefined) cpu.textContent = `{{NAME}} uses ${m.load}% of this computer's time`;
         if (m.store) saveStore(m.store);
@@ -771,6 +1051,7 @@ async function buildAudio(ac) {
   controls.inert = false;
   status.textContent = ac.sampleRate === 44100 ? "On." : `On (the browser runs audio at ${ac.sampleRate} Hz).`;
   syncButtons(); syncKeys();
+  midiStart();                                 /* the pickers; a refusal only costs the pickers */
 }
 
 $("go").addEventListener("click", switchOn);
