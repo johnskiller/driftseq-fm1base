@@ -51,9 +51,10 @@ const cellX = (s) => X0 + (s % 16) * CW;
 const cellY = (s) => GY + Math.floor(s / 16) * CHH;
 
 /* A pitch line is saturated (the hue) and horizontal. Saturation separates it
- * from the cell background and from the grey rest line; a horizontal run of 5+
- * separates it from the cursor's vertical edges. Width counts from 1px BEFORE
- * the cell to 1px after it, because that reach is exactly what a tie adds. */
+ * from the cell background and from the grey rest line. Plan D: an attack is
+ * a 2px stub (the extension lives in other cells, painted after the loop), a
+ * tie runs edge to edge (cw+1 with the 1px overhang) -- so the threshold is
+ * 2: enough to reject the 1px cursor edge, low enough to catch the stub. */
 function lines(fb, s) {
     const x = cellX(s), y = cellY(s), out = [];
     for (let r = 1; r < CHH - 1; r++) {
@@ -61,10 +62,10 @@ function lines(fb, s) {
         for (let dx = -1; dx <= CW; dx++) {
             const [rr, gg, bb] = rgb(fb, x + dx, y + r);
             const v = (rr + gg + bb) / 3, sat = Math.max(rr, gg, bb) - Math.min(rr, gg, bb);
-            if (v > 55 && sat > 35) { run++; if (run > widest) widest = run; }
+            if (v > 40 && sat > 25) { run++; if (run > widest) widest = run; }
             else run = 0;
         }
-        if (widest >= 5) out.push({ r, widest });
+        if (widest >= 2) out.push({ r, widest });
     }
     return out;
 }

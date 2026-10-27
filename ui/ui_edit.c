@@ -2,9 +2,13 @@
  * ARP page + encoder/button routing (part of ui.c unity section). Ported
  * from web/emu.js r16j: drawEditPanel / drum readout / drawArp. */
 
-/* ---- melodic EDIT panel: 4 voice cards (r16j drawEditPanel verbatim) ----
- * card bg luminance = velocity, hue bar length = gate, 5-segment text
- * v<sym> NOTE g<n> v<n> p<n> at fixed columns, 1px dark shadow under text. */
+/* ---- melodic EDIT panel: 4 voice cards (plan D, John 2026-10-27) ----
+ * The bar's LENGTH = velocity now (was gate); gate left the bar because the
+ * grid line's length carries it ("how long does this note sound" is a when-
+ * across-time answer, the grid's whole language). The row's bg luminance
+ * double-coded velocity with the bar -- one value, one channel: bg is the flat
+ * card color again, prob desaturates the bar as before. Text stays the
+ * authority: g/v/p numbers at the same columns. */
 static void ui_draw_edit_panel(void)
 {
     ds_step *st = &TRK()->steps[cursor];
@@ -23,12 +27,11 @@ static void ui_draw_edit_panel(void)
             uint8_t prob = st->prob;
             uint16_t hue = hue12(note);
             uint16_t desat = blend(hue, RGB565(128, 128, 128), (uint8_t)(255 - prob * 255 / 100));
-            int gspan = (gate == 0xFF) ? 234 : (int)(((gate / 4.0) > 8.0 ? 8.0 : gate / 4.0) * 29);
-            /* whole-row bg = velocity luminance (18%..73% gray) */
-            cv_rect(3, y + 1, 234, 23, blend(RGB565(186, 186, 186), RGB565(46, 46, 46), (uint8_t)(255 - vel * 255 / 127)));
-            cv_rect(3, y + 1, gspan < 3 ? 3 : gspan, 23, desat);   /* bar = gate */
+            int vspan = 3 + vel * 231 / 127;         /* the bar IS the velocity */
+            cv_rect(3, y + 1, 234, 23, RGB565(22, 22, 27));   /* flat card bg */
+            cv_rect(3, y + 1, vspan, 23, desat);     /* bar = velocity */
             if (gate == 0xFF && eng.playing)
-                cv_rect(234, y + 1, 3, 23, C_WHITE);
+                cv_rect(234, y + 1, 3, 23, C_WHITE); /* ∞ gate: running past */
             {   /* text: "v1" NOTE "g" GATE "v" VEL "p" PROB at fixed columns */
                 int xs[5] = {7, 34, 84, 140, 188};
                 uint16_t tcol = active ? WARMWHITE : BRIGHTTX;

@@ -171,6 +171,43 @@ static char *chord_name(uint8_t t, uint8_t s)
     return b;
 }
 
+/* ---- gate -> pixel run (plan D, John 2026-10-27) --------------------------
+ * The melodic grid line's LENGTH now carries gate: the same primitive a tie
+ * already uses ("the line runs through"), so a limited gate and a tie are one
+ * rule -- the line runs for as long as the note sounds, in cells of the
+ * track's division.
+ *
+ * The run mirrors the engine's land() arithmetic exactly (driftseq.c): a
+ * limited gate is a pure DURATION -- the steps it crosses say nothing, only a
+ * tie adds a cell (and only the run of ties immediately after the attack);
+ * 0xFF walks forward until the next attacking step or the window end. Both cut
+ * at the loop window, because land()'s span does. */
+static int gate_run_cells(const ds_track *t, uint8_t s, uint8_t gate)
+{
+    uint32_t start = t->loop_start, len = t->loop_len, rel, d;
+    int cells;
+    if (!len) return 1;
+    rel = (s + 64u - start) & 63u;
+    if (rel >= len) return 1;
+    if (gate == 0xFF) {
+        uint32_t span = len - rel;
+        cells = (int)span;
+        for (d = 1; d < span; d++) {
+            const ds_step *nx = &t->steps[(start + rel + d) & 63];
+            if (nx->on && nx->nvoices) { cells = (int)d; break; }   /* retrigger */
+        }
+        return cells;
+    }
+    cells = (gate > len - rel) ? (int)(len - rel) : gate;   /* window cut */
+    for (d = 1; ; d++) {
+        const ds_step *nx = &t->steps[(start + rel + d) & 63];
+        if ((int)rel + (int)d >= (int)len) break;           /* stay in the window */
+        if (!nx->tie) break;
+        cells++;                                            /* a tie extends the hold */
+    }
+    return cells;
+}
+
 /* ---- "the knob you are turning says its value" -------------------------
  *
  * John: "每个旋钮改变时在旋钮位置显示value，停下来后恢复旋钮提示".
@@ -413,7 +450,6 @@ typedef struct {
 
 static void ui_draw_header(const hdr_t *h)
 {
-    const ds_track *tr = TRK();
     /* Pill geometry. The width is FIXED at two digits, not fitted to the
      * number: John's point is that the header must not move when the selection
      * crosses from track 9 to track 10. A fitted pill would grow 7px there and
@@ -834,6 +870,8 @@ static void draw_grid_melodic(void)
          * before -- only the row height changed, not the space it occupies. */
         const int x0 = 18, cw = 13, chh = 22, gy0 = 24;  /* r16j: x0=18, cw=(240-18-16)/16=13 */
         const int nct = cell_ticks(tr->division);    /* one lookup for the grid */
+        struct { int x, y, w; uint16_t c; } ext[16]; /* gate extensions, drawn after */
+        int ext_n = 0;                               /* (see the voice loop below) */
         for (r = 0; r < 4; r++)
             for (c = 0; c < 16; c++) {
                 uint8_t s = (uint8_t)(r * 16 + c);
@@ -877,10 +915,31 @@ static void draw_grid_melodic(void)
                         }
                         continue;                    /* no pitch line of its own */
                     }
-                    if (!st->on)
+                    if (!st->on) {
                         cv_rect(x + 3, lineY, cw - 6, 1, RGB565(102, 102, 114));
-                    else
-                        cv_rect(x + 2, lineY, cw - 4, 2, hue12(sort_vs[vi][0]));
+                    } else {
+                        /* gate = the line's LENGTH (plan D): the attack draws a
+                         * 2x2 stub, and the run's extension is COLLECTED here
+                         * but painted after the cell loop -- later cells' bg
+                         * would otherwise erase the part that crosses them
+                         * (measured: the tail survived only inside its own
+                         * cell, plus 2px slivers where the next cells' bg
+                         * rects didn't reach). Chords: every voice's run
+                         * starts here; two voices with the same pitch share a
+                         * line (they stack with +vi anyway). */
+                        int run = gate_run_cells(tr, s, sort_vs[vi][2]);
+                        int end = x + run * cw - 2;
+                        int lim = x0 + 16 * cw;      /* the grid's right edge */
+                        if (end > lim) end = lim;    /* engine cuts at the window */
+                        cv_rect(x + 2, lineY, 2, 2, hue12(sort_vs[vi][0]));
+                        if (run > 1 && end > x + 4 && ext_n < 16) {
+                            ext[ext_n].x = x + 4;
+                            ext[ext_n].y = lineY;
+                            ext[ext_n].w = end - (x + 4);
+                            ext[ext_n].c = hue12(sort_vs[vi][0]);
+                            ext_n++;
+                        }
+                    }
                 }
                 if (eng.playing && pos == s)           /* playhead ring */
                     cv_rect(x + 1, y + 1, cw - 2, 1, C_WHITE);
@@ -893,6 +952,12 @@ static void draw_grid_melodic(void)
                 if (c == 0)
                     cv_text(3, y + 4, &FONT_T, txt_join("P", txt_num(0, r + 1)), FOOT_GRAY);
             }
+        /* the gate extensions, now that every cell's bg is down: painting them
+         * inside the loop let later cells erase the part crossing them */
+        {   int i;
+            for (i = 0; i < ext_n; i++)
+                cv_rect(ext[i].x, ext[i].y, ext[i].w, 1, ext[i].c);
+        }
     }
     cv_blit(0, 0);
     ui_draw_edit_panel();                            /* rev.12 embedded panel */
