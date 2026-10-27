@@ -312,6 +312,40 @@ win.__sent.length = 0;
 listening[0].onmidimessage({ data: new Uint8Array([0xB0, 7, 100]) });
 check(/CC/.test(monEl.textContent) && /cc7 = 100/.test(monEl.textContent), 'a CC is printed in words too', monEl.textContent);
 
+/* ---- a CC moves the panel: nothing in the firmware reads CC --------------- */
+/* app.c's midi_in() handles notes and nothing else, so this can only happen on
+ * the page. Reported as "旋钮和其他按钮没有反馈". */
+{
+    const knob = win.eval('Object.values(knobs).find((k) => k.role === 3)');
+    const before = knob.angle;
+    win.__sent.length = 0;
+    listening[0].onmidimessage({ data: new Uint8Array([0xb0, 20 + 3, 64 + 2]) });
+    check(knob.angle !== before, 'CC23 turns KNOB1 (relative: 64 is still)', `${before} -> ${knob.angle}`);
+    check(win.__sent.some((m) => m.type === 'enc' && m.role === 3 && m.n === 2),
+          'and the firmware is told, so the sequencer follows the knob', JSON.stringify(win.__sent));
+    check(/CC/.test(monEl.textContent), 'the monitor prints it', monEl.textContent);
+
+    const btn = win.eval('Object.values(buttons).find((b) => b.label === "PLAY" || b.name === "PLAY")');
+    win.__sent.length = 0;
+    listening[0].onmidimessage({ data: new Uint8Array([0xb0, 40 + 10, 127]) });
+    check(win.__sent.some((m) => m.type === 'buttons' && (m.mask & (1 << 10))),
+          'CC50 presses PLAY (mask bit 10)', JSON.stringify(win.__sent));
+    listening[0].onmidimessage({ data: new Uint8Array([0xb0, 40 + 10, 0]) });
+    check(!win.__sent.filter((m) => m.type === 'buttons').at(-1).mask, 'and CC50 = 0 releases it');
+}
+
+/* ---- a looped-back port must not feed itself ----------------------------- */
+/* The app's own notes come back in on IAC / a virtual cable. Without this the
+ * sequencer writes its own output into the pattern. */
+{
+    win.__sent.length = 0;
+    win.eval('echoStamp([144, 60, 100])');
+    listening[0].onmidimessage({ data: new Uint8Array([0x90, 60, 100]) });
+    check(!win.__sent.some((m) => m.type === 'midi'), 'an echo of what we just sent is dropped');
+    listening[0].onmidimessage({ data: new Uint8Array([0x90, 62, 100]) });
+    check(win.__sent.some((m) => m.type === 'midi'), 'but a different note still goes through');
+}
+
 /* what the app sends goes out of the chosen port */
 outs.value = 'out-1';
 outs.dispatchEvent(new win.Event('change'));

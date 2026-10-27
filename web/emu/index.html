@@ -757,6 +757,71 @@ function midiPacket(bytes, i) {
  * the message is assembled around them; reading three consecutive bytes instead
  * would put a clock byte in the velocity (a note at velocity 248, and every
  * message after it shifted by one). */
+/* ---- the panel's own echoes ----------------------------------------------
+ * A hardware FM-1 sends a CC for everything it does itself: CC20-26 when a knob
+ * turns, CC40-53 when a button goes down or up, CC27 for MASTER. Nothing on the
+ * device reads those back -- they are for whoever is listening. The page is
+ * listening, so if it obeyed every CC it received, its own knob turns would come
+ * back a frame later and turn it again (double speed, or a fight between the
+ * pointer and the wire). The old emu solved this with a 250 ms window of what it
+ * had just sent; same idea here, keyed on the exact three bytes, so a deliberate
+ * turn of the same knob by the same amount still gets through.
+ *
+ * What is NOT an echo: a CC nobody here sent -- a controller, another app, a
+ * sequencer -- and that is what turns the knob or lights the button. */
+const echoRing = [];
+const ECHO_MS = 250;
+function echoStamp(msg) {
+  echoRing.push({ s: msg.join(","), t: performance.now() });
+  if (echoRing.length > 96) echoRing.splice(0, 32);
+}
+function echoHit(msg) {
+  const s = msg.join(","), now = performance.now();
+  for (let i = echoRing.length - 1; i >= 0; i--) {
+    if (now - echoRing[i].t > ECHO_MS) break;
+    if (echoRing[i].s === s) return true;
+  }
+  return false;
+}
+
+/* A CC arrives: move the panel to match, the way the device would have.
+ * The firmware has no CC handler (app.c's midi_in() reads notes and nothing
+ * else), so unlike a note this cannot come back through the app -- the page is
+ * the only thing that can show it. That is the whole point of mapping here. */
+function ccToPanel(d1, value) {
+  const v = value | 0;
+  if (d1 === 27) {                                  // MASTER, the emulators' own CC
+    master = Math.max(0, Math.min(4096, v * 32));
+    const k = knobs.MASTER;
+    if (k) {
+      k.angle = -135 + 270 * master / 4096;
+      drawKnob(k);
+      k.hit.setAttribute("aria-valuenow", masterPct());
+      k.hit.setAttribute("aria-valuetext", `${masterPct()} percent`);
+    }
+    send({ type: "master", value: master });
+    return true;
+  }
+  if (d1 >= 40 && d1 < 54) {                        // a button: CC >= 64 is down
+    const bit = d1 - 40, down = v >= 64;
+    const b = Object.values(buttons).find((x) => x.bit === bit);
+    if (!b) return false;
+    if (down) btnHeldBy.set("midi" + bit, bit);
+    else btnHeldBy.delete("midi" + bit);
+    syncButtons();
+    return true;
+  }
+  if (d1 >= 20 && d1 < 27) {                        // a knob: relative, 64 is still
+    const role = d1 - 20;
+    const k = Object.values(knobs).find((x) => x.role === role);
+    if (k) {
+      turn(k, v - 64);
+      return true;
+    }
+  }
+  return false;
+}
+
 function onMidiIn(e) {
   if (!node) return;
   const d = e.data;
@@ -772,6 +837,10 @@ function onMidiIn(e) {
       msg.push(d[i]);
     }
     if (msg.length === want) {
+      /* A port can loop back (IAC, a virtual cable, an FM-1 wired to itself):
+       * what the app just sent would then arrive here as input, and a sequencer
+       * would write its own notes into the pattern. Drop the ones we recognise. */
+      if (echoHit(msg)) continue;
       send({ type: "midi", port: PORT_USB, pkt: midiPacket(msg, 0) });
       monLine("in ", msg);
       /* The flash is the answer to "did the emulator hear it": the app's own
@@ -779,6 +848,8 @@ function onMidiIn(e) {
        * pattern, HOME only sounds it), so the panel has to say "the message got
        * here" on its own or a working page looks dead. Key 0 is F3 = note 53. */
       if (t === 0x90 || t === 0x80) flashKey(msg[1] - 53, t === 0x90 && msg[2] > 0);
+      /* A CC is the panel's: the app has no CC handler to react to it. */
+      else if (t === 0xb0) ccToPanel(msg[1], msg[2]);
     }
   }
 }
@@ -800,6 +871,15 @@ function flashKey(idx, on) {
  * so a sequencer in a browser makes a sound without any external gear. */
 function onMidiOut(bytes) {
   monOut(bytes);
+  /* Remember what is on the wire, so a port that loops back does not come
+   * straight back in as input (see echoHit). Stamped before the send: the echo
+   * arrives after it, never before. */
+  for (let i = 0; i < bytes.length; ) {
+    const st = bytes[i];
+    const n = st >= 0xf0 ? (st === 0xf2 ? 3 : 1) : st < 0x80 ? 1 : (st & 0xf0) === 0xc0 || (st & 0xf0) === 0xd0 ? 2 : 3;
+    echoStamp([st, bytes[i + 1] ?? 0, bytes[i + 2] ?? 0]);
+    i += n;
+  }
   if (midiOutSel && midiAccess) {
     const out = midiAccess.outputs.get(midiOutSel);
     if (out) {
