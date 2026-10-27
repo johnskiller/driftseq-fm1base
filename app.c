@@ -82,6 +82,35 @@ static void note_off(int32_t note)
         voice_note = -1;
 }
 
+/* ---- MIDI in -> the UI ---------------------------------------------------- */
+/* midi_in() runs in the audio interrupt and step entry writes the pattern, so
+ * the handoff to the UI is a ring drained once a frame (ui_midi_dispatch). One
+ * slot per message, packets as plat.h holds them (status<<8|d1<<16|d2<<24): the
+ * same shape plat_midi_in hands over, nothing re-packed.
+ *
+ * What the UI gets, and why:
+ *   note on/off -> ui_midi_note(): the r16j dispatch by NOTE, so a MIDI keyboard
+ *       (or pads) does what the same key on the panel does -- drum grid: a black
+ *       key picks and auditions the drum; melodic grid: step entry at the cursor
+ *       with the MIDI velocity (the panel writes 100; pads have real dynamics);
+ *       EDIT layer: add/del a voice; other pages: audition only.
+ *   FA / FB / FC -> transport: the machine's own PLAY/STOP without anyone
+ *       reaching for the panel.
+ *   CC -> nothing: v1 has no CC handler (the emu page maps the FM-1's own CC
+ *       echo onto its panel); clock (F8) and active sense (FE) are dropped, as
+ *       they always were.
+ *   SysEx -> ignored for now: a pattern/settings dump protocol is planned and
+ *       will need a real buffer, not this ring.
+ *
+ * A note in range for the panel (53+shift .. 79+shift melodic; a GM_DRUMS hit
+ * on a drum track) drives the same handler the panel key does; out-of-range
+ * notes still audition (an external sound module's range is far wider than
+ * the keybed) and go through ds_live_on/off so the sequencer tracks held notes.
+ */
+#define MIDI_Q 32u                               /* a burst between frames; 32 is 2 bars of 16ths at 120 */
+static volatile uint32_t midi_q_w, midi_q_r;
+static uint32_t midi_q[MIDI_Q];
+
 static volatile uint32_t midi_last, midi_last_port, midi_count;   /* the last message in (shown), and how many */
 static void midi_in(void)                    /* audio interrupt: the packets that came in */
 {
@@ -89,13 +118,21 @@ static void midi_in(void)                    /* audio interrupt: the packets tha
     int port;
     while (plat_midi_in(&pkt, &port)) {
         uint32_t st = (pkt >> 8) & 0xFFu, d1 = (pkt >> 16) & 0x7Fu, d2 = pkt >> 24;
-        if (st != 0xF8u && st != 0xFEu) {    /* (clock and active sensing would flood the screen) */
+        int keep = st != 0xF8u && st != 0xFEu;   /* clock and active sensing would flood the screen */
+        uint32_t dispatch = 0;
+        if (keep)
+            dispatch = pkt;                  /* note/transport: for ui_midi_dispatch */
+        else if (st != 0xF8u)
+            continue;                        /* FE only: not kept, not shown, not dispatched */
+        if (keep) {
             midi_last = pkt;
             midi_last_port = (uint32_t)port;
             midi_count++;
         }
+        if (dispatch && midi_q_w - midi_q_r < MIDI_Q)
+            midi_q[midi_q_w++ % MIDI_Q] = dispatch;
         if ((st & 0xF0u) == 0x90u && d2)
-            note_on((int32_t)d1, d2);
+            note_on((int32_t)d1, d2);        /* the template's beep voice: still the first sound */
         else if ((st & 0xF0u) == 0x80u || (st & 0xF0u) == 0x90u)
             note_off((int32_t)d1);
     }
@@ -164,34 +201,47 @@ static uint32_t eng_sent;                          /* bytes put on the wire, for
  * there means the sequencer sees a fraction of the time the frame loop thinks
  * has passed, and it stalls after a bar. plat_ms() is the emulator's clock on
  * both, and 1 ms is well inside a 16th at any tempo this runs at. */
+static void engine_drain(void)
+{
+    uint32_t i;
+    for (i = 0; i < eng.out_len; ) {
+        /* one packet per message: status|d1|d2 is 3 bytes for the messages
+         * this engine sends (note on/off, CC), 2 for a program change */
+        uint8_t st = eng.out[i];
+        uint32_t n = ((st & 0xF0u) == 0xC0u || (st & 0xF0u) == 0xD0u) ? 2u : 3u;
+        uint32_t pkt = (uint32_t)st << 8;
+        if (n >= 2 && i + 1 < eng.out_len) pkt |= (uint32_t)eng.out[i + 1] << 16;
+        if (n >= 3 && i + 2 < eng.out_len) pkt |= (uint32_t)eng.out[i + 2] << 24;
+        if (!plat_midi_out_room(TO_USB | TO_BLE))
+            break;                                 /* full: keep it for the next frame */
+        plat_midi_send(pkt, TO_USB | TO_BLE);
+        eng_sent += n;
+        i += n;
+    }
+    if (i) {                                       /* drop what went out */
+        uint32_t k;
+        for (k = 0; k + i < eng.out_len; k++)
+            eng.out[k] = eng.out[k + i];
+        eng.out_len -= i;
+    }
+}
+/* drain before ds_tick, not after: ds_tick's own bookkeeping resets out_len at
+ * its start (a quiet stopped tick, and the playing branch both), which wiped
+ * whatever the UI queued since the last frame — a key pressed on the panel or
+ * a note in from MIDI auditions through ds_live_on BETWEEN frames, and the
+ * audition never reached the wire (masked for a year on the emu by its local
+ * square-wave preview; on hardware the key simply made no sound). Draining
+ * first, then ticking, then draining again is belt and braces; the first drain
+ * is the one that matters. */
 static void engine_tick(void)
 {
     uint32_t now = plat_ms(), el = now - eng_last_ms;
     eng_last_ms = now;
+    if (eng.out_len)
+        engine_drain();
     ds_tick(&eng, (double)el / 1000.0);
-    if (eng.out_len) {
-        uint32_t i;
-        for (i = 0; i < eng.out_len; ) {
-            /* one packet per message: status|d1|d2 is 3 bytes for the messages
-             * this engine sends (note on/off, CC), 2 for a program change */
-            uint8_t st = eng.out[i];
-            uint32_t n = ((st & 0xF0u) == 0xC0u || (st & 0xF0u) == 0xD0u) ? 2u : 3u;
-            uint32_t pkt = (uint32_t)st << 8;
-            if (n >= 2 && i + 1 < eng.out_len) pkt |= (uint32_t)eng.out[i + 1] << 16;
-            if (n >= 3 && i + 2 < eng.out_len) pkt |= (uint32_t)eng.out[i + 2] << 24;
-            if (!plat_midi_out_room(TO_USB | TO_BLE))
-                break;                             /* full: keep it for the next frame */
-            plat_midi_send(pkt, TO_USB | TO_BLE);
-            eng_sent += n;
-            i += n;
-        }
-        if (i) {                                   /* drop what went out */
-            uint32_t k;
-            for (k = 0; k + i < eng.out_len; k++)
-                eng.out[k] = eng.out[k + i];
-            eng.out_len -= i;
-        }
-    }
+    if (eng.out_len)
+        engine_drain();
 }
 
 static void engine_init(void)
@@ -391,7 +441,11 @@ static void ble_device_button(void)
 #include "ui/ui_screens.c"
 #include "ui/ui_edit.c"
 
-void app_input_only(void) { ui_input_poll(); }
+void app_input_only(void)
+{
+    ui_input_poll();
+    ui_midi_dispatch();                      /* MIDI in as input, on the same schedule */
+}
 
 void app_ui_init(void)
 {
@@ -408,6 +462,7 @@ void app_ui_init(void)
 void app_frame(void)
 {
     ui_input_poll();
+    ui_midi_dispatch();                      /* MIDI in as input, on the same schedule */
     engine_tick();                           /* the sequencer runs on real delta time */
     if (FM1B_BLE_CENTRAL) {                  /* looking: a device found is named at once (REC connects to it) */
         static int found;

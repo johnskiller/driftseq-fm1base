@@ -108,6 +108,14 @@ static uint8_t key_black_id(uint8_t ord)           /* black ordinal -> key id */
     return 0xFF;
 }
 
+/* Velocity: the panel writes 100 everywhere; a controller says what it played.
+ * Rather than rewrite the step afterwards (a second write, and it can pick the
+ * wrong voice when several share a note), the dispatch hands the real velocity
+ * down and the write sites use it -- one override point per 100, right where
+ * the 100 was. Declared before the write sites that read it (unity build: this
+ * file IS the order). */
+static uint8_t midi_vel = 100;                   /* the note being dispatched now */
+
 /* black-key ordinal -> drum lane; white key -> step-in-page.
  * r16j key dispatch (mode/focus aware):
  *   grid+drum  : black = pick drum + audition, white = toggle that drum
@@ -184,7 +192,7 @@ static void panel_key_handler(uint8_t key, uint8_t down)
         if (down) {
             while (tr->steps[s].nvoices)          /* override, not append */
                 ds_voice_remove(tr, s, tr->steps[s].v[0].note);
-            ds_voice_add(tr, s, (uint8_t)note, 100, 1);
+            ds_voice_add(tr, s, (uint8_t)note, midi_vel, 1);
             tr->steps[s].on = 1;                  /* revive rest steps on write */
             edit_voice = 0;
             if (cursor < 63u) cursor++;           /* rev.9: advance, dead-stop */
@@ -236,12 +244,12 @@ static void edit_key_handler(uint8_t key, uint8_t down)
              * so the hero drew a line across the entire 1/4 note for what the
              * user heard (and intended) as a single 1/16 hit. The hero was
              * telling the truth about the data; the data was wrong. */
-            ds_voice_add(tr, cursor, (uint8_t)note, 100, 1);
+            ds_voice_add(tr, cursor, (uint8_t)note, midi_vel, 1);
             edit_voice = (uint8_t)(st->nvoices - 1);       /* new voice active */
         } else {                                           /* full: replace highest */
             voices_sorted(sel_track, cursor);
             ds_voice_remove(tr, cursor, sort_vs[3][0]);
-            ds_voice_add(tr, cursor, (uint8_t)note, 100, 1);
+            ds_voice_add(tr, cursor, (uint8_t)note, midi_vel, 1);
             edit_voice = 3;
         }
         st->on = 1;
@@ -257,6 +265,85 @@ static void edit_key_handler(uint8_t key, uint8_t down)
 static void panel_key_up(uint8_t key)
 {
     panel_key_handler(key, 0);
+}
+
+/* ---- MIDI notes as keys (and out-of-range notes as audition) ---------------
+ * A MIDI note does what the panel key for that note does: the SAME dispatch
+ * (r16j parity), so pads and the keybed are two fronts of one instrument.
+ *
+ * The pitch math differs from the panel only in where the note comes from:
+ *   in range  -> panel key = note - 53 - shift; the full grid behaviour
+ *                (drum pick, step entry, EDIT layer) falls out of it, with the
+ *                MIDI velocity written where the panel writes 100;
+ *   otherwise -> audition only (ds_live_on/off), never a write: the keybed
+ *                covers 25 notes, a sound module covers the whole GM range, and
+ *                writing the top of it into a 64-step pattern by accident would
+ *                be worse than not writing.
+ * Drums ignore the keybed window: the lane is whichever GM_DRUMS entry the note
+ * names, on any octave a controller sends. The panel's white-key fallbacks
+ * (kick, selected drum) stay panel-only: a pad says exactly what it means.
+ *
+ * Velocity: the panel writes 100 everywhere; a controller says what it played.
+ * Rather than rewrite the step afterwards (a second write, and it can pick the
+ * wrong voice when several share a note), the dispatch hands the real velocity
+ * down and the write sites use it -- one override point per 100, right where
+ * the 100 was. */
+static void ui_midi_note(int32_t note, uint8_t down, uint8_t vel)
+{
+    midi_vel = vel ? vel : 100;                  /* a 0-velocity note-on is an off */
+    if (is_drum_trk()) {
+        uint8_t bi;
+        for (bi = 0; bi < NDRUM; bi++)
+            if (GM_DRUMS[bi] == (uint32_t)note)
+                break;
+        if (bi >= NDRUM)
+            bi = 0xFF;
+        if (down) {
+            if (bi != 0xFF) {                /* a lane's note: pick it and hear it */
+                if (ui_mode == M_GRID && !focus_layer)
+                    drum_sel = bi;
+                ds_live_on(&eng, sel_track, GM_DRUMS[bi], midi_vel);
+            } else
+                ds_live_on(&eng, sel_track, (uint8_t)note, midi_vel);
+        } else if (bi != 0xFF)
+            ds_live_off(&eng, sel_track, GM_DRUMS[bi]);
+        else
+            ds_live_off(&eng, sel_track, (uint8_t)note);
+        return;
+    }
+    {   /* melodic: shift by the same OCT+- the panel uses */
+        int32_t key = note - 53 - key_shift;
+        if (key >= 0 && key < 27)
+            panel_key_handler((uint8_t)key, down);          /* the whole grid behaviour */
+        else if (down)
+            ds_live_on(&eng, sel_track, (uint8_t)note, midi_vel);
+        else
+            ds_live_off(&eng, sel_track, (uint8_t)note);
+    }
+}
+
+/* the frame's queued messages, in order: MIDI start (FA) is play, stop (FC) is
+ * the panel's PLAY edge, continue (FB) the same as FA here; an edge only fires
+ * on a real change, because ds_play resets pos16 to loop_start -- it is NOT
+ * idempotent, and a DAW's redundant transport would rewind the sequencer every
+ * bar. */
+static void ui_midi_dispatch(void)
+{
+    while (midi_q_r != midi_q_w) {
+        uint32_t pkt = midi_q[midi_q_r++ % MIDI_Q];
+        uint32_t st = (pkt >> 8) & 0xFFu, d1 = (pkt >> 16) & 0x7Fu, d2 = pkt >> 24;
+        if ((st & 0xF0u) == 0x90u)
+            ui_midi_note((int32_t)d1, d2 != 0, (uint8_t)d2);
+        else if ((st & 0xF0u) == 0x80u)
+            ui_midi_note((int32_t)d1, 0, 0);
+        else if (st == 0xFAu || st == 0xFBu) {
+            if (!eng.playing)
+                ds_play(&eng);
+        } else if (st == 0xFCu) {
+            if (eng.playing)
+                ds_stop(&eng);
+        }
+    }
 }
 
 static void ui_poll(void)
