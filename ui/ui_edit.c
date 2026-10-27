@@ -25,6 +25,7 @@ static void ui_draw_edit_panel(void)
         } else {
             uint8_t note = sort_vs[r][0], vel = sort_vs[r][1], gate = sort_vs[r][2];
             uint8_t prob = st->prob;
+            uint16_t tcol = active ? WARMWHITE : BRIGHTTX;
             uint16_t hue = hue12(note);
             uint16_t desat = blend(hue, RGB565(128, 128, 128), (uint8_t)(255 - prob * 255 / 100));
             int vspan = 3 + vel * 231 / 127;         /* the bar IS the velocity */
@@ -32,20 +33,36 @@ static void ui_draw_edit_panel(void)
             cv_rect(3, y + 1, vspan, 23, desat);     /* bar = velocity */
             if (gate == 0xFF && eng.playing)
                 cv_rect(234, y + 1, 3, 23, C_WHITE); /* ∞ gate: running past */
-            {   /* text: "v1" NOTE "g" GATE "v" VEL "p" PROB at fixed columns */
-                int xs[5] = {7, 34, 84, 140, 188};
-                uint16_t tcol = active ? WARMWHITE : BRIGHTTX;
-                char *seg = txt_next();
-                seg[0] = 'v';
-                seg[1] = (char)('1' + r);
-                seg[2] = ' ';
-                seg[3] = st->on ? (char)((eng.playing && eng.pos16[sel_track] == cursor) ? '>' : 'o') : '-';
-                seg[4] = 0;
-                cv_text(xs[0], y + 5, &FONT_XS, seg, tcol);
-                cv_text(xs[1], y + 5, &FONT_XS, note_name2(note), tcol);
-                cv_text(xs[2], y + 5, &FONT_XS, txt_join("g", gate_str(gate)), tcol);
-                cv_text(xs[3], y + 5, &FONT_XS, txt_join("v", txt_num(0, vel)), tcol);
-                cv_text(xs[4], y + 5, &FONT_XS, txt_join("p", txt_num(0, prob)), tcol);
+            /* one BIG state glyph, where "v1..v4" used to sit (John: the
+             * ordinal is redundant -- row order IS the ordinal, high first).
+             * The glyph is the STEP state, shared by all four voice rows:
+             *   o = attacks (play)   - = rest (data dormant, revivable)
+             *   = = tied into the previous note (yellow: the one state that
+             *       changes what the OTHER rows' g means, so it gets the
+             *       alarm color, not a third glyph shape to memorize). */
+            cv_text(7, y + 2, &FONT_T,
+                    st->tie ? "=" : (st->on ? "o" : "-"),
+                    st->tie ? YELLOW : tcol);
+            {   /* text: NOTE "g" GATE "v" VEL "p" PROB at fixed columns */
+                int xs[4] = {34, 84, 140, 188};
+                /* g says what will SOUND, not what is stored: a tied step
+                 * never attacks (land() returns early), so its stored gate
+                 * is dead -- the hold belongs to the attack behind it, at
+                 * this row's pitch. Same number the grid line draws; "g-"
+                 * when no attack owns the hold. The txt_next() pair keeps
+                 * "g" and the value in separate buffers: gate_str() itself
+                 * takes a slot, and a step can tie across two rows. */
+                char *gs;
+                if (st->tie) {
+                    int eff = gate_display(TRK(), cursor, gate, note);
+                    gs = (eff >= 0) ? gate_str((uint8_t)(eff > 254 ? 254 : eff)) : "-";
+                } else {
+                    gs = gate_str(gate);
+                }
+                cv_text(xs[0], y + 5, &FONT_XS, note_name2(note), tcol);
+                cv_text(xs[1], y + 5, &FONT_XS, txt_join("g", gs), tcol);
+                cv_text(xs[2], y + 5, &FONT_XS, txt_join("v", txt_num(0, vel)), tcol);
+                cv_text(xs[3], y + 5, &FONT_XS, txt_join("p", txt_num(0, prob)), tcol);
             }
         }
         if (active) {                                /* r16j: yellow card outline */

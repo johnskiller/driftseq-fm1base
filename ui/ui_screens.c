@@ -208,6 +208,35 @@ static int gate_run_cells(const ds_track *t, uint8_t s, uint8_t gate)
     return cells;
 }
 
+/* effective gate for the EDIT panel: what the engine will DO with this row,
+ * not what is stored. An attack row sounds its own gate plus the tie run
+ * after it (gate_run_cells == the very length the grid line draws). A tied
+ * row never attacks (land() returns early): the sounding hold belongs to the
+ * nearest attack behind it -- prefer that attack's voice at the SAME pitch,
+ * else its first voice. -1 = nothing owns this hold (a rest breaks it). */
+static int gate_display(const ds_track *t, uint8_t s, uint8_t gate, uint8_t note)
+{
+    uint32_t start = t->loop_start, len = t->loop_len, rel, d;
+    if (!len) return -1;
+    rel = (s + 64u - start) & 63u;
+    if (rel >= len) return -1;
+    if (!t->steps[s].tie)
+        return t->steps[s].on ? gate_run_cells(t, s, gate) : -1;
+    for (d = 1; d <= rel; d++) {                /* nearest attack looking back */
+        const ds_step *pv = &t->steps[(start + rel - d) & 63];
+        uint8_t vi;
+        if (pv->on && pv->nvoices) {
+            for (vi = 0; vi < pv->nvoices; vi++)
+                if (pv->v[vi].note == note)     /* the hold at THIS row's pitch */
+                    return gate_run_cells(t, (uint8_t)((s + 64u - d) & 63u),
+                                          pv->v[vi].gate);
+            return gate_run_cells(t, (uint8_t)((s + 64u - d) & 63u), pv->v[0].gate);
+        }
+        if (!pv->tie) break;                    /* a rest breaks the hold */
+    }
+    return -1;
+}
+
 /* ---- "the knob you are turning says its value" -------------------------
  *
  * John: "每个旋钮改变时在旋钮位置显示value，停下来后恢复旋钮提示".
