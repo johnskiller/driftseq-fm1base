@@ -27,7 +27,15 @@
 enum { SC_MAJ, SC_MIN, SC_DOR, SC_MIX, SC_HMI, SC_PMAJ, SC_PMIN, SC_BLU, SC_CHR, SC_NKIND };
 /* pitch-class sets, bit n = tonic+n sounds */
 static const uint16_t SC_SET[SC_NKIND] = {
-    0x0AB5, 0x09AD, 0x06AD, 0x0AD5, 0x09B5, 0x05A9, 0x04A9, 0x0CEF, 0x0FFF
+    0x0AB5,                                    /* MAJ  0 2 4 5 7 9 11 */
+    0x05AD,                                    /* MIN  0 2 3 5 7 8 10 */
+    0x06AD,                                    /* DOR  0 2 3 5 7 9 10 */
+    0x06B5,                                    /* MIX  0 2 4 5 7 9 10 */
+    0x09AD,                                    /* HMI  0 2 3 5 7 8 11 */
+    0x0295,                                    /* PMAJ 0 2 4 7 9 */
+    0x04A9,                                    /* PMIN 0 3 5 7 10 */
+    0x04E9,                                    /* BLU  0 3 5 6 7 10 */
+    0x0FFF                                     /* CHR  everything */
 };
 
 enum { OC_MAJ, OC_MIN, OC_DIM, OC_SIX, OC_SEV, OC_M7, OC_SUS, OC_ADD9, OC_NCOMP };
@@ -319,6 +327,60 @@ static const char *const SC_FULL[SC_NKIND] = {
     "PENT.MINOR", "BLUES", "CHROMATIC"
 };
 
+/* The diagram greys by SPELLING, not by pitch class (John: C# major must grey
+ * the C key even though B# shares its pitch class — the key signature says
+ * every letter is sharped). Degrees are (letter, pitch) pairs: letters walk
+ * one per degree (floor(interval * 7 / 12) from the tonic's letter); a key is
+ * lit iff a degree shares its letter AND its pitch. The tonic's letter is the
+ * one spelling the scale with the fewest accidentals. CHROMATIC lights all.
+ * Returns the lit mask over the 27 key ids (bit k = key k). */
+static uint32_t sc_spell_keys(void)
+{
+    /* tonic's conventional letter: C C# D Eb E F F# G G# A Bb B */
+    static const int8_t TONIC_L[12] = {0, 0, 1, 2, 2, 3, 3, 4, 4, 5, 6, 6};
+    static const int8_t BASE[7] = {0, 2, 4, 5, 7, 9, 11};       /* C D E F G A B */
+    static const int8_t PCL[12] = {0, 0, 1, 1, 2, 3, 3, 4, 4, 5, 5, 6}; /* pc -> lower letter */
+    uint16_t set = SC_SET[sc_kind];
+    uint32_t lit = 0;
+    int8_t iv[12], deg_pc[12];
+    int n = 0, n_deg;
+
+    if (sc_kind == SC_CHR)                                      /* every key lit */
+        return ~0u;
+    for (int i = 0; i < 12; i++)
+        if (set >> i & 1) iv[n++] = i;
+
+    if (n == 7) {                       /* diatonic: one letter per degree, ascending — the key
+                                         * signature's own spelling, so C# major greys the C key */
+        for (int d = 0; d < 7; d++) {
+            int dpc = (sc_tonic + iv[d]) % 12;
+            int L = (TONIC_L[sc_tonic] + d) % 7;
+            int acc = dpc - BASE[L];
+            if (acc > 6) acc -= 12;
+            if (acc < -6) acc += 12;
+            deg_pc[d] = (BASE[L] + acc + 12) % 12;
+        }
+        n_deg = 7;
+    } else                              /* pentatonic / blues: no signature — pitch classes */
+        for (int d = 0; d < n; d++) deg_pc[d] = (sc_tonic + iv[d]) % 12;
+
+    /* light every key matching a degree's letter AND pitch (diatonic) or just
+     * its pitch (pentatonic); a black key carries either boundary letter */
+    for (int k = 0; k < 27; k++) {
+        int pc = (k + 5) % 12;                                  /* id 0 = F3 */
+        int black = (pc == 1 || pc == 3 || pc == 6 || pc == 8 || pc == 10);
+        for (int d = 0; d < n_deg; d++) {
+            if (deg_pc[d] != pc) continue;
+            if (n < 7 || PCL[pc] == ((TONIC_L[sc_tonic] + d) % 7) ||
+                (black && (PCL[pc] + 1) % 7 == ((TONIC_L[sc_tonic] + d) % 7))) {
+                lit |= 1u << k;
+                break;
+            }
+        }
+    }
+    return lit;
+}
+
 static void draw_scale(void)
 {
     uint8_t i;
@@ -330,6 +392,8 @@ static void draw_scale(void)
     cv_text(8, 46, &FONT_T, "CHORD KEYS", C_AMB);
     cv_text(96, 46, &FONT_T, sc_ofc ? "ON" : "OFF", sc_ofc ? C_HI : C_GRAY);
 
+
+
     /* the keybed IS the scale display (John: 不在 scale 中的键 grey out): 27
      * keys F3..G5 in real piano arrangement. In-scale keys render true piano
      * (white bright, black dark); out-of-scale keys grey out. The tonic's
@@ -339,10 +403,11 @@ static void draw_scale(void)
         const uint8_t BLACK_LOW[11] = {0, 1, 2, 4, 5, 7, 8, 9, 11, 12, 14};  /* key -> lower white ordinal */
         const uint8_t BLACK_KEY[11] = {1, 3, 5, 8, 10, 13, 15, 17, 20, 22, 25};
         int x0 = 14, y0 = 72, kw = 11, kp = 13;
+        uint32_t lit = sc_spell_keys();              /* spelled degrees, see above */
         for (i = 0; i < 16; i++) {                   /* the white keys */
             uint8_t k = WHITE_KEYS[i];
             int pc = (k + 5) % 12;                   /* id 0 = F3: pc = (F3 + k) % 12 */
-            int in_scale = (SC_SET[sc_kind] >> ((pc + 12 - sc_tonic) % 12) & 1);
+            int in_scale = (lit >> k & 1);
             int tonic = (pc == sc_tonic);
             uint16_t col = in_scale ? C_WHITE : C_GRAY;
             if (sc_root_key != 0xFF && k == sc_root_key) col = C_AMB;
@@ -356,10 +421,9 @@ static void draw_scale(void)
         }
         for (i = 0; i < 11; i++) {                   /* the black keys, real offsets */
             uint8_t k = BLACK_KEY[i];
-            int pc = (k + 5) % 12;                   /* id 0 = F3 (see the whites) */
-            int in_scale = (SC_SET[sc_kind] >> ((pc + 12 - sc_tonic) % 12) & 1);
+            int in_scale = (lit >> k & 1);
             int x = x0 + BLACK_LOW[i] * kp + kw - 3; /* straddling the boundary */
-            uint16_t col = in_scale ? C_BLACK : C_LINE;   /* out of scale: dim grey */
+            uint16_t col = in_scale ? C_BLACK : C_DIM;    /* out of scale: clearly lighter than black */
             if (sc_root_key != 0xFF && k == sc_root_key) col = C_AMB;
             cv_rect(x, y0, 7, 24, col);
         }
