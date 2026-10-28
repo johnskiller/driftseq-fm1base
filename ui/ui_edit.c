@@ -556,6 +556,10 @@ static void ui_encoder(uint8_t enc, int8_t det)
         }
         return;
     }
+    if (ui_mode == M_SCALE) {                     /* the SCALE page owns K1..K4 */
+        scale_encoder(enc, det);
+        return;
+    }
     /* r16j panelEnc: SELECT is context-aware, not global —
      * ARP page + non-EDIT = track; EDIT layer (melodic) = active voice.
      * (drum EDIT resolves its voice by drum_sel, never via SELECT) */
@@ -588,6 +592,8 @@ static void ui_button(uint8_t btn, uint8_t down, uint8_t released)
     (void)down;
     if (!released)
         return;                                   /* everything fires on the release edge */
+    if (scale_button(btn))
+        return;                                   /* SEL/the SCALE page consumed it */
     if (jam_menu) {                               /* the menu owns SAVE/HOME until it closes */
         if (btn == B_SAVE) {
             jam_menu_act(jam_menu_sel);
@@ -669,4 +675,13 @@ static void ui_init(void)
     glo_held = 0;
     sel_track = 0;
     jam_menu_close();                        /* boot: no menu, no ttl */
+    /* the SCALE page's live-only state (ui_scale.c): boot = MAJ/C/OFC off */
+    sc_kind = SC_MAJ;
+    sc_tonic = 0;
+    sc_ofc = 0;
+    sc_root_oct = 0;
+    sc_root_key = 0xFF;
+    sc_mask = 0;
+    sc_last_valid = 0;
+    sc_tones_n = 0;
 }

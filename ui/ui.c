@@ -7,7 +7,7 @@
  * v1 scope (b42a5eb): step rec/play/edit + USB out. EAS GM = batch 2. */
 
 /* ---- UI state (emu globals parity) ---- */
-enum { M_HOME = 0, M_GRID, M_ARP };
+enum { M_HOME = 0, M_GRID, M_ARP, M_SCALE };
 static uint8_t ui_mode = M_HOME;
 static uint8_t focus_layer;                  /* 0 base 1 EDIT (GRID only) */
 static uint8_t cursor;                       /* 0..63, dead-stop */
@@ -21,6 +21,12 @@ static uint8_t sel_track;
 static void voices_sorted(uint8_t t, uint8_t s);
 static uint8_t sort_vs[4][3];
 static void edit_key_handler(uint8_t key, uint8_t down);
+/* ui_scale.c (included last): the SCALE page + one-finger chords */
+static uint8_t scale_key_hook(uint8_t key, uint8_t down);
+static void scale_encoder(uint8_t enc, int8_t det);
+static uint8_t scale_button(uint8_t btn);
+static void draw_scale(void);
+static void scale_leds(uint32_t *litK, uint32_t *litB, uint8_t is_drum);
 
 static ds_track *TRK(void) { return &eng.pat.track[sel_track]; }
 static uint8_t is_drum_trk(void) { return TRK()->channel == 9; }
@@ -97,7 +103,8 @@ static void ui_draw(void)
     if (ui_mode == M_HOME) draw_home();
     else if (ui_mode == M_GRID) {
         if (is_drum_trk()) draw_grid_drum(); else draw_grid_melodic();
-    } else draw_arp();
+    } else if (ui_mode == M_SCALE) draw_scale();
+    else draw_arp();
 }
 
 /* ---- input routing (emu panelEnc/panelButton/panelKey parity) ---- */
@@ -173,6 +180,8 @@ static uint8_t midi_vel = 100;                   /* the note being dispatched no
  * EDIT layer: keys edit voices (batch 3) — no grid writes now. */
 static void panel_key_handler(uint8_t key, uint8_t down)
 {
+    if (scale_key_hook(key, down))
+        return;                                       /* the scale/OFC layer consumed it */
     if (ui_mode != M_GRID) {                          /* non-grid: live audition only */
         int note;
         if (is_drum_trk()) {
@@ -512,6 +521,8 @@ static void ui_leds(uint32_t *litK, uint32_t *dimK, uint32_t *litB, uint32_t *di
 
     if (tr->mute)                    /* muted track: no hit LEDs, ruler stays */
         *litK = 0;
+
+    scale_leds(litK, litB, is_drum);                 /* the SCALE/OFC zone lights (ui_scale.c) */
 
     /* button LEDs (only states that actually exist in v1 — REC is a momentary
      * cursor-step toggle, not an armed mode, so it has no idle light) */

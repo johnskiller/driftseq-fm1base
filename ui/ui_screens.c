@@ -344,6 +344,10 @@ static void ui_draw_footer(void)
     } else if (ui_mode == M_ARP) {
         for (k = 0; k < 4; k++)
             cv_text(FX[k], 6, &FONT_T, FOOT_ARP[k], FOOT_GRAY);
+    } else if (ui_mode == M_SCALE) {
+        static const char *const FOOT_SCALE[4] = {"KIND", "KEY", "OFC", ""};
+        for (k = 0; k < 4; k++)
+            cv_text(FX[k], 6, &FONT_T, FOOT_SCALE[k], FOOT_GRAY);
     } else if (glo_held && ui_mode != M_ARP) {
         const char *const *f = (ui_mode == M_HOME) ? FOOT_GLO_HOME : FOOT_GLO_GRID;
         for (k = 0; k < 4; k++)

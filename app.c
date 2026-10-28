@@ -594,6 +594,7 @@ static void ble_device_button(void)
 #include "ui/ui.c"
 #include "ui/ui_input.c"
 #include "ui/ui_screens.c"
+#include "ui/ui_scale.c"
 #include "ui/ui_edit.c"
 
 void app_input_only(void)
@@ -649,6 +650,16 @@ int app_expect(const char *what, int *got)
         *got = eas_ok;
     else if (!strcmp(what, "gm_pool"))
         *got = eas_pool_peak();
+    else if (!strcmp(what, "scale"))             /* the SCALE page: kind<<8 | tonic */
+        *got = (sc_kind << 8) | sc_tonic;
+    else if (!strcmp(what, "ofc"))
+        *got = sc_ofc;
+    else if (!strcmp(what, "ofc_mask"))
+        *got = (sc_mask << 8) | (sc_root_key == 0xFF ? 0x7F : sc_root_key);
+    else if (!strcmp(what, "step0"))             /* step 0's voice count + first voice */
+        *got = (TRK()->steps[0].nvoices << 8) | (TRK()->steps[0].nvoices ? TRK()->steps[0].v[0].note : 0);
+    else if (!strcmp(what, "snapped"))           /* the cursor step's first voice, post-snap */
+        *got = TRK()->steps[cursor].nvoices ? TRK()->steps[cursor].v[0].note : -1;
     else
         return 0;
     return 1;
