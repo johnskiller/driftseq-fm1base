@@ -481,7 +481,12 @@ void ds_jam_capture(ds_state *s, uint8_t note, uint8_t vel, uint8_t down)
 {
     int i;
     if (down) {
-        ds_voice_add(&s->jam, ds_jam_pos(s), note, vel, 1);   /* same-note dedupe: -2 ignored */
+        /* a re-hit rewrites its pitch in the slot (John 2026-10-28: replace, not
+         * overdub): the previous pass's same note must not outvote the new one's
+         * vel/gate, and a plain add would swallow the re-hit (-2 dedupe). Chord
+         * mates - a different pitch in the same slot - survive the rewrite. */
+        ds_voice_remove(&s->jam, ds_jam_pos(s), note);
+        ds_voice_add(&s->jam, ds_jam_pos(s), note, vel, 1);
         for (i = 0; i < s->jam_held_n; i++)
             if (s->jam_held[i].note == note) { s->jam_held[i].on = s->jam_abs; return; }
         if (s->jam_held_n < 8) {

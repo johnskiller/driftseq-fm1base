@@ -129,7 +129,9 @@ typedef struct {
      * merges it into a real track. jam_abs is the absolute step counter since
      * the last reset (the wrap is jam_abs & 63), jam_acc the sub-step rest.
      * melodic notes land at key-DOWN with a provisional gate of 1 and are
-     * closed at key-UP; jam_held is the pool of notes still waiting. */
+     * closed at key-UP; jam_held is the pool of notes still waiting. A re-hit
+     * rewrites its pitch in the slot (replace, not overdub: the last thing
+     * played is what SAVE keeps); other pitches in the slot survive. */
     ds_track    jam;
     uint32_t    jam_abs;
     double      jam_acc;
