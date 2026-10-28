@@ -111,6 +111,7 @@ kbd { font: 600 .85em ui-monospace, Menlo, monospace; background: var(--card); b
 <body>
 <header>
   <h1>{{NAME}}</h1>
+  <p class="turn">{{BUILD}}</p>
 </header>
 <main>
 <h2 class="sr">The FM-1</h2>
@@ -892,8 +893,14 @@ function onMidiOut(bytes) {
 /* A very small stand-in for what the FM-1 would drive: one oscillator per
  * channel/note, a square with a 10 ms envelope. It is a monitoring aid -- it is
  * NOT the FM-1's sound and makes no claim to be -- so it only runs when no MIDI
- * output is selected, and MASTER does not touch it. */
+ * output is selected, and MASTER does not touch it. This app always has its own
+ * GM engine (EAS sounds every track channel locally), so the preview never
+ * plays note on/off — it would drone a square under the real GM voice, and its
+ * note-off lookup (status+note key) missed proper 0x80 offs anyway, so the
+ * square sustained forever (John 2026-10-28). CC/PC/system still echo here;
+ * a future app without an internal sound source can re-enable the note path. */
 const preview = { ctx: null, gain: null, voices: new Map() };
+const PREVIEW_NOTES = false;
 function previewSilence(now) {
   for (const [id, v] of preview.voices) {
     v.g.gain.setTargetAtTime(0.0001, now, 0.02);
@@ -922,6 +929,8 @@ function previewMidi(bytes) {
     const d1 = bytes[i + 1] ?? 0, d2 = bytes[i + 2] ?? 0;
     i += len;
     if (st >= 0xf0) continue;                                                  // clock, start, stop: nothing to play
+    if (!PREVIEW_NOTES && (t === 0x90 || t === 0x80))
+        continue;                                                              // the GM engine owns the notes
     if (t === 0x90 && d2 > 0) {
       const id = st + ":" + d1;
       const old = preview.voices.get(id);
@@ -935,7 +944,10 @@ function previewMidi(bytes) {
       o.start(now);
       preview.voices.set(id, { o, g });
     } else if (t === 0x80 || (t === 0x90 && d2 === 0)) {
-      const id = st + ":" + d1, v = preview.voices.get(id);
+      /* the voice was stored under its note-on status (0x90|ch): a proper 0x80
+       * note-off must look it up under 0x90|ch, not 0x80|ch, or it never stops
+       * (John 2026-10-28: "Message 栏显示发了 noteoff，但音不停") */
+      const id = (t === 0x80 ? st | 0x10 : st) + ":" + d1, v = preview.voices.get(id);
       if (v) {
         v.g.gain.setTargetAtTime(0.0001, now, 0.02);
         v.o.stop(now + 0.2);
