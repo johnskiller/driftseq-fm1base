@@ -82,6 +82,107 @@ static void note_off(int32_t note)
         voice_note = -1;
 }
 
+/* ------------------------------------------------------------------ GM --- */
+/* The Sonivox EAS wavetable synth (eas/eas_unity.c, its own -O2 unit): the
+ * pattern's notes as real sounds, until now the app was silent but for the
+ * template's beep voice above.
+ *
+ * The engine (ui_glue.c) routes a playing step to gm_on/off and a MIDI-in note
+ * goes to both EAS and the template voice. EAS renders 128 stereo frames per
+ * call at 22050 Hz -- exactly one app_render block (256 frames at 44100) --
+ * and the call is linear upsampled by 2 into the mix. Its render interval is
+ * the app block by construction, not by luck: AUDIO_FRAME_LENGTH (1486/256 ms
+ * at 22050) matches n=256 at 44100 to within a sample.
+ *
+ * EAS_PCM is int16; its full scale is 32767, and the master's int32 window is
+ * ~8.3 M (fm1-base's codec convention), so one EAS point maps to <<8.
+ * EAS's own master volume is set to full and the FM-1's MASTER knob is applied
+ * here, once per block, with the same glide the template voice uses. */
+#include "eas.h"
+
+static EAS_DATA_HANDLE eas_data;
+static EAS_HANDLE eas_stream;                    /* the live MIDI stream into the synth */
+static EAS_I32 eas_prev_l, eas_prev_r;           /* last upsampled pair (the interpolation's left point) */
+static uint8_t eas_ok;                           /* EAS_Init succeeded (else the app runs without it) */
+
+int eas_pool_peak(void);                         /* eas_host_fm1.c: the pool's high-water (diagnostics) */
+
+static void gm_start(void)
+{
+    if (EAS_Init(&eas_data) != EAS_SUCCESS) {
+        eas_data = NULL;
+        return;
+    }
+    if (EAS_OpenMIDIStream(eas_data, &eas_stream, NULL) != EAS_SUCCESS) {
+        eas_stream = NULL;
+        return;
+    }
+    EAS_SetVolume(eas_data, NULL, 100);          /* EAS master to full; MASTER is ours */
+    eas_prev_l = eas_prev_r = 0;
+    eas_ok = 1;
+}
+
+static void gm_stop(void)                        /* all notes off, EAS kept (a panic, not a shutdown) */
+{
+    static const uint8_t cc[3] = {0xB0, 123, 0};
+    if (!eas_ok)
+        return;
+    EAS_WriteMIDIStream(eas_data, eas_stream, (EAS_U8 *)cc, 3);
+}
+
+static void gm_on(uint8_t ch, uint8_t note, uint8_t vel)
+{
+    uint8_t b[3] = {(uint8_t)(0x90u | (ch & 15u)), note, vel};
+    if (eas_ok)
+        EAS_WriteMIDIStream(eas_data, eas_stream, b, 3);
+}
+static void gm_off(uint8_t ch, uint8_t note)
+{
+    uint8_t b[3] = {(uint8_t)(0x80u | (ch & 15u)), note, 0};
+    if (eas_ok)
+        EAS_WriteMIDIStream(eas_data, eas_stream, b, 3);
+}
+static void gm_cc(uint8_t ch, uint8_t num, uint8_t val)
+{
+    uint8_t b[3] = {(uint8_t)(0xB0u | (ch & 15u)), num, val};
+    if (eas_ok)
+        EAS_WriteMIDIStream(eas_data, eas_stream, b, 3);
+}
+static void gm_pc(uint8_t ch, uint8_t prog)
+{
+    uint8_t b[2] = {(uint8_t)(0xC0u | (ch & 15u)), prog};
+    if (eas_ok)
+        EAS_WriteMIDIStream(eas_data, eas_stream, b, 2);
+}
+
+/* one block: EAS renders its 128-frame frame, the result is upsampled by two
+ * (linear between the frames, hold at the seam) and mixed into lr. gain is the
+ * plain 0..1 MASTER (the pcm is ALREADY <<8 to the codec window; multiplying by
+ * the window again is a 32 000x overflow, the rail the host sim's peak reads). */
+static void gm_render(int32_t *lr, uint32_t n, float gain)
+{
+    EAS_PCM buf[128 * 2];
+    EAS_I32 got = 0;
+    uint32_t i;
+    if (!eas_ok || EAS_Render(eas_data, buf, 128, &got) != EAS_SUCCESS || got <= 0)
+        return;
+    for (i = 0; i < (uint32_t)got; i++) {
+        int32_t l = (int32_t)buf[2 * i] << 8, r = (int32_t)buf[2 * i + 1] << 8;
+        uint32_t j = i * 2;
+        float lmid = (float)(eas_prev_l + l) * 0.5f, rmid = (float)(eas_prev_r + r) * 0.5f;
+        if (j < n) {                             /* odd: the midpoint between frames */
+            lr[2 * j] += (int32_t)(lmid * gain);
+            lr[2 * j + 1] += (int32_t)(rmid * gain);
+        }
+        if (j + 1 < n) {
+            lr[2 * (j + 1)] += (int32_t)((float)l * gain);
+            lr[2 * (j + 1) + 1] += (int32_t)((float)r * gain);
+        }
+        eas_prev_l = l;
+        eas_prev_r = r;
+    }
+}
+
 /* ---- MIDI in -> the UI ---------------------------------------------------- */
 /* midi_in() runs in the audio interrupt and step entry writes the pattern, so
  * the handoff to the UI is a ring drained once a frame (ui_midi_dispatch). One
@@ -131,10 +232,17 @@ static void midi_in(void)                    /* audio interrupt: the packets tha
         }
         if (dispatch && midi_q_w - midi_q_r < MIDI_Q)
             midi_q[midi_q_w++ % MIDI_Q] = dispatch;
-        if ((st & 0xF0u) == 0x90u && d2)
-            note_on((int32_t)d1, d2);        /* the template's beep voice: still the first sound */
-        else if ((st & 0xF0u) == 0x80u || (st & 0xF0u) == 0x90u)
-            note_off((int32_t)d1);
+        /* Notes are NOT played here: ui_midi_dispatch routes them through the engine, so the
+         * sound carries the selected track's program and channel, and the engine's note-offs
+         * (key-up AND the 2-cell live auto-gate) reach the same EAS channel that started the
+         * note. The old code here started a template beep voice (never note_off'd by the
+         * engine's offs: it sustained forever -- John 2026-10-28 "melody track 一直 sustain")
+         * and a second EAS voice on hardcoded ch0 whose channel never matched the engine's
+         * off. CC and PC stay: nothing else forwards a controller to EAS. */
+        if ((st & 0xF0u) == 0xB0u)
+            gm_cc(0, (uint8_t)d1, (uint8_t)d2);
+        else if ((st & 0xF0u) == 0xC0u)
+            gm_pc(0, (uint8_t)d1);
     }
 }
 
@@ -158,12 +266,15 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
         lr[2 * i] = (int32_t)s;
         lr[2 * i + 1] = (int32_t)s;
     }
+    gm_render(lr, n, gain_now / 8300000.0f);  /* the GM synth mixed after the beep voice;
+                                               * gain_now is the codec-window gain, the GM wants the plain 0..1 */
 }
 
 void app_panic(void)
 {
     voice_note = -1;
     voice_level = 0.0f;
+    gm_stop();
 }
 
 /* --------------------------------------------------------------- settings --- */
@@ -216,6 +327,16 @@ static void engine_drain(void)
             break;                                 /* full: keep it for the next frame */
         plat_midi_send(pkt, TO_USB | TO_BLE);
         eng_sent += n;
+        /* and into the GM synth: the wire hears it, the local sound does too.
+         * d1/d2 live just past the status byte. */
+        if ((st & 0xF0u) == 0x90u)
+            gm_on(st & 15u, (uint8_t)(pkt >> 16), (uint8_t)(pkt >> 24));
+        else if ((st & 0xF0u) == 0x80u)
+            gm_off(st & 15u, (uint8_t)(pkt >> 16));
+        else if ((st & 0xF0u) == 0xB0u)
+            gm_cc(st & 15u, (uint8_t)(pkt >> 16), (uint8_t)(pkt >> 24));
+        else if ((st & 0xF0u) == 0xC0u)
+            gm_pc(st & 15u, (uint8_t)(pkt >> 16));
         i += n;
     }
     if (i) {                                       /* drop what went out */
@@ -262,6 +383,7 @@ void app_init(void)
         || set.octave < -2 || set.octave > 2 || set.wave > 1u || set.ble_off > 1u)
         settings_defaults();
     engine_init();
+    gm_start();                              /* the GM synth; on failure eas_ok stays 0 and the app runs beep-only */
 }
 
 /* --------------------------------------------------------------------- UI --- */
@@ -493,6 +615,10 @@ int app_expect(const char *what, int *got)
         *got = cursor;
     else if (!strcmp(what, "track"))
         *got = sel_track;
+    else if (!strcmp(what, "gm"))            /* GM diagnostics: eas_ok | voices<<8 (EAS internals below) */
+        *got = eas_ok;
+    else if (!strcmp(what, "gm_pool"))
+        *got = eas_pool_peak();
     else
         return 0;
     return 1;

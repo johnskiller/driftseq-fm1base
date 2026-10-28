@@ -28,6 +28,19 @@
  * relicensed first. That is a product decision, not a build detail. */
 #pragma once
 
+/* memset too, and deliberately a declaration only: this header is
+ * force-included (-include, fm1.toml o2_include) ahead of everything, so its
+ * #pragma once would silence the host's real <string.h> and eas_wtsynth.c's
+ * memset call would lose its declaration there. On the device the definition
+ * is bsp/chip/libc.c's; on the host/web it is libc's -- the same symbol either
+ * way, only the declaration lives here. memcpy and memcmp as well -- plat_host.c
+ * and pack.c compile in units that include this header (the -I puts eas_inc on
+ * the app's include path), so their calls would lose their declarations to
+ * #pragma once the same way. */
+void *memset(void *s, int c, unsigned long n);
+void *memcpy(void *d, const void *s, unsigned long n);
+int memcmp(const void *a, const void *b, unsigned long n);
+
 static inline int strcmp(const char *a, const char *b)
 {
     while (*a && *a == *b)

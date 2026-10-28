@@ -13,7 +13,13 @@ name = "driftseq"
 id_prefix = "FM-1_92"
 usb_manufacturer = "DriftSeq"
 usb_product = "DriftSeq FM-1"
-o2 = []                        # separate units at -O2 (an app's DSP) — none yet
+o2 = ["eas/eas_config_unit.c", "eas/eas_wtlib_unit.c", "eas/eas_unity.c"]
+                               # the Sonivox GM synth: config and the sound library apart (their
+                               # extern-vs-definition types only link across units), the rest one
+                               # unit; all at -O2 (EAS's float math)
+o2_cflags = ["-Ieas", "-Ieas_inc", "-Ieas/cutils"]  # eas.h, the strcmp shim, the Android log fakes
+o2_include = ["eas_inc/string.h"]  # strcmp for eas_sndlibmgt.c (the toolchain has no libc header)
+include = ["eas", "eas_inc"]   # app.c includes eas.h; eas_inc also answers <string.h> for the app's own unit
 # The Sonivox EAS tree and its wavetable are third-party Apache-2.0 code that
 # must not be edited, so they are excluded from the app's own checks: its
 # 212 KB sample table reads as literal addresses to mmio_check (0x00011c7c and
