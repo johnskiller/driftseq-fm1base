@@ -546,13 +546,19 @@ static uint8_t jam_gate_rescale(uint8_t gate16, uint8_t target_div)
 int ds_jam_save_merge(ds_state *s, uint8_t trk)
 {
     ds_track *t;
-    uint32_t i;
+    uint32_t k, start;
     uint8_t vi;
     if (trk >= DS_TRACKS) return -1;
     t = &s->pat.track[trk];
-    for (i = 0; i < DS_STEPS; i++) {
-        const ds_step *js = &s->jam.steps[i];
-        uint32_t dst = (i * 6u) / jam_ct(t->division);   /* ring tick -> target cell */
+    /* save the LAST 64 steps in chronological order, not the ring's physical
+     * layout: capture lands at jam_abs&63 and advances, so once the ring has
+     * wrapped the oldest retained step is (jam_abs+1)&63 — the playhead's next
+     * victim. k=0 walks from there; before the first wrap the phrase began at
+     * slot 0 and must stay where the player heard it. */
+    start = (s->jam_abs >= DS_STEPS) ? ((s->jam_abs + 1u) & (DS_STEPS - 1u)) : 0u;
+    for (k = 0; k < DS_STEPS; k++) {
+        const ds_step *js = &s->jam.steps[(start + k) & (DS_STEPS - 1u)];
+        uint32_t dst = (k * 6u) / jam_ct(t->division);   /* ring tick -> target cell */
         for (vi = 0; vi < js->nvoices; vi++)
             ds_voice_add(t, dst, js->v[vi].note, js->v[vi].vel,
                          jam_gate_rescale(js->v[vi].gate, t->division));
@@ -577,7 +583,7 @@ int ds_jam_save_replace(ds_state *s, uint8_t trk)
         uint8_t keep_channel = t->channel, keep_prog = t->prog, keep_route = t->route,
                keep_mute = t->mute, keep_voice_mode = t->voice_mode, keep_swing = t->swing_amt;
         ds_track fresh;
-        uint32_t i;
+        uint32_t k, start;
         uint8_t vi;
         ds_clear_track(&fresh);
         fresh.channel = keep_channel; fresh.prog = keep_prog; fresh.route = keep_route;
@@ -585,10 +591,11 @@ int ds_jam_save_replace(ds_state *s, uint8_t trk)
         fresh.swing_amt = keep_swing;
         fresh.division = s->jam.division;                /* the ring's grid: what was played is what is kept */
         fresh.loop_len = 64;
-        for (i = 0; i < DS_STEPS; i++) {
-            const ds_step *js = &s->jam.steps[i];
+        start = (s->jam_abs >= DS_STEPS) ? ((s->jam_abs + 1u) & (DS_STEPS - 1u)) : 0u;
+        for (k = 0; k < DS_STEPS; k++) {                 /* chronological: see merge */
+            const ds_step *js = &s->jam.steps[(start + k) & (DS_STEPS - 1u)];
             for (vi = 0; vi < js->nvoices; vi++)
-                ds_voice_add(&fresh, i, js->v[vi].note, js->v[vi].vel, js->v[vi].gate);
+                ds_voice_add(&fresh, k, js->v[vi].note, js->v[vi].vel, js->v[vi].gate);
         }
         *t = fresh;
     }
