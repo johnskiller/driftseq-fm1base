@@ -13,6 +13,9 @@ name = "driftseq"
 id_prefix = "FM-1_92"
 usb_manufacturer = "DriftSeq"
 usb_product = "DriftSeq FM-1"
+usb_pid = 0x9201               # own PID: macOS caches CoreMIDI port names by vid/pid/serial and the
+                               # family shares vid 0x1209 pid 0x0001 with no serial — driftseq inherited
+                               # fm1-ctrl's cached "FM-1 ctrl" endpoint (John 2026-10-28). Loader keeps 0x0002.
 o2 = ["eas/eas_config_unit.c", "eas/eas_wtlib_unit.c", "eas/eas_unity.c"]
                                # the Sonivox GM synth: config and the sound library apart (their
                                # extern-vs-definition types only link across units), the rest one
