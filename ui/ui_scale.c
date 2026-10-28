@@ -330,36 +330,34 @@ static void draw_scale(void)
     cv_text(8, 46, &FONT_T, "CHORD KEYS", C_AMB);
     cv_text(96, 46, &FONT_T, sc_ofc ? "ON" : "OFF", sc_ofc ? C_HI : C_GRAY);
 
-    /* the interval strip: one cell per semitone from the tonic, tonic framed */
-    for (i = 0; i < 12; i++) {
-        int in = (SC_SET[sc_kind] >> i & 1);
-        int x = 36 + i * 15;
-        if (in)
-            cv_rect(x, 70, 12, 14, TB_TX);
-        if (i == 0) {                                /* the tonic: an outline (4 rules) */
-            cv_rect(x - 2, 68, 16, 1, C_AMB); cv_rect(x - 2, 85, 16, 1, C_AMB);
-            cv_rect(x - 2, 68, 1, 18, C_AMB); cv_rect(x + 13, 68, 1, 18, C_AMB);
-        }
-    }
-
-    /* the keybed: 27 keys F3..G5 in real piano arrangement. 16 white keys at a
-     * 13px pitch; each black key sits on the boundary between its lower white
-     * neighbor and the next. Zones get brackets + labels UNDER the keys. */
+    /* the keybed IS the scale display (John: 不在 scale 中的键 grey out): 27
+     * keys F3..G5 in real piano arrangement. In-scale keys render true piano
+     * (white bright, black dark); out-of-scale keys grey out. The tonic's
+     * pitch class gets an amber outline everywhere it appears. */
     {
         const uint8_t WHITE_KEYS[16] = PLAT_WHITE_KEYS;   /* from plat.h */
         const uint8_t BLACK_LOW[11] = {0, 1, 2, 4, 5, 7, 8, 9, 11, 12, 14};  /* key -> lower white ordinal */
         const uint8_t BLACK_KEY[11] = {1, 3, 5, 8, 10, 13, 15, 17, 20, 22, 25};
-        int x0 = 14, y0 = 96, kw = 11, kp = 13;
+        int x0 = 14, y0 = 72, kw = 11, kp = 13;
         for (i = 0; i < 16; i++) {                   /* the white keys */
             uint8_t k = WHITE_KEYS[i];
-            uint16_t col = C_WHITE;
+            int in_scale = (SC_SET[sc_kind] >> (k % 12) & 1);
+            int tonic = ((k % 12) == sc_tonic);
+            uint16_t col = in_scale ? C_WHITE : C_GRAY;
             if (sc_root_key != 0xFF && k == sc_root_key) col = C_AMB;
             cv_rect(x0 + i * kp, y0, kw, 40, col);
+            if (tonic) {                             /* the tonic: an outline (4 rules) */
+                cv_rect(x0 + i * kp - 1, y0 - 1, kw + 2, 1, C_AMB);
+                cv_rect(x0 + i * kp - 1, y0 + 40, kw + 2, 1, C_AMB);
+                cv_rect(x0 + i * kp - 1, y0 - 1, 1, 42, C_AMB);
+                cv_rect(x0 + i * kp + kw, y0 - 1, 1, 42, C_AMB);
+            }
         }
         for (i = 0; i < 11; i++) {                   /* the black keys, real offsets */
             uint8_t k = BLACK_KEY[i];
+            int in_scale = (SC_SET[sc_kind] >> (k % 12) & 1);
             int x = x0 + BLACK_LOW[i] * kp + kw - 3; /* straddling the boundary */
-            uint16_t col = C_BLACK;
+            uint16_t col = in_scale ? C_BLACK : C_LINE;   /* out of scale: dim grey */
             if (sc_root_key != 0xFF && k == sc_root_key) col = C_AMB;
             cv_rect(x, y0, 7, 24, col);
         }
