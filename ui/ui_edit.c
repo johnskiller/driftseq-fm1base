@@ -222,7 +222,7 @@ static void draw_arp(void)
         cv_text(70, 112, &FONT_XS, "K4 - generate", RGB565(85, 85, 95));
         cv_text(64, 202, &FONT_XS, "K -  N -  ROT -", RGB565(138, 138, 153));
         cv_text(168, 202, &FONT_XS, "ARP v1.1", YELLOW);
-        cv_blit(0, 0);
+        cv_blit_band(0, 0, 216);                     /* the footer painter owns 216+ */
         ui_draw_footer();
         return;
     }
@@ -349,7 +349,7 @@ static void draw_arp(void)
     cv_text(64, 204, &FONT_T, txt_join("N", txt_num(0, n)), BRIGHTTX);
     cv_text(118, 204, &FONT_T, txt_join("ROT", txt_num(0, rot)), BRIGHTTX);
     cv_text(168, 204, &FONT_T, "ARP v1.1", YELLOW);
-    cv_blit(0, 0);
+    cv_blit_band(0, 0, 216);                         /* the footer painter owns 216+ */
     ui_draw_footer();
 }
 

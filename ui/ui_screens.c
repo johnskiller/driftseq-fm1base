@@ -867,7 +867,7 @@ outline:
             cv_rect(HX1, y, 1, 11, RGB565(127, 217, 74));
         }
     }
-    cv_blit(0, 0);
+    cv_blit_band(0, 0, 216);                         /* the footer painter owns 216+ */
     ui_draw_footer();
 }
 
@@ -1037,7 +1037,7 @@ static void draw_grid_melodic(void)
                 cv_rect(ext[i].x, ext[i].y, ext[i].w, 1, ext[i].c);
         }
     }
-    cv_blit(0, 0);
+    cv_blit_band(0, 0, 112);                         /* edit panel + footer own 112+ */
     ui_draw_edit_panel();                            /* rev.12 embedded panel */
     ui_draw_footer();
 }
@@ -1156,7 +1156,7 @@ static void draw_grid_drum(void)
         int px = x0 + (pos - page * 16) * cw;
         cv_rect(px, y0, 1, NDRUM * lh, C_WHITE);
     }
-    cv_blit(0, 0);
+    cv_blit_band(0, 0, 115);                         /* the card + footer own 115+ */
     ui_draw_drum_card();                             /* 100px single-drum card */
     ui_draw_footer();
 }
