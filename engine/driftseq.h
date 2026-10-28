@@ -129,12 +129,21 @@ typedef struct {
      * merges it into a real track. jam_abs is the absolute step counter since
      * the last reset (the wrap is jam_abs & 63), jam_acc the sub-step rest.
      * melodic notes land at key-DOWN with a provisional gate of 1 and are
-     * closed at key-UP; jam_held is the pool of notes still waiting. A re-hit
-     * rewrites its pitch in the slot (replace, not overdub: the last thing
-     * played is what SAVE keeps); other pitches in the slot survive. */
+     * closed at key-UP; jam_held is the pool of notes still waiting. The ring
+     * holds ONE take — the current pass: a re-hit rewrites its pitch in the
+     * slot (last thing played wins), a hit into a slot from an older pass
+     * clears the slot, and SAVE keeps current-pass slots only. */
     ds_track    jam;
     uint32_t    jam_abs;
     double      jam_acc;
+    uint8_t     jam_slot_pass[64];           /* the pass each slot was last written in (the pass
+                                              * number = jam_abs >> 6, derived where needed): a
+                                              * capture into a slot from an older pass clears that
+                                              * slot first — the ring holds ONE take, the current
+                                              * pass (John 2026-10-28: C E G, then a pass later
+                                              * A B A B, must save as A B A B alone). The pass byte
+                                              * wraps at 256 passes (16,384 steps): a slot untouched
+                                              * that long can read as fresh once — harmless. */
     struct { uint8_t note; uint32_t on; } jam_held[8];
     uint8_t     jam_held_n;
 } ds_state;

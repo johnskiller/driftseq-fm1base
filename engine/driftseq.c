@@ -466,6 +466,7 @@ void ds_jam_reset(ds_state *s)
     s->jam_held_n = 0;
     s->jam_abs = 0;
     s->jam_acc = 0.0;
+    memset(s->jam_slot_pass, 0xFF, sizeof s->jam_slot_pass);   /* no slot in pass 0 yet */
 }
 
 /* find the voice a held note landed on and finalize its gate */
@@ -481,12 +482,21 @@ void ds_jam_capture(ds_state *s, uint8_t note, uint8_t vel, uint8_t down)
 {
     int i;
     if (down) {
-        /* a re-hit rewrites its pitch in the slot (John 2026-10-28: replace, not
-         * overdub): the previous pass's same note must not outvote the new one's
-         * vel/gate, and a plain add would swallow the re-hit (-2 dedupe). Chord
-         * mates - a different pitch in the same slot - survive the rewrite. */
-        ds_voice_remove(&s->jam, ds_jam_pos(s), note);
-        ds_voice_add(&s->jam, ds_jam_pos(s), note, vel, 1);
+        uint32_t pos = ds_jam_pos(s);
+        uint8_t pass = (uint8_t)(s->jam_abs >> 6);
+        /* the ring holds ONE take — the current pass (jam_abs>>6). A hit into a
+         * slot from an older pass rewrites the whole slot: the previous pass's
+         * chord there dies with it (John 2026-10-28: C E G, then a pass later
+         * A B A B, must save as A B A B alone). Within the pass, a re-hit
+         * rewrites only its pitch — chord mates survive; the plain add would
+         * swallow the re-hit (-2 dedupe) and leave the old vel/gate playing. */
+        if (s->jam_slot_pass[pos] != pass) {
+            s->jam.steps[pos].nvoices = 0;
+            s->jam.steps[pos].on = 0;
+        }
+        s->jam_slot_pass[pos] = pass;
+        ds_voice_remove(&s->jam, pos, note);
+        ds_voice_add(&s->jam, pos, note, vel, 1);
         for (i = 0; i < s->jam_held_n; i++)
             if (s->jam_held[i].note == note) { s->jam_held[i].on = s->jam_abs; return; }
         if (s->jam_held_n < 8) {
@@ -551,19 +561,20 @@ static uint8_t jam_gate_rescale(uint8_t gate16, uint8_t target_div)
 int ds_jam_save_merge(ds_state *s, uint8_t trk)
 {
     ds_track *t;
-    uint32_t k, start;
-    uint8_t vi;
+    uint32_t k;
+    uint8_t vi, pass = (uint8_t)(s->jam_abs >> 6);
     if (trk >= DS_TRACKS) return -1;
     t = &s->pat.track[trk];
-    /* save the LAST 64 steps in chronological order, not the ring's physical
-     * layout: capture lands at jam_abs&63 and advances, so once the ring has
-     * wrapped the oldest retained step is (jam_abs+1)&63 — the playhead's next
-     * victim. k=0 walks from there; before the first wrap the phrase began at
-     * slot 0 and must stay where the player heard it. */
-    start = (s->jam_abs >= DS_STEPS) ? ((s->jam_abs + 1u) & (DS_STEPS - 1u)) : 0u;
+    /* save the CURRENT pass (the take): slots are stamped with the pass they were
+     * written in, a slot from an older pass is the previous take's residue and is
+     * skipped. The pass begins at slot 0, so slot order IS play order — the take
+     * lands where it was played, no rotation. */
     for (k = 0; k < DS_STEPS; k++) {
-        const ds_step *js = &s->jam.steps[(start + k) & (DS_STEPS - 1u)];
-        uint32_t dst = (k * 6u) / jam_ct(t->division);   /* ring tick -> target cell */
+        const ds_step *js = &s->jam.steps[k];
+        uint32_t dst;
+        if (s->jam_slot_pass[k] != pass)
+            continue;
+        dst = (k * 6u) / jam_ct(t->division);            /* ring tick -> target cell */
         for (vi = 0; vi < js->nvoices; vi++)
             ds_voice_add(t, dst, js->v[vi].note, js->v[vi].vel,
                          jam_gate_rescale(js->v[vi].gate, t->division));
@@ -588,17 +599,19 @@ int ds_jam_save_replace(ds_state *s, uint8_t trk)
         uint8_t keep_channel = t->channel, keep_prog = t->prog, keep_route = t->route,
                keep_mute = t->mute, keep_voice_mode = t->voice_mode, keep_swing = t->swing_amt;
         ds_track fresh;
-        uint32_t k, start;
-        uint8_t vi;
+        uint32_t k;
+        uint8_t vi, pass = (uint8_t)(s->jam_abs >> 6);
         ds_clear_track(&fresh);
         fresh.channel = keep_channel; fresh.prog = keep_prog; fresh.route = keep_route;
         fresh.mute = keep_mute; fresh.voice_mode = keep_voice_mode;
         fresh.swing_amt = keep_swing;
         fresh.division = s->jam.division;                /* the ring's grid: what was played is what is kept */
         fresh.loop_len = 64;
-        start = (s->jam_abs >= DS_STEPS) ? ((s->jam_abs + 1u) & (DS_STEPS - 1u)) : 0u;
-        for (k = 0; k < DS_STEPS; k++) {                 /* chronological: see merge */
-            const ds_step *js = &s->jam.steps[(start + k) & (DS_STEPS - 1u)];
+        /* current pass only, slot order = play order (see merge) */
+        for (k = 0; k < DS_STEPS; k++) {
+            const ds_step *js = &s->jam.steps[k];
+            if (s->jam_slot_pass[k] != pass)
+                continue;
             for (vi = 0; vi < js->nvoices; vi++)
                 ds_voice_add(&fresh, k, js->v[vi].note, js->v[vi].vel, js->v[vi].gate);
         }
