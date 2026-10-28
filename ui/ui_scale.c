@@ -25,8 +25,6 @@
  * GRID write happens once, when the set resolves to a chord. */
 
 enum { SC_MAJ, SC_MIN, SC_DOR, SC_MIX, SC_HMI, SC_PMAJ, SC_PMIN, SC_BLU, SC_CHR, SC_NKIND };
-static const char *const SC_NAME[SC_NKIND] =
-    {"MAJ", "MIN", "DOR", "MIX", "HMI", "P.MAJ", "P.MIN", "BLU", "CHR"};
 /* pitch-class sets, bit n = tonic+n sounds */
 static const uint16_t SC_SET[SC_NKIND] = {
     0x0AB5, 0x09AD, 0x06AD, 0x0AD5, 0x09B5, 0x05A9, 0x04A9, 0x0CEF, 0x0FFF
@@ -312,75 +310,78 @@ static void scale_leds(uint32_t *litK, uint32_t *litB, uint8_t is_drum)
         *litB |= 1u << B_SEL;                        /* the page is open: SEL is live */
 }
 
-/* ---- the SCALE page (painter) ---- */
+/* ---- the SCALE page (painter) ----
+ * Three settings, three rows, full names (John: 三行写全称); below them the
+ * interval strip and a REAL piano-keybed diagram (proper black/white offsets,
+ * zone brackets under the keys, the held root lit). */
+static const char *const SC_FULL[SC_NKIND] = {
+    "MAJOR", "MINOR", "DORIAN", "MIXOLYDIAN", "HARM.MINOR", "PENT.MAJOR",
+    "PENT.MINOR", "BLUES", "CHROMATIC"
+};
+
 static void draw_scale(void)
 {
     uint8_t i;
-    /* title + the three values (each names itself: no mode words) */
-    cv_text(8, 8, &FONT_T, "SCALE", C_AMB);
-    cv_text(8, 28, &FONT_T, SC_NAME[sc_kind], TB_TX);
+    /* the three settings, one per row, full names */
+    cv_text(8, 10, &FONT_T, "SCALE", C_AMB);
+    cv_text(96, 10, &FONT_T, SC_FULL[sc_kind], TB_TX);
+    cv_text(8, 28, &FONT_T, "TONIC", C_AMB);
     cv_text(96, 28, &FONT_T, ui_note_name(sc_tonic), TB_TX);
-    cv_text(152, 28, &FONT_T, sc_ofc ? "OFC ON" : "OFC OFF", sc_ofc ? C_HI : C_GRAY);
+    cv_text(8, 46, &FONT_T, "CHORD KEYS", C_AMB);
+    cv_text(96, 46, &FONT_T, sc_ofc ? "ON" : "OFF", sc_ofc ? C_HI : C_GRAY);
 
-    /* the 12-cell interval strip: one cell per semitone from the tonic */
+    /* the interval strip: one cell per semitone from the tonic, tonic framed */
     for (i = 0; i < 12; i++) {
         int in = (SC_SET[sc_kind] >> i & 1);
-        int x = 24 + i * 16;
-        uint16_t col = in ? TB_TX : C_LINE;
+        int x = 36 + i * 15;
         if (in)
-            cv_rect(x, 56, 14, 18, col);
+            cv_rect(x, 70, 12, 14, TB_TX);
         if (i == 0) {                                /* the tonic: an outline (4 rules) */
-            cv_rect(x - 2, 54, 18, 1, C_AMB); cv_rect(x - 2, 75, 18, 1, C_AMB);
-            cv_rect(x - 2, 54, 1, 22, C_AMB); cv_rect(x + 15, 54, 1, 22, C_AMB);
+            cv_rect(x - 2, 68, 16, 1, C_AMB); cv_rect(x - 2, 85, 16, 1, C_AMB);
+            cv_rect(x - 2, 68, 1, 18, C_AMB); cv_rect(x + 13, 68, 1, 18, C_AMB);
         }
     }
 
-    /* the keybed diagram (the page is the OFC legend): real key shapes, zones
-     * tinted, live keys lit. White keys 7px/38px, black keys 5px/22px. */
+    /* the keybed: 27 keys F3..G5 in real piano arrangement. 16 white keys at a
+     * 13px pitch; each black key sits on the boundary between its lower white
+     * neighbor and the next. Zones get brackets + labels UNDER the keys. */
     {
-        const uint8_t WHITE[16] = {0, 2, 4, 6, 7, 9, 11, 12, 14, 16, 18, 19, 21, 23, 24, 26};
-        const uint8_t BLACK[11] = {1, 3, 5, 8, 10, 13, 15, 17, 20, 22, 25};
-        const uint8_t WHITE_IDX[27] = {0, 0xFF, 1, 0xFF, 2, 0xFF, 3, 4, 0xFF, 5, 0xFF,
-                                       6, 7, 0xFF, 8, 0xFF, 9, 0xFF, 10, 11, 0xFF, 12, 0xFF,
-                                       13, 0xFF, 14, 0xFF};
-        int x0 = 20, y0 = 100;
-        (void)WHITE; (void)BLACK;
+        const uint8_t WHITE_KEYS[16] = PLAT_WHITE_KEYS;   /* from plat.h */
+        const uint8_t BLACK_LOW[11] = {0, 1, 2, 4, 5, 7, 8, 9, 11, 12, 14};  /* key -> lower white ordinal */
+        const uint8_t BLACK_KEY[11] = {1, 3, 5, 8, 10, 13, 15, 17, 20, 22, 25};
+        int x0 = 14, y0 = 96, kw = 11, kp = 13;
         for (i = 0; i < 16; i++) {                   /* the white keys */
-            uint8_t k = WHITE[i];
+            uint8_t k = WHITE_KEYS[i];
             uint16_t col = C_WHITE;
-            if (k <= 6) col = C_DIM;                 /* the degree zone */
-            else if (k >= 19) col = C_GRAY;          /* the component zone */
             if (sc_root_key != 0xFF && k == sc_root_key) col = C_AMB;
-            cv_rect(x0 + i * 13, y0, 11, 38, col);
+            cv_rect(x0 + i * kp, y0, kw, 40, col);
         }
-        for (i = 0; i < 11; i++) {                   /* the black keys */
-            uint8_t k = BLACK[i];
-            int x = x0 + WHITE_IDX[k] * 13 + 8;      /* between its white neighbors */
+        for (i = 0; i < 11; i++) {                   /* the black keys, real offsets */
+            uint8_t k = BLACK_KEY[i];
+            int x = x0 + BLACK_LOW[i] * kp + kw - 3; /* straddling the boundary */
             uint16_t col = C_BLACK;
-            if (k <= 6) col = C_DIM;
-            else if (k >= 19) col = C_GRAY;
             if (sc_root_key != 0xFF && k == sc_root_key) col = C_AMB;
-            cv_rect(x, y0, 7, 22, col);
+            cv_rect(x, y0, 7, 24, col);
         }
-        /* the zone labels */
-        cv_text(x0, y0 + 42, &FONT_S, "DEG", C_DIM);
-        cv_text(x0 + 7 * 13 + 4, y0 + 42, &FONT_S, "ROOT", C_GRAY);
-        cv_text(x0 + 11 * 13 + 2, y0 + 42, &FONT_S, "CHORD", C_HI);
-        /* the component key names (the right zone's legend), lit when in the
-         * last valid set */
+        /* zone brackets: a 3px rule under each zone + its label. The zones are
+         * key-id ranges but the geometry is white-ordinal space (the blacks
+         * hang between whites): DEG = whites 0..3, ROOT = 4..10, CHORD = 11..15 */
+        cv_rect(x0, y0 + 43, 4 * kp - 2, 3, C_AMB);
+        cv_text(x0, y0 + 50, &FONT_T, "DEG", C_AMB);
+        cv_rect(x0 + 4 * kp, y0 + 43, 7 * kp - 2, 3, C_GRAY);
+        cv_text(x0 + 4 * kp + (7 * kp - 4 * 7) / 2, y0 + 50, &FONT_T, "ROOT", C_GRAY);
+        cv_rect(x0 + 11 * kp, y0 + 43, 5 * kp - 2, 3, C_HI);
+        cv_text(x0 + 11 * kp, y0 + 50, &FONT_T, "CHORD", C_HI);
+        /* the component legend (the CHORD zone's keys), lit when in the set */
         for (i = 0; i < OC_NCOMP; i++) {
-            int x = 8 + (i % 4) * 58, y = y0 + 58 + (i / 4) * 14;
+            int x = 8 + (i % 4) * 58, y = y0 + 70 + (i / 4) * 15;
             uint16_t col = (sc_last_valid >> i & 1) ? C_HI : C_GRAY;
-            cv_text(x, y, &FONT_S, OC_NAME[i], col);
+            cv_text(x, y, &FONT_T, OC_NAME[i], col);
         }
-        /* the degree walk's one-line manual */
-        cv_text(x0, y0 + 88, &FONT_S, sc_ofc ? "DEG WALKS THE SCALE WHILE HELD"
-                                             : "K3 FOR CHORD KEYS", C_GRAY);
     }
     cv_blit_band(0, 0, 216);                          /* the footer painter owns 216+ */
     ui_draw_footer();                                 /* the SCALE footer (else stale pixels stay) */
 }
-
 
 /* ---- the page's encoders (K1..K4) + SEL ---- */
 static void scale_encoder(uint8_t enc, int8_t det)
