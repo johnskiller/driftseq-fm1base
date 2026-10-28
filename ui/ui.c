@@ -154,8 +154,6 @@ static void panel_key_handler(uint8_t key, uint8_t down)
         return;
     }
     if (is_drum_trk()) {                          /* r16j drumKeyHandler: press edge only */
-        if (!down)
-            return;                               /* key-up = no toggle (r16j parity) */
         {
             uint8_t bi = key_black_ordinal(key);
             if (bi != 0xFF) {
@@ -164,8 +162,11 @@ static void panel_key_handler(uint8_t key, uint8_t down)
                  * 不报错", and silently selecting a different drum than the
                  * printed key would be worse than doing nothing. */
                 if (bi < NDRUM) {
-                    drum_sel = bi;                /* pick instrument */
-                    ds_live_on(&eng, sel_track, GM_DRUMS[bi], midi_vel);
+                    if (down) {
+                        drum_sel = bi;                /* pick instrument */
+                        ds_live_on(&eng, sel_track, GM_DRUMS[bi], midi_vel);
+                    } else
+                        ds_live_off(&eng, sel_track, GM_DRUMS[bi]);
                 }
                 return;
             }
@@ -177,13 +178,16 @@ static void panel_key_handler(uint8_t key, uint8_t down)
                     uint8_t vi, found = 0;
                     for (vi = 0; vi < tr->steps[s].nvoices; vi++)
                         if (tr->steps[s].v[vi].note == GM_DRUMS[drum_sel]) found = 1;
-                    if (found)
-                        ds_voice_remove(tr, s, GM_DRUMS[drum_sel]);
-                    else {
-                        ds_voice_add(tr, s, GM_DRUMS[drum_sel], midi_vel, 1);
-                        tr->steps[s].on = 1;      /* bare write revives the gate */
-                    }
-                    ds_live_on(&eng, sel_track, GM_DRUMS[drum_sel], midi_vel);  /* audition (r16j) */
+                    if (down) {
+                        if (found)
+                            ds_voice_remove(tr, s, GM_DRUMS[drum_sel]);
+                        else {
+                            ds_voice_add(tr, s, GM_DRUMS[drum_sel], midi_vel, 1);
+                            tr->steps[s].on = 1;      /* bare write revives the gate */
+                        }
+                        ds_live_on(&eng, sel_track, GM_DRUMS[drum_sel], midi_vel);  /* audition (r16j) */
+                    } else
+                        ds_live_off(&eng, sel_track, GM_DRUMS[drum_sel]);
                 }
             }
         }

@@ -377,25 +377,15 @@ static void land(ds_state *s, ds_track *t, int trk, uint32_t pos) {
 
 void ds_tick(ds_state *s, double dt_seconds) {
     int trk, i;
-    int live_emitted = 0;
     jam_advance(s, dt_seconds);              /* the jam ring's clock never stops: PLAY keeps
                                               * it on the bar line (same rate as tick_acc),
                                               * stop walks it free at the current BPM */
-    /* live held notes: schedule note-off after ~2 cells of the track's division.
-     * note-offs are appended to out[]; JS drains out every tick even when
-     * stopped, so key-offs land regardless of transport state. When stopped we
-     * must NOT reset out_len on a tick that emitted a note-off (it would be
-     * wiped before JS drains it) — only on quiet ticks. */
-    if (s->live_n) {
-        const uint32_t keep = s->out_len;
-        for (i = (int)s->live_n - 1; i >= 0; i--) {
-            s->live[i].t += dt_seconds;
-            if (s->live[i].t >= 2.0 * cell_seconds(s->bpm, s->pat.track[s->live[i].trk].division))
-                ds_live_off(s, s->live[i].trk, s->live[i].note);
-        }
-        live_emitted = (s->out_len > keep);
-    }
-    if (!s->playing) { if (!live_emitted) s->out_len = 0; return; }
+    /* live held notes: no auto-gate — the keyboard sustains while held and the key-up
+     * sends the off (John 2026-10-28, option A). The 2-cell gate killed notes under a
+     * held mouse/piano key after 250 ms (2×DIV_16 cell), which reads as a broken
+     * instrument. A missed key-up (page hidden, focus loss) still dies: ds_stop sends
+     * CC123 on every track channel and clears live[]. */
+    if (!s->playing) { s->out_len = 0; return; }
     s->out_len = 0;
     /* absolute time @24 PPQ — the hero's axis. 4/4 bar = 16 sixteenths = 96 ticks. */
     s->tick_acc += dt_seconds * (s->bpm / 60.0) * 24.0;
