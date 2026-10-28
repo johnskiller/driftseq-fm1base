@@ -37,9 +37,9 @@
  * and pack.c compile in units that include this header (the -I puts eas_inc on
  * the app's include path), so their calls would lose their declarations to
  * #pragma once the same way. */
-void *memset(void *s, int c, unsigned long n);
-void *memcpy(void *d, const void *s, unsigned long n);
-int memcmp(const void *a, const void *b, unsigned long n);
+void *memset(void *s, int c, unsigned n);
+void *memcpy(void *d, const void *s, unsigned n);
+int memcmp(const void *a, const void *b, unsigned n);
 
 static inline int strcmp(const char *a, const char *b)
 {
