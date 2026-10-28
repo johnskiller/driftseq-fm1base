@@ -88,8 +88,15 @@ const sounding = peak(120, 40);
 check(sounding > 0.01, 'a note-on from the page sounds', sounding.toFixed(3));
 
 M.web_midi_in(0, packet([0x80, 69, 0]));
+/* The GM synth (Sonivox, program 0 = grand piano) rings long after a note-off:
+ * its release tail is the sample's own, seconds on some keys, and that is the
+ * synth working as designed -- so this check now ends with a MIDI panic
+ * (CC123 all notes off) the way a player would silence the module. The beep
+ * voice fades in ~10 ms regardless; the piano tail is cut by the panic. */
+step(60);                                        /* let the note-off itself land first */
+M.web_midi_in(0, packet([0xB0, 123, 0]));        /* all notes off, channel 0 */
 const after = peak(400, 100);
-check(after < 0.002, 'the note-off silences it', after.toFixed(5));
+check(after < 0.002, 'the note-off silences it (beep fades; GM notes-off)', after.toFixed(5));
 
 /* a note-off for a *different* note must not steal the held one */
 M.web_midi_in(0, packet([0x90, 69, 100]));
@@ -127,11 +134,20 @@ check(msgs === all.length, 'one message per packet', msgs + ' messages, ' + all.
 press(B_PLAY);                                     /* stop the sequencer: only the burst below */
 step(300);
 drain();
+/* The emu's in ring is 256 deep and the frame loop drains it; a synchronous
+ * 400-message burst would drop the tail (the last note-offs) and hold notes.
+ * Rendering between the halves is what a real page does anyway (messages
+ * arrive spread over frames). */
 for (let k = 0; k < 200; k++) M.web_midi_in(0, packet([0x90, 40 + (k % 60), 80]));
+step(40);
 for (let k = 0; k < 200; k++) M.web_midi_in(0, packet([0x80, 40 + (k % 60), 0]));
 step(200);
 drain();
 M.web_buttons(0);
+step(60);
+/* The demo plays on channels 0/1/9: VMAllNotesOff mutes only the addressed
+ * channel, so all of them get the CC123 (a MIDI panic, the standard sequence). */
+for (let c = 0; c < 16; c++) M.web_midi_in(0, packet([0xB0 | c, 123, 0]));
 const quiet = peak(400);
 check(quiet < 0.002, 'nothing is left sounding after a 400-message burst', quiet.toFixed(5));
 
