@@ -320,7 +320,13 @@ static void engine_drain(void)
          * this engine sends (note on/off, CC), 2 for a program change */
         uint8_t st = eng.out[i];
         uint32_t n = ((st & 0xF0u) == 0xC0u || (st & 0xF0u) == 0xD0u) ? 2u : 3u;
-        uint32_t pkt = (uint32_t)st << 8;
+        /* byte0 = the USB-MIDI event packet's Cable|CIN nibble. The platform sends the
+         * 4 bytes as-is on EP1, and CIN 0 (misc) is a packet macOS drops — the BLE side
+         * never sees this byte (it rebuilds from the status), which is why the wire
+         * played on 88emu while USB-MIDI stayed silent. CIN = the status's high nibble
+         * is exactly the spec's mapping for the channel voice messages this engine
+         * sends (8 note-off, 9 note-on, B CC, C program change). */
+        uint32_t pkt = (uint32_t)(st >> 4) | (uint32_t)st << 8;
         if (n >= 2 && i + 1 < eng.out_len) pkt |= (uint32_t)eng.out[i + 1] << 16;
         if (n >= 3 && i + 2 < eng.out_len) pkt |= (uint32_t)eng.out[i + 2] << 24;
         if (!plat_midi_out_room(TO_USB | TO_BLE))
