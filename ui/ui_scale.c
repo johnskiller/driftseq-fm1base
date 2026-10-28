@@ -396,7 +396,9 @@ static void scale_encoder(uint8_t enc, int8_t det)
         if (v > 11) v = 11;
         sc_tonic = (uint8_t)v;
     } else if (enc == EN_K3) {
-        if (det) sc_ofc = !sc_ofc;                    /* any detent flips */
+        /* John: no cycling — left detent = OFF, right detent = ON, dead stops */
+        if (det < 0) sc_ofc = 0;
+        if (det > 0) sc_ofc = 1;
         if (!sc_ofc) { sc_mask = 0; sc_last_valid = 0; }
     }                                                  /* K4: spare */
     kn_poke(enc);
