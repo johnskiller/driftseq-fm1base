@@ -27,6 +27,52 @@ static uint8_t is_drum_trk(void) { return TRK()->channel == 9; }
 static uint8_t step_nv(uint8_t t, uint8_t s) { return eng.pat.track[t].steps[s].nvoices; }
 static uint8_t step_note(uint8_t t, uint8_t s, uint8_t vi) { return eng.pat.track[t].steps[s].v[vi].note; }
 
+/* K3 = a virtual 10-detent slider, one per track (John 2026-10-28): detent 0 = ON,
+ * 1..8 = SOLO (a wide middle so the blind hand always lands it), 9 = MUTE. Dead
+ * stops at both ends, never wraps. The knob has no absolute position, so k3_pos[]
+ * is the slider's memory; it re-syncs to the track's state whenever that state
+ * was set from elsewhere (a loaded pattern's mute, ...). solo is live-only (not
+ * packed): SAVE/load never carries it, and the slider re-syncs from mute then. */
+#define K3_ON   0
+#define K3_MUTE 9
+static int8_t k3_pos[DS_TRACKS];
+
+static void k3_sync(ds_track *tr, uint8_t ti)
+{
+    /* re-sync only on DISAGREEMENT (state set from elsewhere: a loaded mute, ...),
+     * else the slider would fight its own writes */
+    uint8_t im_mute = (k3_pos[ti] == K3_MUTE);
+    uint8_t im_solo = (k3_pos[ti] > K3_ON && k3_pos[ti] < K3_MUTE);
+    if (tr->mute != im_mute || tr->solo != im_solo) {
+        if (tr->mute)
+            k3_pos[ti] = K3_MUTE;
+        else if (tr->solo)
+            k3_pos[ti] = (K3_ON + K3_MUTE) / 2;  /* mid-slider: SOLO */
+        else
+            k3_pos[ti] = K3_ON;
+    }
+}
+
+static void k3_state_slider(ds_track *tr, uint8_t ti, int8_t det)
+{
+    int8_t p;
+    k3_sync(tr, ti);
+    p = (int8_t)(k3_pos[ti] + det);
+    if (p < K3_ON) p = K3_ON;                    /* dead stop: never wraps */
+    if (p > K3_MUTE) p = K3_MUTE;
+    k3_pos[ti] = p;
+    tr->mute = (p == K3_MUTE);
+    tr->solo = (p > K3_ON && p < K3_MUTE);
+}
+
+static const char *k3_state_name(const ds_track *tr, uint8_t ti)   /* the knob readout */
+{
+    k3_sync((ds_track *)tr, ti);
+    if (k3_pos[ti] == K3_MUTE) return "MUTE";
+    if (k3_pos[ti] == K3_ON)   return "ON";
+    return "SOLO";
+}
+
 /* engine state init: ds_init(42) + demo (emu boot parity) */
 static void ds_state_init(void)
 {

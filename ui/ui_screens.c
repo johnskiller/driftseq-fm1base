@@ -638,12 +638,14 @@ static void draw_home(void)
             lpx = HXW;
         if (wpx > HXW)
             wpx = HXW;
-        /* gutter (46px): TRK nn | LEN nn | route | M */
+        /* gutter (46px): TRK nn | LEN nn | route | M/S */
         cv_text(2, y, &FONT_T, txt_num(0, t + 1), muted ? MUTE_GRAY : RGB565(154, 154, 168));
         cv_text(15, y, &FONT_T, txt_num(0, tr->loop_len), muted ? RGB565(74, 74, 82) : RGB565(106, 106, 120));
         cv_text(28, y, &FONT_T, "U", muted ? RGB565(74, 74, 82) : RGB565(122, 122, 136));
         if (muted)
             cv_text(36, y, &FONT_T, "M", RGB565(224, 160, 64));
+        else if (tr->solo)
+            cv_text(36, y, &FONT_T, "S", RGB565(224, 160, 64));
         cv_rect(HX0, y, HX1 - HX0, 11, muted ? RGB565(20, 20, 24) : RGB565(29, 29, 38));
         if (muted) {
             if (t == sel_track)
@@ -1229,12 +1231,12 @@ static const char *kn_value_text(void)
     } else if (ui_mode == M_GRID) {
         if (kn_i == 0)       fmt_int(b, (int32_t)cursor + 1);           /* STEP  */
         else if (kn_i == 1)  fmt_int(b, tr->loop_len);                  /* LEN   */
-        else if (kn_i == 2)  strcpy_(b, tr->mute ? "MUTE" : "ON");      /* MUTE  */
+        else if (kn_i == 2)  strcpy_(b, k3_state_name(tr, sel_track));  /* MUTE/SOLO */
         else                 fmt_int(b, st->prob);                      /* PROB  */
     } else {
         if (kn_i == 0)       fmt_int(b, (int32_t)tr->loop_start + 1);   /* START */
         else if (kn_i == 1)  fmt_int(b, tr->loop_len);                  /* LEN   */
-        else if (kn_i == 2)  strcpy_(b, tr->mute ? "MUTE" : "ON");      /* MUTE  */
+        else if (kn_i == 2)  strcpy_(b, k3_state_name(tr, sel_track));  /* MUTE/SOLO */
         else                 fmt_int(b, st->prob);                      /* PROB  */
     }
     return b;

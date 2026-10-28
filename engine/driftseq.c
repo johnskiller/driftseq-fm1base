@@ -376,7 +376,13 @@ static void land(ds_state *s, ds_track *t, int trk, uint32_t pos) {
 }
 
 void ds_tick(ds_state *s, double dt_seconds) {
-    int trk, i;
+    int trk;
+    {   /* solo is a live-only mask: recompute the union each tick (16 bytes) */
+        int t2;
+        s->any_solo = 0;
+        for (t2 = 0; t2 < DS_TRACKS; t2++)
+            if (s->pat.track[t2].solo) { s->any_solo = 1; break; }
+    }
     jam_advance(s, dt_seconds);              /* the jam ring's clock never stops: PLAY keeps
                                               * it on the bar line (same rate as tick_acc),
                                               * stop walks it free at the current BPM */
@@ -396,7 +402,10 @@ void ds_tick(ds_state *s, double dt_seconds) {
     for (trk = 0; trk < DS_TRACKS; trk++) {
         ds_track *t = &s->pat.track[trk];
         double adv;
-        if (t->mute) continue;
+        if (t->mute)
+            continue;
+        if (s->any_solo && !t->solo)
+            continue;                                 /* a solo elsewhere masks this track */
         if (!s->pc_sent[trk]) { emit_pc(s, t); s->pc_sent[trk] = 1; }
 
         if (s->pending[trk]) {                       /* launch: loop_start sounds now */

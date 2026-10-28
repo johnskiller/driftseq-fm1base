@@ -53,9 +53,10 @@ void *memset(void *d, int c, unsigned n);
 /* ds_track has no padding (every member is uint8_t or an array of them), which
  * is what lets the default comparison below be a memcmp. If that ever stops
  * being true this fails the build instead of silently comparing garbage.
- * 64 steps x 17 B + 13 meta bytes = 1,101. */
+ * 64 steps x 17 B + 14 meta bytes = 1,102 (rev.28 added live-only solo; the
+ * packer still writes 13 — solo is deliberately not serialized). */
 typedef char ds_pack_track_size_check[
-    (sizeof(ds_track) == DS_STEPS * (DS_VOICES * 3u + 5u) + 13u) ? 1 : -1];
+    (sizeof(ds_track) == DS_STEPS * (DS_VOICES * 3u + 5u) + 14u) ? 1 : -1];
 
 /* a step is content if it holds a note OR its `on` bit is set. `on` alone is the
  * silent-keep state the UI toggles; dropping it on save would resurrect notes

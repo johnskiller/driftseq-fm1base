@@ -403,8 +403,8 @@ static void ui_home_encoder(uint8_t enc, int8_t det)
         if (v < 1) v = 1;
         if (v > 64) v = 64;
         tr->loop_len = (uint8_t)v;
-    } else if (enc == EN_K3 && det > 0) {        /* K3 MUTE: right = on */
-        tr->mute = tr->mute ? 0 : 1;
+    } else if (enc == EN_K3) {                   /* K3 MUTE/SOLO slider (rev.28) */
+        k3_state_slider(tr, sel_track, det);
     } else if (enc == EN_K4) {                   /* K4 PROB 0..100 */
         int v = tr->steps[cursor].prob + det * 5;
         if (v < 0) v = 0;
@@ -427,9 +427,12 @@ static void ui_grid_encoder(uint8_t enc, int8_t det)
         track_div_encoder(det);
         return;
     }
+    if (enc == EN_K3 && !glo_held) {             /* K3 MUTE/SOLO slider (rev.28) */
+        k3_state_slider(TRK(), sel_track, det);
+        return;
+    }
     if (enc == EN_K1) cursor_move(det);          /* K1 cursor (bare: the fast path) */
     else if (enc == EN_K2) ui_home_encoder(EN_K2, det);   /* K2 LEN */
-    else if (enc == EN_K3 && det > 0) { TRK()->mute ^= 1; }
     else if (enc == EN_K4) ui_home_encoder(EN_K4, det);   /* K4 PROB */
 }
 

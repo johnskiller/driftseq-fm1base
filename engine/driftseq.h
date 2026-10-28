@@ -55,6 +55,9 @@ typedef struct {
     uint8_t  route;             /* DS_ROUTE_* */
     uint8_t  prog;              /* GM program (bank MSB ignored v1) */
     uint8_t  mute;
+    uint8_t  solo;              /* live-only: not packed (a performance gesture). The
+                                 * sequencer plays soloed tracks and silences the
+                                 * rest; K3's middle detents set/clear it. */
     uint8_t  swing_amt;         /* 0..100: how much of the global swing applies */
     uint8_t  voice_mode;        /* DS_VOICE_* */
     uint8_t  eu_on, eu_k, eu_n, eu_rot;
@@ -98,6 +101,7 @@ typedef struct {
     double      frac16[DS_TRACKS];      /* sub-cell accumulator, [0,1) */
     uint8_t     pending[DS_TRACKS];     /* fire loop_start on next tick after play */
     uint8_t     pc_sent[DS_TRACKS];     /* program-change sent once per run */
+    uint8_t     any_solo;               /* recomputed each tick: 1 = some track.solos */
     uint8_t     playing;
     double      tick_acc;               /* absolute time in ticks @24 PPQ since play (hero axis) */
     uint8_t     sel_track;              /* UI-selected track (emu + panel SEL) */
