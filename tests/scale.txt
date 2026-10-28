@@ -67,3 +67,23 @@ key 22 up
 key 10 up
 wait 20
 out
+
+# the DEGREE walk (left 7 keys, I..VII): chord follows the scale, key up returns
+# (root C4 + MAJ held throughout: C maj -> IV -> ii -> back)
+key 7 down 100
+key 19 down 100
+wait 20
+out                              # C major: 60 64 67
+key 3 down 100                   # IV: Fmaj7 (the scale's own seventh) 65 69 72 76
+wait 20
+out
+key 3 up
+key 1 down 100                   # ii with the MAJ flavor: D F# A (62 66 69)
+wait 20
+out
+key 1 up
+wait 20
+out                              # back to C major
+key 19 up
+key 7 up
+wait 20

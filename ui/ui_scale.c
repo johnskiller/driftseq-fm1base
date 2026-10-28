@@ -7,10 +7,19 @@
  * Live-only like K3 solo: pack.c untouched; boot = MAJ / tonic C / OFC off.
  *
  * Keybed zones (27 keys F3..G5):
- *   left  0..6   (F3..E4)   OCT- (key 0) / OCT+ (key 6) transposes the ROOT
- *                           zone by octaves; 1..5 spare (fall through)
- *   mid   7..18  (F4..B4)   ROOT: the 12 chromatic roots, printed C..B
- *   right 19..26 (C5..G5)   COMPONENTS: MAJ MIN DIM 6 7 M7 SUS4 ADD9
+ *   left  0..6   (F3..E4)   DEGREES I..VII: while a chord is held, the chord's
+ *                           root walks the scale and the quality recomputes
+ *                           from it (I=maj ii=min ...); key up returns to the
+ *                           held root. Live-only: the pattern keeps the anchor.
+ *   mid   7..18  (F4..B4)   ROOT: the 12 chromatic roots, printed C..B (the
+ *                           panel's OCT buttons transpose the whole keybed as
+ *                           everywhere else)
+ *   right 19..26 (C5..G5)   COMPONENTS: MAJ MIN DIM 6 7 M7 SUS4 ADD9 — flavors
+ *                           over the scale's own quality (MAJ/MIN force the
+ *                           third, DIM flats the fifth, SUS4 takes the fourth,
+ *                           7/M7 add a seventh, 6 swaps the fifth, ADD9 adds
+ *                           the ninth). Flavor notes are deliberate and skip
+ *                           the snap; scale-born tones stay scale-true.
  * A chord = root + up to 3 component keys; nonsense sets play nothing.
  * While a root is held, changing the set re-voices live (jam follows); the
  * GRID write happens once, when the set resolves to a chord. */
@@ -71,8 +80,8 @@ static Chord oc_resolve(uint8_t mask)
 static uint8_t sc_kind = SC_MAJ;                  /* K1 */
 static uint8_t sc_tonic = 0;                      /* K2, pitch class 0..11 (0=C) */
 static uint8_t sc_ofc;                            /* K3: one-finger chords on */
-static int8_t sc_root_oct;                        /* the ROOT zone's octave shift (keys 0/6) */
 static uint8_t sc_root_key = 0xFF;                /* held root's KEY ID, 0xFF none */
+static uint8_t sc_deg_key = 0xFF;                 /* held degree key (0..6), 0xFF none */
 static uint8_t sc_mask;                           /* held component keys' bitmask */
 static uint8_t sc_last_valid;                     /* the last set that resolved (LED aid) */
 
@@ -124,18 +133,87 @@ static void sc_apply(void)
     for (i = 0; i < sc_tones_n; i++) sc_prev[i] = sc_tones[i];
 }
 
+/* the ROOT zone's note for key k (the panel's OCT buttons shift everything) */
+static int sc_root_note(uint8_t k)
+{
+    int note = 60 + (int)k - 7 + key_shift;          /* printed C4..B4 */
+    if (note < 12) note += 12;
+    if (note > 108) note -= 12;
+    return note;
+}
+
+/* the pitch class of scale degree d (0..6: the d-th scale tone above the tonic),
+ * and the stacked-third chord the scale implies there: the third is 2 scale
+ * steps up, the fifth 4. Returns tone count; t[] = semitones above the degree
+ * root. Degrees need the SC_SET bit per step, walking the mask circularly. */
+static uint8_t sc_degree_chord(uint8_t d, int8_t *t)
+{
+    uint8_t n = 0, i;
+    int8_t offs[7];
+    for (i = 0; i < 12 && n < 7; i++)                /* the scale's own tones, low to high */
+        if (SC_SET[sc_kind] >> i & 1)
+            offs[n++] = (int8_t)i;
+    /* semitone offset of scale-step s above the degree root */
+    #define SC_STEP(s) (offs[((d + (s)) % 7 + 7) % 7] - offs[d] + ((((d + (s)) % 7) < d) ? 12 : 0))
+    t[0] = 0;
+    t[1] = SC_STEP(2);                               /* the third */
+    t[2] = SC_STEP(4);                               /* the fifth */
+    t[3] = SC_STEP(6);                               /* the seventh */
+    return 4;
+    #undef SC_STEP
+}
+
+/* apply the right hand's flavor keys onto a scale-stacked chord (in place) */
+static void sc_flavor(int8_t *t, uint8_t *pn)
+{
+    uint8_t m = sc_mask, n = *pn;
+    if (m & (1u << OC_SUS)) t[1] = 5;                /* the fourth replaces the third */
+    else if (m & (1u << OC_MIN)) t[1] = 3;           /* force the minor third */
+    else if (m & (1u << OC_MAJ)) t[1] = 4;           /* force the major third */
+    if (m & (1u << OC_DIM)) { t[1] = 3; t[2] = 6; }  /* the dim: minor third + flat fifth */
+    if (m & (1u << OC_SIX)) t[2] = 9;                /* the sixth replaces the fifth */
+    if ((m & (1u << OC_SEV)) || (m & (1u << OC_M7)))
+        t[3] = (m & (1u << OC_M7)) ? 11 : 10;        /* the seventh (replaces the scale's) */
+    if (m & (1u << OC_ADD9) && n < 4) { t[n++] = 14; }   /* the ninth, closed position */
+    *pn = n;
+}
+
 static void sc_revoice(uint8_t root_note)            /* rebuild sc_tones from state */
 {
     Chord c = oc_resolve(sc_mask);
     uint8_t i;
+    if (sc_deg_key != 0xFF) {                        /* a degree walk is live: the scale speaks */
+        int8_t t[4];
+        uint8_t n = sc_degree_chord(sc_deg_key, t), d;
+        int deg_pc, root_pc, delta;
+        /* the degree root, nearest to the held root's register */
+        d = sc_deg_key;
+        deg_pc = -1;
+        {   uint8_t k = 0;
+            for (i = 0; i < 12; i++)
+                if (SC_SET[sc_kind] >> i & 1) {
+                    if (k == d) { deg_pc = (int)i; break; }
+                    k++;
+                }
+        }
+        if (deg_pc < 0) return;                      /* no scale: silence */
+        root_pc = ((root_note % 12) + 12) % 12;
+        delta = ((deg_pc - root_pc) + 18) % 12 - 6;  /* the shortest way round (+-6) */
+        root_note = (uint8_t)(root_note + delta);
+        sc_flavor(t, &n);
+        sc_tones_n = 0;
+        for (i = 0; i < (int)n && sc_tones_n < 4; i++)
+            sc_tones[sc_tones_n++] = (uint8_t)(root_note + t[i]);
+        return;
+    }
     if (sc_mask && c.n == 0) { sc_tones_n = 0; return; }   /* nonsense set: silence */
     sc_tones_n = 0;
     if (!sc_mask) {                                  /* root alone: one snapped note */
         sc_tones[sc_tones_n++] = (uint8_t)ui_snap(root_note);
         return;
     }
-    for (i = 0; i < c.n && sc_tones_n < 4; i++)
-        sc_tones[sc_tones_n++] = (uint8_t)ui_snap(root_note + c.t[i]);
+    for (i = 0; i < c.n && sc_tones_n < 4; i++)      /* flavor tones: no snap (deliberate) */
+        sc_tones[sc_tones_n++] = (uint8_t)(root_note + c.t[i]);
 }
 
 /* ---- input ----
@@ -157,25 +235,29 @@ static uint8_t scale_key_hook(uint8_t key, uint8_t down)
         return 1;
     }
     /* OFC on: the three zones */
-    if (key == 0 || key == 6) {                   /* OCT- / OCT+ : edge action */
-        if (down) {
-            sc_root_oct += (key == 0) ? -12 : 12;
-            if (sc_root_oct < -24) sc_root_oct = -24;
-            if (sc_root_oct > 24)  sc_root_oct = 24;
+    if (key <= 6) {                               /* DEGREES I..VII: the chord walks */
+        if (down && sc_root_key != 0xFF && sc_deg_key != key) {
+            sc_deg_key = key;                     /* the scale re-voices, live */
+            sc_revoice(sc_root_note(sc_root_key));
+            sc_apply();
+        } else if (!down && sc_deg_key == key) {
+            sc_deg_key = 0xFF;                    /* back to the held root's chord */
+            sc_revoice(sc_root_note(sc_root_key));
+            sc_apply();
         }
-        return 1;                                 /* the shift keys never sound */
+        return 1;                                 /* degree keys never sound alone */
     }
     if (key >= 7 && key <= 18) {                  /* a root */
-        int root = 60 + (key - 7) + sc_root_oct;  /* printed C4..B4 + the zone shift */
         if (down) {
             if (sc_root_key == 0xFF) {            /* first root takes over */
                 sc_root_key = key;
-                sc_revoice((uint8_t)root);
+                sc_revoice(sc_root_note(key));
                 sc_apply();
             }
             /* a second root while one is held is ignored: one left hand */
         } else if (sc_root_key == key) {
             sc_root_key = 0xFF;
+            sc_deg_key = 0xFF;
             sc_mask = 0;
             sc_tones_n = 0;
             sc_apply();
@@ -185,10 +267,8 @@ static uint8_t scale_key_hook(uint8_t key, uint8_t down)
     if (key >= 19) {                              /* a component */
         uint8_t bit = (uint8_t)(1u << (key - 19));
         if (down && sc_root_key != 0xFF && !(sc_mask & bit)) {
-            uint8_t i;
-            uint8_t prev_n;
             sc_mask |= bit;
-            sc_revoice(60 + (sc_root_key - 7) + sc_root_oct);
+            sc_revoice(sc_root_note(sc_root_key));
             if (sc_tones_n == 0) {                /* the set went nonsense: silence */
                 return 1;
             }
@@ -209,7 +289,7 @@ static uint8_t scale_key_hook(uint8_t key, uint8_t down)
         } else if (!down && (sc_mask & bit)) {    /* component up: live follows, no write */
             sc_mask &= (uint8_t)~bit;
             if (sc_root_key != 0xFF) {
-                sc_revoice(60 + (sc_root_key - 7) + sc_root_oct);
+                sc_revoice(sc_root_note(sc_root_key));
                 sc_apply();
             }
         }
@@ -255,29 +335,52 @@ static void draw_scale(void)
         }
     }
 
-    /* the chord components, lit when in the last valid set (or all dim) */
-    cv_text(8, 96, &FONT_T, "CHORD", C_GRAY);
-    for (i = 0; i < OC_NCOMP; i++) {
-        int x = 8 + (i % 4) * 58, y = 116 + (i / 4) * 22;
-        uint16_t col = (sc_last_valid >> i & 1) ? C_HI : C_GRAY;
-        cv_text(x, y, &FONT_T, OC_NAME[i], col);
-    }
-
-    /* the keybed zones: ROOT C..B (12), COMPONENTS (8) */
-    cv_text(8, 168, &FONT_T, "ROOT", C_GRAY);
-    for (i = 0; i < 12; i++) {
-        int x = 52 + i * 14;
-        cv_text(x, 168, &FONT_S, ui_note_name(i), (sc_root_key != 0xFF && (uint8_t)(sc_root_key - 7) == i) ? C_AMB : C_GRAY);
-    }
-    cv_text(8, 186, &FONT_T, "OCT", C_GRAY);
+    /* the keybed diagram (the page is the OFC legend): real key shapes, zones
+     * tinted, live keys lit. White keys 7px/38px, black keys 5px/22px. */
     {
-        char *b = txt_next();
-        strcpy_(b, "");
-        fmt_int(txt_end(b), sc_root_oct / 12);
-        cv_text(52, 186, &FONT_S, b, C_GRAY);
+        const uint8_t WHITE[16] = {0, 2, 4, 6, 7, 9, 11, 12, 14, 16, 18, 19, 21, 23, 24, 26};
+        const uint8_t BLACK[11] = {1, 3, 5, 8, 10, 13, 15, 17, 20, 22, 25};
+        const uint8_t WHITE_IDX[27] = {0, 0xFF, 1, 0xFF, 2, 0xFF, 3, 4, 0xFF, 5, 0xFF,
+                                       6, 7, 0xFF, 8, 0xFF, 9, 0xFF, 10, 11, 0xFF, 12, 0xFF,
+                                       13, 0xFF, 14, 0xFF};
+        int x0 = 20, y0 = 100;
+        (void)WHITE; (void)BLACK;
+        for (i = 0; i < 16; i++) {                   /* the white keys */
+            uint8_t k = WHITE[i];
+            uint16_t col = C_WHITE;
+            if (k <= 6) col = C_DIM;                 /* the degree zone */
+            else if (k >= 19) col = C_GRAY;          /* the component zone */
+            if (sc_root_key != 0xFF && k == sc_root_key) col = C_AMB;
+            cv_rect(x0 + i * 13, y0, 11, 38, col);
+        }
+        for (i = 0; i < 11; i++) {                   /* the black keys */
+            uint8_t k = BLACK[i];
+            int x = x0 + WHITE_IDX[k] * 13 + 8;      /* between its white neighbors */
+            uint16_t col = C_BLACK;
+            if (k <= 6) col = C_DIM;
+            else if (k >= 19) col = C_GRAY;
+            if (sc_root_key != 0xFF && k == sc_root_key) col = C_AMB;
+            cv_rect(x, y0, 7, 22, col);
+        }
+        /* the zone labels */
+        cv_text(x0, y0 + 42, &FONT_S, "DEG", C_DIM);
+        cv_text(x0 + 7 * 13 + 4, y0 + 42, &FONT_S, "ROOT", C_GRAY);
+        cv_text(x0 + 11 * 13 + 2, y0 + 42, &FONT_S, "CHORD", C_HI);
+        /* the component key names (the right zone's legend), lit when in the
+         * last valid set */
+        for (i = 0; i < OC_NCOMP; i++) {
+            int x = 8 + (i % 4) * 58, y = y0 + 58 + (i / 4) * 14;
+            uint16_t col = (sc_last_valid >> i & 1) ? C_HI : C_GRAY;
+            cv_text(x, y, &FONT_S, OC_NAME[i], col);
+        }
+        /* the degree walk's one-line manual */
+        cv_text(x0, y0 + 88, &FONT_S, sc_ofc ? "DEG WALKS THE SCALE WHILE HELD"
+                                             : "K3 FOR CHORD KEYS", C_GRAY);
     }
     cv_blit_band(0, 0, 216);                          /* the footer painter owns 216+ */
+    ui_draw_footer();                                 /* the SCALE footer (else stale pixels stay) */
 }
+
 
 /* ---- the page's encoders (K1..K4) + SEL ---- */
 static void scale_encoder(uint8_t enc, int8_t det)

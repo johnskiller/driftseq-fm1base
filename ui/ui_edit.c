@@ -679,8 +679,8 @@ static void ui_init(void)
     sc_kind = SC_MAJ;
     sc_tonic = 0;
     sc_ofc = 0;
-    sc_root_oct = 0;
     sc_root_key = 0xFF;
+    sc_deg_key = 0xFF;
     sc_mask = 0;
     sc_last_valid = 0;
     sc_tones_n = 0;
