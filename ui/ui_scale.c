@@ -341,8 +341,9 @@ static void draw_scale(void)
         int x0 = 14, y0 = 72, kw = 11, kp = 13;
         for (i = 0; i < 16; i++) {                   /* the white keys */
             uint8_t k = WHITE_KEYS[i];
-            int in_scale = (SC_SET[sc_kind] >> (k % 12) & 1);
-            int tonic = ((k % 12) == sc_tonic);
+            int pc = (k + 5) % 12;                   /* id 0 = F3: pc = (F3 + k) % 12 */
+            int in_scale = (SC_SET[sc_kind] >> ((pc + 12 - sc_tonic) % 12) & 1);
+            int tonic = (pc == sc_tonic);
             uint16_t col = in_scale ? C_WHITE : C_GRAY;
             if (sc_root_key != 0xFF && k == sc_root_key) col = C_AMB;
             cv_rect(x0 + i * kp, y0, kw, 40, col);
@@ -355,7 +356,8 @@ static void draw_scale(void)
         }
         for (i = 0; i < 11; i++) {                   /* the black keys, real offsets */
             uint8_t k = BLACK_KEY[i];
-            int in_scale = (SC_SET[sc_kind] >> (k % 12) & 1);
+            int pc = (k + 5) % 12;                   /* id 0 = F3 (see the whites) */
+            int in_scale = (SC_SET[sc_kind] >> ((pc + 12 - sc_tonic) % 12) & 1);
             int x = x0 + BLACK_LOW[i] * kp + kw - 3; /* straddling the boundary */
             uint16_t col = in_scale ? C_BLACK : C_LINE;   /* out of scale: dim grey */
             if (sc_root_key != 0xFF && k == sc_root_key) col = C_AMB;
