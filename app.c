@@ -70,6 +70,10 @@ static const char *const ENC_NAME[NE] = {"SELECT", "ALGO", "PRESET", "K1", "K2",
 static volatile int32_t voice_note = -1;     /* MIDI note, -1 = released */
 static volatile float voice_vel = 1.0f;      /* the note's velocity, 0..1 */
 static float voice_phase, voice_level, gain_now;   /* gain_now glides to MASTER: no step at a block's edge */
+static volatile uint32_t render_blocks;            /* the audio ISR's heartbeat (the remote log's app line) */
+static volatile uint32_t gm_blocks;                /* blocks EAS actually rendered */
+static volatile int32_t gm_last_peak;              /* EAS's newest block's peak: is it producing sound? */
+static volatile uint32_t last_master_q12;          /* the newest block's MASTER (the log's app line) */
 
 static void note_on(int32_t note, uint32_t vel)
 {
@@ -166,6 +170,16 @@ static void gm_render(int32_t *lr, uint32_t n, float gain)
     uint32_t i;
     if (!eas_ok || EAS_Render(eas_data, buf, 128, &got) != EAS_SUCCESS || got <= 0)
         return;
+    gm_blocks++;
+    {   int32_t pk = 0;                          /* the log's "is EAS producing sound" */
+        for (i = 0; i < (uint32_t)got; i++) {
+            int32_t l = buf[2 * i] < 0 ? -buf[2 * i] : buf[2 * i];
+            int32_t r = buf[2 * i + 1] < 0 ? -buf[2 * i + 1] : buf[2 * i + 1];
+            if (l > pk) pk = l;
+            if (r > pk) pk = r;
+        }
+        gm_last_peak = pk;
+    }
     for (i = 0; i < (uint32_t)got; i++) {
         int32_t l = (int32_t)buf[2 * i] << 8, r = (int32_t)buf[2 * i + 1] << 8;
         uint32_t j = i * 2;
@@ -253,6 +267,8 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
     float target = note >= 0 ? 0.25f * voice_vel : 0.0f;
     float inc = note >= 0 ? 440.0f * fm_exp2f((float)(note - 69) / 12.0f) / 44100.0f : 0.0f;
     float gain = (float)master_q12 / 4096.0f * 8300000.0f;   /* MASTER, read once a block */
+    render_blocks++;
+    last_master_q12 = master_q12;
     midi_in();
     for (i = 0; i < n; i++) {
         float s;
@@ -329,9 +345,17 @@ static void engine_drain(void)
         uint32_t pkt = (uint32_t)(st >> 4) | (uint32_t)st << 8;
         if (n >= 2 && i + 1 < eng.out_len) pkt |= (uint32_t)eng.out[i + 1] << 16;
         if (n >= 3 && i + 2 < eng.out_len) pkt |= (uint32_t)eng.out[i + 2] << 24;
-        if (!plat_midi_out_room(TO_USB | TO_BLE))
-            break;                                 /* full: keep it for the next frame */
-        plat_midi_send(pkt, TO_USB | TO_BLE);
+        /* room 0 has TWO different causes: the wire ring is full (hold the event
+         * for the next frame), or every link in `to` is down (the plat returns 0
+         * then, not a big room). The second must not starve the local GM: with
+         * USB and BLE both down the old check broke here and the synth went
+         * silent though the engine kept stepping (John 2026-10-28: sound only
+         * while a link was up). So: the wire send waits for room, the GM feed
+         * never does; the event is consumed either way — the platform's send
+         * drops on a full ring itself, and a disconnected wire has no listener
+         * to lose. */
+        if (plat_midi_out_room(TO_USB | TO_BLE))
+            plat_midi_send(pkt, TO_USB | TO_BLE);
         eng_sent += n;
         /* and into the GM synth: the wire hears it, the local sound does too.
          * d1/d2 live just past the status byte. */
@@ -630,3 +654,33 @@ int app_expect(const char *what, int *got)
     return 1;
 }
 #endif
+
+/* the remote log's app line: is the render alive, is EAS alive, is it loud?
+ * (the platform's b is 48 chars: keep under it) */
+void app_log_line(char *b)
+{
+    static const char H[] = "0123456789ABCDEF";
+    char *q = b;
+    const char *l = "app r";
+    while (*l) *q++ = *l++;
+    q[0] = H[(render_blocks >> 20) & 15]; q[1] = H[(render_blocks >> 16) & 15];
+    q[2] = H[(render_blocks >> 12) & 15]; q[3] = H[(render_blocks >> 8) & 15];
+    q[4] = H[(render_blocks >> 4) & 15]; q[5] = H[render_blocks & 15];
+    q += 6;
+    for (l = " g"; *l;) *q++ = *l++;
+    q[0] = H[(gm_blocks >> 20) & 15]; q[1] = H[(gm_blocks >> 16) & 15];
+    q[2] = H[(gm_blocks >> 12) & 15]; q[3] = H[(gm_blocks >> 8) & 15];
+    q[4] = H[(gm_blocks >> 4) & 15]; q[5] = H[gm_blocks & 15];
+    q += 6;
+    for (l = " m"; *l;) *q++ = *l++;
+    q[0] = H[(last_master_q12 >> 8) & 15]; q[1] = H[(last_master_q12 >> 4) & 15];
+    q[2] = H[last_master_q12 & 15];
+    q += 3;
+    for (l = " e"; *l;) *q++ = *l++;
+    *q++ = (char)('0' + (eas_ok != 0));
+    for (l = " p"; *l;) *q++ = *l++;
+    q[0] = H[(gm_last_peak >> 8) & 15]; q[1] = H[(gm_last_peak >> 4) & 15];
+    q[2] = H[gm_last_peak & 15];
+    q += 3;
+    *q = 0;
+}

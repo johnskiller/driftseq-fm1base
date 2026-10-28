@@ -38,3 +38,8 @@ void app_say(const char *a, const char *b);   /* a short message on the screen a
 /* the host simulator's checks (host/plat_host.c "expect"): octave, wave, note (-1 none), dirty, turnsN */
 #define APP_HOST_EXPECT
 int app_expect(const char *what, int *got);
+
+/* the remote's `log` gets one app line (platform device main_fm1.c calls it before "end"):
+ * whatever answers "why is it silent" — the render counter, the live gain, EAS's state */
+#define APP_LOG_HOOK
+void app_log_line(char *b);
