@@ -39,7 +39,7 @@ static const uint16_t SC_SET[SC_NKIND] = {
 };
 
 enum { OC_MAJ, OC_SEV, OC_M7, OC_MIN, OC_DIM, OC_ADD9, OC_SUS, OC_SIX, OC_NCOMP };
-static const char *const OC_NAME[OC_NCOMP] = {"MAJ", "7", "M7", "MIN", "DIM", "ADD", "SUS", "6"};
+static const char *const OC_NAME[OC_NCOMP] = {"MAJ", "7", "M7", "MIN", "DIM", "ADD9", "SUS4", "6"};
 
 typedef struct { uint8_t n; int8_t t[4]; } Chord;   /* semitones above the root, sorted */
 
