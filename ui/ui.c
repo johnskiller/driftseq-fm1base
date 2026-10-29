@@ -26,7 +26,7 @@ static uint8_t scale_key_hook(uint8_t key, uint8_t down);
 static void scale_encoder(uint8_t enc, int8_t det);
 static uint8_t scale_button(uint8_t btn);
 static void draw_scale(void);
-static void scale_leds(uint32_t *litK, uint32_t *litB, uint8_t is_drum);
+static void scale_leds(uint32_t *litK, uint32_t *dimK, uint32_t *litB, uint8_t is_drum);
 
 static ds_track *TRK(void) { return &eng.pat.track[sel_track]; }
 static uint8_t is_drum_trk(void) { return TRK()->channel == 9; }
@@ -522,7 +522,7 @@ static void ui_leds(uint32_t *litK, uint32_t *dimK, uint32_t *litB, uint32_t *di
     if (tr->mute)                    /* muted track: no hit LEDs, ruler stays */
         *litK = 0;
 
-    scale_leds(litK, litB, is_drum);                 /* the SCALE/OFC zone lights (ui_scale.c) */
+    scale_leds(litK, dimK, litB, is_drum);           /* the SCALE/OFC zone lights (ui_scale.c) */
 
     /* button LEDs (only states that actually exist in v1 — REC is a momentary
      * cursor-step toggle, not an armed mode, so it has no idle light) */

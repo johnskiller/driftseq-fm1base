@@ -116,9 +116,9 @@ wait 20
 
 # -- LATCH (K4 right, on the SCALE page — K4 was spare): release keeps sounding --
 tap SEL                           # the SCALE page owns K1..K4
-turn K4 1                         # LATCH
+turn K3 1                         # GATE -> LATCH (one knob, three dead stops)
 tap SEL                           # back
-expect ofc 3
+expect ofc 2
 key 7 down 100                    # C
 key 22 down 100                   # MIN: C Eb G
 wait 20
@@ -131,7 +131,7 @@ key 22 down 100                   # press again = toggle off: offs + single C
 wait 20
 out                               # 80 3C 80 3F 80 43 then 90 3C
 tap SEL
-turn K4 -1                        # LATCH -> GATE boundary: silence
+turn K3 -1                        # LATCH -> GATE boundary: silence
 tap SEL
 wait 50
 out                               # 80 3C (the latched single goes off)

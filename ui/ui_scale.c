@@ -91,12 +91,11 @@ static Chord oc_resolve(uint8_t mask)
 /* ---- state ---- */
 static uint8_t sc_kind = SC_CHR;                  /* K1 (John: chromatic by default) */
 static uint8_t sc_tonic = 0;                      /* K2, pitch class 0..11 (0=C) */
-static uint8_t sc_ofc;                            /* K3: one-finger chords on */
+static uint8_t sc_ofc;                            /* K3: 0 = OFF, 1 = GATE, 2 = LATCH */
 static uint8_t sc_root_key = 0xFF;               /* Root SELECTION: persists after release */
 static uint8_t sc_gate = 0xFF;                   /* the physically held root (GATE): 0xFF = silent */                /* held root's KEY ID, 0xFF none */
 static uint8_t sc_deg_key = 0xFF;                 /* held degree key (0..6), 0xFF none */
 static uint8_t sc_mask;                           /* held component keys' bitmask */
-static uint8_t sc_latch;                          /* K4: sounding mode, 0 = GATE, 1 = LATCH */
 
 /* snap a MIDI note into the scale: nearest scale tone, tie takes the lower */
 static int ui_snap(int note)
@@ -184,8 +183,13 @@ static uint8_t sc_degree_chord(uint8_t d, int8_t *t)
     t[0] = 0;
     t[1] = SC_STEP(2);                               /* the third */
     t[2] = SC_STEP(4);                               /* the fifth */
-    t[3] = SC_STEP(6);                               /* the seventh */
-    return 4;
+    /* the seventh is OPT-IN (John 2026-10-29: the natural degrees are the
+     * triads — i=Cmaj, ii=Dmin, iii=Emin, iv=Fmaj; the 7/M7 keys add it) */
+    if (sc_mask & ((1u << OC_SEV) | (1u << OC_M7))) {
+        t[3] = SC_STEP(6);
+        return 4;
+    }
+    return 3;
     #undef SC_STEP
 }
 
@@ -198,8 +202,10 @@ static void sc_flavor(int8_t *t, uint8_t *pn)
     else if (m & (1u << OC_MAJ)) t[1] = 4;           /* force the major third */
     if (m & (1u << OC_DIM)) { t[1] = 3; t[2] = 6; }  /* the dim: minor third + flat fifth */
     if (m & (1u << OC_SIX)) t[2] = 9;                /* the sixth replaces the fifth */
-    if ((m & (1u << OC_SEV)) || (m & (1u << OC_M7)))
-        t[3] = (m & (1u << OC_M7)) ? 11 : 10;        /* the seventh (replaces the scale's) */
+    if (m & (1u << OC_M7))
+        t[3] = 11;                                   /* M7 forces the major seventh;
+                                                      * plain 7 keeps the scale's own
+                                                      * (diatonic) seventh from sc_degree_chord */
     if (m & (1u << OC_ADD9) && n < 4) { t[n++] = 14; }   /* the ninth, closed position */
     *pn = n;
 }
@@ -295,7 +301,7 @@ static uint8_t scale_key_hook(uint8_t key, uint8_t down)
             sc_grid_write();
         } else if (!down && sc_deg_key == key) {
             sc_deg_key = 0xFF;
-            if (sc_latch) return 1;               /* LATCH: the latched chord keeps
+            if (sc_ofc == 2) return 1;            /* LATCH: the latched chord keeps
                                                    * sounding (selection persists) */
             sc_tones_n = 0;                       /* GATE: the walk ends: silence */
             sc_apply();
@@ -316,7 +322,7 @@ static uint8_t scale_key_hook(uint8_t key, uint8_t down)
             sc_grid_write();
         } else if (sc_gate == key) {
             sc_deg_key = 0xFF;
-            if (sc_latch) return 1;               /* LATCH: the release keeps the
+            if (sc_ofc == 2) return 1;            /* LATCH: the release keeps the
                                                    * chord sounding (review §五.2);
                                                    * the gate stays latched */
             sc_gate = 0xFF;                       /* GATE: root up = sound off; the
@@ -348,14 +354,23 @@ static uint8_t scale_key_hook(uint8_t key, uint8_t down)
     return 0;                                     /* keys 1..5 spare: fall through */
 }
 
-/* the panel's key lights for this layer: the right hand must SEE its zone */
-static void scale_leds(uint32_t *litK, uint32_t *litB, uint8_t is_drum)
+/* the panel's key lights for this layer: with OFC on the whole right zone
+ * sits DIM (John 2026-10-29) and each pressed/selected key lights — the
+ * panel shows the selection, not just "this zone does something". */
+static void scale_leds(uint32_t *litK, uint32_t *dimK, uint32_t *litB, uint8_t is_drum)
 {
     uint8_t i;
     if (sc_ofc && !is_drum) {
-        for (i = 0; i < OC_NCOMP; i++)               /* the 8 component keys */
-            *litK |= 1u << (19 + i);
-        if (sc_root_key != 0xFF)                     /* the selected root */
+        for (i = 0; i < OC_NCOMP; i++)               /* the component zone: dim base */
+            *dimK |= 1u << (19 + i);
+        for (i = 0; i <= 6; i++)                     /* the degree zone: dim base —
+                                                      * but CHR has no degrees (John) */
+            if (sc_kind != SC_CHR) *dimK |= 1u << i;
+        for (i = 0; i < OC_NCOMP; i++)               /* a selected component lights */
+            if (sc_mask >> i & 1u) *litK |= 1u << (19 + i);
+        if (sc_deg_key != 0xFF)                      /* the walking degree lights */
+            *litK |= 1u << sc_deg_key;
+        if (sc_root_key != 0xFF)                     /* the selected root lights */
             *litK |= 1u << sc_root_key;
     }
     if (ui_mode == M_SCALE)
@@ -381,7 +396,7 @@ static void draw_scale(void)
     cv_text(96, 28, &FONT_T, ui_note_name(sc_tonic), TB_TX);
     cv_text(8, 46, &FONT_T, "CHORD KEYS", C_AMB);
     if (sc_ofc)                                     /* John: K4 = GATE / LATCH */
-        cv_text(96, 46, &FONT_T, sc_latch ? "ON LATCH" : "ON GATE", C_HI);
+        cv_text(96, 46, &FONT_T, sc_ofc == 2 ? "ON LATCH" : "ON GATE", C_HI);
     else
         cv_text(96, 46, &FONT_T, "OFF", C_GRAY);
 
@@ -447,6 +462,23 @@ static void draw_scale(void)
         }
         cv_text(x0 + 2 + 20 - 30, y0 + 100, &FONT_T, "MAJ+DIM = AUG", C_GRAY);
     }
+    /* the ACTIVE chord as it will be sent (John 2026-10-29: show the notes
+     * so the player can verify OFC is doing what he thinks). Empty = silence. */
+    if (sc_ofc && !is_drum_trk()) {
+        char names[20];
+        char *q = names;
+        uint8_t i;
+        *q = 0;
+        for (i = 0; i < sc_tones_n; i++) {
+            const char *nm = ui_note_name((uint8_t)(sc_tones[i] % 12));
+            while (*nm) *q++ = *nm++;
+            if (i + 1 < sc_tones_n) *q++ = ' ';
+        }
+        *q = 0;
+        if (names[0])
+            cv_text(6, 186, &FONT_T, names, C_HI);   /* under the AUG hint (y 172+14);
+                                                      * footer owns 216+ */
+    }
     cv_blit_band(0, 0, 216);                          /* the footer painter owns 216+ */
     ui_draw_footer();                                 /* the SCALE footer (else stale pixels stay) */
 }
@@ -466,24 +498,20 @@ static void scale_encoder(uint8_t enc, int8_t det)
         if (v > 11) v = 11;
         sc_tonic = (uint8_t)v;
     } else if (enc == EN_K3) {
-        /* John: no cycling — left detent = OFF, right detent = ON, dead stops */
-        if (det < 0) sc_ofc = 0;
-        if (det > 0) sc_ofc = 1;
-        if (!sc_ofc) {                            /* full stop: no hanging notes
-                                                   * (the review's MIDI-hygiene rule) */
+        /* John 2026-10-29: one knob, three states — OFF / GATE / LATCH,
+         * dead stops both ends (K4 is freed). LATCH->GATE silences at the
+         * boundary so no notes stick when the player expects gate. */
+        uint8_t prev = sc_ofc;
+        if (det < 0 && sc_ofc > 0) sc_ofc--;
+        if (det > 0 && sc_ofc < 2) sc_ofc++;
+        if (!sc_ofc) {                            /* OFF: full stop, no hanging notes */
             sc_tones_n = 0;
             sc_apply();
             sc_mask = 0;
             sc_gate = 0xFF;
             sc_root_key = 0xFF;
             sc_deg_key = 0xFF;
-        }
-    } else if (enc == EN_K4) {                       /* John: K4 = the sounding mode */
-        if (det < 0) sc_latch = 0;                   /* left = GATE, right = LATCH */
-        if (det > 0) sc_latch = 1;                   /* dead stops, like K3 */
-        if (!sc_latch) {                             /* LATCH -> GATE: a clear boundary —
-                                                      * silence, so no stuck notes when the
-                                                      * player believes the mode is gate */
+        } else if (prev == 2 && sc_ofc == 1) {    /* the LATCH->GATE boundary */
             sc_tones_n = 0;
             sc_apply();
             sc_gate = 0xFF;
