@@ -91,14 +91,16 @@ sizeof(ds_track)   1,101 B   64 steps + 13 B meta
 sizeof(ds_pattern) 17,616 B
 ```
 
-固件构建（`build.py`，最后一次）：
+固件构建（`build.py`，最后一次 = Track Settings 之后）：
 
 ```
-image 250,508 B
-RAM   .data+.bss 68,276 B of 98,304   余 30,028
-pool  155,192 B of 344,064            余 188,872
-fwsc  611,496 B, identity FM-1_9200
+image 517,644 B of 581,564   余 63,920
+RAM   .data+.bss 68,612 B of 98,304   余 29,692
+pool  254,776 B of 344,064            余 89,288
+fwsc  611,547 B, identity FM-1_9200
 ```
+
+Track Settings 一页的代价（实测）：**+4,144 B flash**（含 128 条 GM 名表 ≈1.4 KB、`ds_route_sync`、MONO），RAM **±0**（`mono_note[16]` 与 gate/live 各 +1 字节抵消 memset 里的冗余赋值）。
 
 `eng`（`ds_state`）在 `.pool`，不在 DRAM。这是 `9744689` 的成果：DRAM 94,436 → 68,276。
 
@@ -243,6 +245,41 @@ AC79_SDK=/tmp/fw-AC79_AIoT_SDK JIELI_TOOLCHAIN=/home/john/.jieli/toolchain \
 和弦行排版：名字与音名固定 12px 间隙；名字 `text_w()` 实测超 232px 降档 FONT_B+FONT_T（`Cdim(maj7)` 这类长名走降档，实测名 x8..108 + 音名 x123..175 不重叠）。
 
 实测尺寸：image **513,500 B** / slot 581,564 → 余 **68,064 B**；fwsc 611,547 B。
+
+## Track Settings 页（`9c3e89a`，2026-10-29）
+
+入口 = **ENV 键**（`B_ENV`，此前无任何页面使用）。五字段全做 + MONO + global swing。
+
+| 行 | 字段 | 范围 / 死停 | 页面绘制 |
+| --- | --- | --- | --- |
+| CHANNEL | `ds_track.channel` | 0..15（屏显 1..16），改到 9 即鼓轨 | `CHANNEL  10` |
+| PROGRAM | `ds_track.prog` | 0..127 | `039 SYNTH BASS 1`（自建 128 条 GM 缩写名表；树内原本无 GM 名表） |
+| ROUTE | `ds_track.route` | USB / GM / USB+GM | `USB` `GM` `USB+GM` |
+| VOICE | `ds_track.voice_mode` | POLY / MONO | `POLY` `MONO` |
+| SWING | `ds_track.swing_amt` | 0..100 步进 5 | `100%` |
+
+- **K1 移行**（死停 0..4）、**K2 改值**、**K3 仍是 MUTE/SOLO**（肌肉记忆）、**K4 = global swing**（0..100 步进 5）
+- 没有 global swing 入口时 `swing_amt` 恒乘 0 —— 这是它此前全线失效的原因，现在 K4 直接写 `eng.global_swing`
+- 下半屏 = **CHANNEL MAP**：16 格，实心=本轨，亮数字空心=别的轨占着，暗=空闲；下方 `SHARED WITH T1 T2`（最多 3 个 + `+N`）
+- 顶栏 `h.page = 3`（HDR_DOTS 仍 5；曾试 6 但越出右边界，回退）
+
+### 引擎侧同时落地（`2c21d00`、`d3092d9`）
+三个字段此前引擎从未读过（只有 pack/clear 用），上线必须同时给语义：
+- `route` → `ds_route_sync()` 维护 `wire_mask`/`gm_mask`（按 channel 位），`app.c` drain 按 `wire_mask` 决定是否 `plat_midi_send`，GM 侧按 `gm_mask` 喂 EAS。每 block 重算（16 次迭代），页面改完立即生效
+- `voice_mode` → MONO 每步只发**最高音**（和弦按进单音轨时语义正确），`mono_note[t]` 记住本轨挂着的那一个，下一步先掐它
+- **channel 改动的挂音 bug**：`ds_gate_ev` / live pool 原本在 off 时回读 `track.channel`，页面改通道会让 off 发到错误通道 → 改为一律**捕获 note-on 时的通道**
+- 探针：`ts_row` `ts_ch` `ts_prog` `ts_route` `ts_voice` `ts_swing` `ts_gswing` `ts_prog_hash`(djb2)
+
+### 测试
+- `tests/trkset.txt`：**69 断言**全通过（门、五个字段两端死停、1-based 显示、逐轨独立、PROGRAM 行 djb2、HOME/SEL 出口）
+- `tests/trkset_route.txt`：**ROUTE 到线缆边界** —— 16 轨全 GM → `midi_out == 0`；全 USB → `midi_out == 45`
+- `tests_engine/test_trkset.c`：ROUTE 掩码 / MONO 掐音 / SWING / 通道改动后 off 走原通道
+- golden 哈希 `420C4824C85B79CB`、242 note-ons **不变**
+- ASAN 全跑 trkset+scale 无报错
+
+### 两个已修的 bug（都是真 bug，不是测试错）
+1. **`txt_pool` 越界写坏 `jam_menu`**：`SHARED WITH T1 T2 …` 最多 58 字符，塞进 36 字节槽 → 溢出到 `jam_menu`(=50) → 悄悄打开 SAVE 菜单 → 菜单吞掉 K1/K2，"K2 没反应"其实是缓冲区溢出。改用局部 `char[48]` + 列表上限 3 名 + `+N`
+2. **`tests/scale.txt` 4 处注释行**（`#` 前有空格）让解析器以 `unknown command` 停机，28 条断言实际只跑了 25 条 —— 此前"0 fails"是没跑完。已并入前一行注释，现 28 条全跑全过
 
 ## 未验证（真机一次没刷过）
 

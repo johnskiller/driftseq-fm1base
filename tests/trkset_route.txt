@@ -1,0 +1,232 @@
+# ROUTE at the box's edge: not 'the masks were computed' but 'what left the
+# cable'. The host counts what plat_midi_send put on the wire, and the sim is
+# deterministic, so the numbers below are facts, not guesses.
+wait 600
+
+# --- put all 16 tracks on GM (the local synth): the wire must stay silent ---
+tap ENV
+wait 20
+expect mode 4
+turn K1 2
+wait 3
+turn K2 -1
+wait 3
+expect ts_route 1
+turn SELECT 1
+wait 3
+turn K1 2
+wait 3
+turn K2 -1
+wait 3
+expect ts_route 1
+turn SELECT 1
+wait 3
+turn K1 2
+wait 3
+turn K2 -1
+wait 3
+expect ts_route 1
+turn SELECT 1
+wait 3
+turn K1 2
+wait 3
+turn K2 -1
+wait 3
+expect ts_route 1
+turn SELECT 1
+wait 3
+turn K1 2
+wait 3
+turn K2 -1
+wait 3
+expect ts_route 1
+turn SELECT 1
+wait 3
+turn K1 2
+wait 3
+turn K2 -1
+wait 3
+expect ts_route 1
+turn SELECT 1
+wait 3
+turn K1 2
+wait 3
+turn K2 -1
+wait 3
+expect ts_route 1
+turn SELECT 1
+wait 3
+turn K1 2
+wait 3
+turn K2 -1
+wait 3
+expect ts_route 1
+turn SELECT 1
+wait 3
+turn K1 2
+wait 3
+turn K2 -1
+wait 3
+expect ts_route 1
+turn SELECT 1
+wait 3
+turn K1 2
+wait 3
+turn K2 -1
+wait 3
+expect ts_route 1
+turn SELECT 1
+wait 3
+turn K1 2
+wait 3
+turn K2 -1
+wait 3
+expect ts_route 1
+turn SELECT 1
+wait 3
+turn K1 2
+wait 3
+turn K2 -1
+wait 3
+expect ts_route 1
+turn SELECT 1
+wait 3
+turn K1 2
+wait 3
+turn K2 -1
+wait 3
+expect ts_route 1
+turn SELECT 1
+wait 3
+turn K1 2
+wait 3
+turn K2 -1
+wait 3
+expect ts_route 1
+turn SELECT 1
+wait 3
+turn K1 2
+wait 3
+turn K2 -1
+wait 3
+expect ts_route 1
+turn SELECT 1
+wait 3
+turn K1 2
+wait 3
+turn K2 -1
+wait 3
+expect ts_route 1
+expect track 15
+
+# USB+GM puts the mix on the wire: 45 messages in 300 ms from the demo.
+# No track is on USB at all yet, so this is 0.
+tap PLAY
+wait 300
+tap PLAY
+wait 20
+expect midi_out 0
+
+# --- now give every track USB back; the full mix returns ---
+expect track 15
+turn K1 2
+wait 3
+turn K2 1
+wait 3
+turn SELECT -1
+wait 3
+turn K1 2
+wait 3
+turn K2 1
+wait 3
+turn SELECT -1
+wait 3
+turn K1 2
+wait 3
+turn K2 1
+wait 3
+turn SELECT -1
+wait 3
+turn K1 2
+wait 3
+turn K2 1
+wait 3
+turn SELECT -1
+wait 3
+turn K1 2
+wait 3
+turn K2 1
+wait 3
+turn SELECT -1
+wait 3
+turn K1 2
+wait 3
+turn K2 1
+wait 3
+turn SELECT -1
+wait 3
+turn K1 2
+wait 3
+turn K2 1
+wait 3
+turn SELECT -1
+wait 3
+turn K1 2
+wait 3
+turn K2 1
+wait 3
+turn SELECT -1
+wait 3
+turn K1 2
+wait 3
+turn K2 1
+wait 3
+turn SELECT -1
+wait 3
+turn K1 2
+wait 3
+turn K2 1
+wait 3
+turn SELECT -1
+wait 3
+turn K1 2
+wait 3
+turn K2 1
+wait 3
+turn SELECT -1
+wait 3
+turn K1 2
+wait 3
+turn K2 1
+wait 3
+turn SELECT -1
+wait 3
+turn K1 2
+wait 3
+turn K2 1
+wait 3
+turn SELECT -1
+wait 3
+turn K1 2
+wait 3
+turn K2 1
+wait 3
+turn SELECT -1
+wait 3
+turn K1 2
+wait 3
+turn K2 1
+wait 3
+turn SELECT -1
+wait 3
+turn K1 2
+wait 3
+turn K2 1
+wait 3
+expect track 0
+tap PLAY
+wait 300
+tap PLAY
+wait 20
+expect midi_out 45
+shot trk_route_done.png

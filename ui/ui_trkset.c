@@ -170,7 +170,9 @@ static void trkset_encoder(uint8_t enc, int8_t det)
 }
 
 /* the page's SEL/ENV/leave handling. ENV is the door (John's pick: the printed
- * label is a lie either way, and ENV is the one key no page has ever used). */
+ * label is a lie either way, and ENV is the one key no page has ever used).
+ * Note SEL is not handled here: scale_button runs first and owns it, so SEL
+ * from this page goes to SCALE, which is where the panel says it goes. */
 static uint8_t trkset_button(uint8_t btn)
 {
     if (btn == B_ENV) {
@@ -181,8 +183,15 @@ static uint8_t trkset_button(uint8_t btn)
     }
     if (ui_mode != M_TRKSET)
         return 0;
-    if (btn == B_HOME || btn == B_SEQ || btn == B_ARP || btn == B_SEL)
-        ui_mode = M_HOME;                        /* any screen switch leaves */
+    if (btn == B_HOME) {
+        ui_mode = M_HOME;
+        return 1;                                /* consumed: the generic B_HOME case
+                                                  * would otherwise toggle HOME->GRID
+                                                  * on the mode we just cleared. SEQ and
+                                                  * ARP fall through to their own cases:
+                                                  * they already set the page you asked
+                                                  * for. */
+    }
     return 0;
 }
 

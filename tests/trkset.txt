@@ -192,3 +192,21 @@ expect ts_ch 9
 expect ts_prog 0
 expect ts_route 2
 expect ts_voice 0
+
+# --- HOME leaves to HOME, not to GRID (the generic handler would toggle) ---
+expect mode 4
+tap HOME
+wait 20
+expect mode 0
+
+# --- SEL is SCALE's, as the panel says: it leaves this page for SCALE ---
+tap ENV
+wait 20
+expect mode 4
+tap SEL
+wait 20
+expect mode 3
+expect ofc 0
+tap SEL
+wait 20
+expect mode 0
