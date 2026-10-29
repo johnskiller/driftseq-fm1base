@@ -550,10 +550,17 @@ static void draw_scale(void)
         }
         *q = 0;
         if (chord[0]) {                              /* the NAME first (John), then the
-                                                      * notes it actually sends */
-            cv_text(6, 186, &FONT_T, chord, C_AMB);
-            for (w = 0; chord[w]; w++) ;
-            cv_text(6 + w * 5 + 6, 186, &FONT_T, notes, C_HI);
+                                                      * notes it actually sends. FONT_M:
+                                                      * this row is the page's answer, so
+                                                      * it gets the room the footer left */
+            int32_t cw = text_w(&FONT_M, chord);      /* real advance, not a guess */
+            if (6 + cw + 8 + text_w(&FONT_S, notes) > 232) {
+                cv_text(6, 190, &FONT_B, chord, C_AMB);
+                cv_text(6 + text_w(&FONT_B, chord) + 6, 190, &FONT_T, notes, C_HI);
+            } else {
+                cv_text(6, 186, &FONT_M, chord, C_AMB);
+                cv_text(6 + cw + 8, 190, &FONT_S, notes, C_HI);
+            }
         }
     }
     cv_blit_band(0, 0, 216);                          /* the footer painter owns 216+ */
