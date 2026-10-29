@@ -94,13 +94,13 @@ sizeof(ds_pattern) 17,616 B
 固件构建（`build.py`，最后一次 = Track Settings 之后）：
 
 ```
-image 517,740 B of 581,564   余 63,824
+image 518,012 B of 581,564   余 63,552
 RAM   .data+.bss 68,612 B of 98,304   余 29,692
 pool  254,776 B of 344,064            余 89,288
-fwsc  611,547 B, identity FM-1_9200  (md5 前缀 9b5f510c，未刷机)
+fwsc  611,547 B, identity FM-1_9200  (未刷机)
 ```
 
-Track Settings 一页的代价（实测）：**+4,240 B flash**（含 128 条 GM 名表 ≈1.4 KB、`ds_route_sync`、MONO），RAM **±0**（`mono_note[16]` 与 gate/live 各 +1 字节抵消 memset 里的冗余赋值）。
+Track Settings 一页的代价（实测）：**+4,512 B flash**（含 128 条 GM 名表 ≈1.4 KB、`ds_route_sync`、MONO），RAM **±0**（`mono_note[16]` 与 gate/live 各 +1 字节抵消 memset 里的冗余赋值）。
 
 `eng`（`ds_state`）在 `.pool`，不在 DRAM。这是 `9744689` 的成果：DRAM 94,436 → 68,276。
 
@@ -253,7 +253,7 @@ AC79_SDK=/tmp/fw-AC79_AIoT_SDK JIELI_TOOLCHAIN=/home/john/.jieli/toolchain \
 | 行 | 字段 | 范围 / 死停 | 页面绘制 |
 | --- | --- | --- | --- |
 | CHANNEL | `ds_track.channel` | 0..15（屏显 1..16），改到 9 即鼓轨 | `CHANNEL  10` |
-| PROGRAM | `ds_track.prog` | 0..127 | `039 SYNTH BASS 1`（自建 128 条 GM 缩写名表；树内原本无 GM 名表） |
+| PROGRAM | `ds_track.prog` | 0..127 | 旋律轨：`039 SYNTH BASS 1`（自建 128 条 GM 缩写名表）；**鼓轨（CH=10）：`025 ELECTRONIC KIT`**（program 在鼓通道选的是鼓组，不是音色） |
 | ROUTE | `ds_track.route` | USB / GM / USB+GM | `USB` `GM` `USB+GM` |
 | VOICE | `ds_track.voice_mode` | POLY / MONO | `POLY` `MONO` |
 | SWING | `ds_track.swing_amt` | 0..100 步进 5 | `100%` |
@@ -271,7 +271,7 @@ AC79_SDK=/tmp/fw-AC79_AIoT_SDK JIELI_TOOLCHAIN=/home/john/.jieli/toolchain \
 - 探针：`ts_row` `ts_ch` `ts_prog` `ts_route` `ts_voice` `ts_swing` `ts_gswing` `ts_prog_hash`(djb2)
 
 ### 测试
-- `tests/trkset.txt`：**69 断言**全通过（门、五个字段两端死停、1-based 显示、逐轨独立、PROGRAM 行 djb2、HOME/SEL 出口）
+- `tests/trkset.txt`：**76 断言**全通过（门、五个字段两端死停、1-based 显示、逐轨独立、PROGRAM 行 djb2、HOME/SEL 出口）
 - `tests/trkset_route.txt`：**ROUTE 到线缆边界** —— 16 轨全 GM → `midi_out == 0`；全 USB → `midi_out == 45`
 - `tests_engine/test_trkset.c`：ROUTE 掩码 / MONO 掐音 / SWING / 通道改动后 off 走原通道
 - golden 哈希 `420C4824C85B79CB`、242 note-ons **不变**
