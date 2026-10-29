@@ -327,60 +327,6 @@ static const char *const SC_FULL[SC_NKIND] = {
     "PENT.MINOR", "BLUES", "CHROMATIC"
 };
 
-/* The diagram greys by SPELLING, not by pitch class (John: C# major must grey
- * the C key even though B# shares its pitch class — the key signature says
- * every letter is sharped). Degrees are (letter, pitch) pairs: letters walk
- * one per degree (floor(interval * 7 / 12) from the tonic's letter); a key is
- * lit iff a degree shares its letter AND its pitch. The tonic's letter is the
- * one spelling the scale with the fewest accidentals. CHROMATIC lights all.
- * Returns the lit mask over the 27 key ids (bit k = key k). */
-static uint32_t sc_spell_keys(void)
-{
-    /* tonic's conventional letter: C C# D Eb E F F# G G# A Bb B */
-    static const int8_t TONIC_L[12] = {0, 0, 1, 2, 2, 3, 3, 4, 4, 5, 6, 6};
-    static const int8_t BASE[7] = {0, 2, 4, 5, 7, 9, 11};       /* C D E F G A B */
-    static const int8_t PCL[12] = {0, 0, 1, 1, 2, 3, 3, 4, 4, 5, 5, 6}; /* pc -> lower letter */
-    uint16_t set = SC_SET[sc_kind];
-    uint32_t lit = 0;
-    int8_t iv[12], deg_pc[12];
-    int n = 0, n_deg;
-
-    if (sc_kind == SC_CHR)                                      /* every key lit */
-        return ~0u;
-    for (int i = 0; i < 12; i++)
-        if (set >> i & 1) iv[n++] = i;
-
-    if (n == 7) {                       /* diatonic: one letter per degree, ascending — the key
-                                         * signature's own spelling, so C# major greys the C key */
-        for (int d = 0; d < 7; d++) {
-            int dpc = (sc_tonic + iv[d]) % 12;
-            int L = (TONIC_L[sc_tonic] + d) % 7;
-            int acc = dpc - BASE[L];
-            if (acc > 6) acc -= 12;
-            if (acc < -6) acc += 12;
-            deg_pc[d] = (BASE[L] + acc + 12) % 12;
-        }
-        n_deg = 7;
-    } else                              /* pentatonic / blues: no signature — pitch classes */
-        for (int d = 0; d < n; d++) deg_pc[d] = (sc_tonic + iv[d]) % 12;
-
-    /* light every key matching a degree's letter AND pitch (diatonic) or just
-     * its pitch (pentatonic); a black key carries either boundary letter */
-    for (int k = 0; k < 27; k++) {
-        int pc = (k + 5) % 12;                                  /* id 0 = F3 */
-        int black = (pc == 1 || pc == 3 || pc == 6 || pc == 8 || pc == 10);
-        for (int d = 0; d < n_deg; d++) {
-            if (deg_pc[d] != pc) continue;
-            if (n < 7 || PCL[pc] == ((TONIC_L[sc_tonic] + d) % 7) ||
-                (black && (PCL[pc] + 1) % 7 == ((TONIC_L[sc_tonic] + d) % 7))) {
-                lit |= 1u << k;
-                break;
-            }
-        }
-    }
-    return lit;
-}
-
 static void draw_scale(void)
 {
     uint8_t i;
@@ -403,11 +349,10 @@ static void draw_scale(void)
         const uint8_t BLACK_LOW[11] = {0, 1, 2, 4, 5, 7, 8, 9, 11, 12, 14};  /* key -> lower white ordinal */
         const uint8_t BLACK_KEY[11] = {1, 3, 5, 8, 10, 13, 15, 17, 20, 22, 25};
         int x0 = 14, y0 = 72, kw = 11, kp = 13;
-        uint32_t lit = sc_spell_keys();              /* spelled degrees, see above */
         for (i = 0; i < 16; i++) {                   /* the white keys */
             uint8_t k = WHITE_KEYS[i];
             int pc = (k + 5) % 12;                   /* id 0 = F3: pc = (F3 + k) % 12 */
-            int in_scale = (lit >> k & 1);
+            int in_scale = (SC_SET[sc_kind] >> ((pc + 12 - sc_tonic) % 12) & 1);
             int tonic = (pc == sc_tonic);
             uint16_t col = in_scale ? C_WHITE : C_GRAY;
             if (sc_root_key != 0xFF && k == sc_root_key) col = C_AMB;
@@ -421,9 +366,10 @@ static void draw_scale(void)
         }
         for (i = 0; i < 11; i++) {                   /* the black keys, real offsets */
             uint8_t k = BLACK_KEY[i];
-            int in_scale = (lit >> k & 1);
+            int pc = (k + 5) % 12;                   /* id 0 = F3 (see the whites) */
+            int in_scale = (SC_SET[sc_kind] >> ((pc + 12 - sc_tonic) % 12) & 1);
             int x = x0 + BLACK_LOW[i] * kp + kw - 3; /* straddling the boundary */
-            uint16_t col = in_scale ? C_BLACK : C_DIM;    /* out of scale: clearly lighter than black */
+            uint16_t col = in_scale ? C_BLACK : C_GRAY;   /* out of scale: the greyed family, same as the whites */
             if (sc_root_key != 0xFF && k == sc_root_key) col = C_AMB;
             cv_rect(x, y0, 7, 24, col);
         }
