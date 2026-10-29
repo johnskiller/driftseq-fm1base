@@ -384,7 +384,7 @@ static void draw_scale(void)
         cv_text(x0 + 4 * kp + (7 * kp - 4 * 7) / 2, y0 + 50, &FONT_T, "ROOT", C_GRAY);
         cv_rect(x0 + 11 * kp, y0 + 43, 5 * kp - 2, 3, C_HI);
         cv_text(x0 + 11 * kp, y0 + 50, &FONT_T, "CHORD", C_HI);
-        /* /* the component legend spreads the CHORD zone across the full keybed width:
+        /* the component legend spreads the CHORD zone across the full keybed width:
          * the zone's five white columns map to 41px slots (the keybed is too
          * tight for text at 13px), blacks in the upper row, whites below — the
          * left-to-right order still reads along the keys (John: 可读性优先) */
