@@ -384,15 +384,22 @@ static void draw_scale(void)
         cv_text(x0 + 4 * kp + (7 * kp - 4 * 7) / 2, y0 + 50, &FONT_T, "ROOT", C_GRAY);
         cv_rect(x0 + 11 * kp, y0 + 43, 5 * kp - 2, 3, C_HI);
         cv_text(x0 + 11 * kp, y0 + 50, &FONT_T, "CHORD", C_HI);
-        /* the component legend: 3 + 5 in two rows, matching the CHORD zone's
-         * physical split (keys 19-21 = the top cluster, 22-26 = the rest);
+        /* the component legend sits ON its keys: black-key components in the
+         * upper row at their key's x, white-key components in the lower row
+         * (John: the two rows follow the physical 3 black + 5 white split);
          * a held component's text lights */
         for (i = 0; i < OC_NCOMP; i++) {
-            int row = i < 3 ? 0 : 1;
-            int col_n = row ? 5 : 3, ci = row ? i - 3 : i;
-            int span = 15 * kp - 4;                     /* the keybed's width */
-            int x = x0 + 2 + ci * (span - 26) / (col_n - 1);
-            int y = y0 + 70 + row * 15;
+            /* the key's x inside the CHORD zone: white ordinal (blacks ride
+             * the boundary 8px in, like the keybed above) */
+            static const int8_t KX[8] = {11, 11, 12, 12, 13, 14, 14, 15};
+            static const uint8_t KB[8] = {0, 1, 0, 1, 0, 0, 1, 0};  /* black? */
+            int keyx = x0 + KX[i] * kp + (KB[i] ? 8 : 0);
+            int t, tw = 0;                              /* FONT_T: ~5px advance */
+            for (t = 0; OC_NAME[i][t]; t++)
+                tw += 5;
+            tw -= 2;
+            int x = keyx + (KB[i] ? 3 : 5) - tw / 2;
+            int y = y0 + 70 + (KB[i] ? 0 : 15);
             uint16_t col = (sc_mask >> i & 1) ? C_HI : C_GRAY;   /* held = lit */
             cv_text(x, y, &FONT_T, OC_NAME[i], col);
         }
