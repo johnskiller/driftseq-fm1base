@@ -138,3 +138,39 @@ out                               # 80 3C (the latched single goes off)
 expect ofc 1
 key 22 up
 wait 20
+
+# -- CHR kills the degree keys (John: the object doesn't exist) --
+tap SEL
+turn K1 8                        # CHROMATIC
+tap SEL
+expect scale 2048                # kind 8 (CHR) << 8 | tonic 0
+key 7 down 100                   # C
+key 19 down 100                  # MAJ: C E G
+key 0 down 100                   # degree I: DEAD in CHR (no new events)
+wait 20
+out                              # (nothing new: the chord keeps sounding)
+key 0 up
+key 19 up
+key 7 up
+wait 20
+out                              # the plain root-up offs only
+
+# -- 6 + seventh = the 13th voicings (John: 支持; the fifth gives way) --
+key 7 down 100                   # C
+key 19 down 100                  # MAJ: C E G
+key 26 down 100                  # 6: C E G A
+wait 20
+out
+key 20 down 100                  # +7: C13(no5) = C E A Bb
+wait 20
+out
+key 20 up
+key 20 down 100                  # 7 off, then M7: Cmaj13(no5) = C E A B
+key 21 down 100
+wait 20
+out
+key 21 up
+key 26 up
+key 19 up
+key 7 up
+wait 20

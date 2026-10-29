@@ -56,8 +56,10 @@ static Chord oc_resolve(uint8_t mask)
     uint8_t has9   = (mask >> OC_ADD9) & 1u;
     int8_t t[5], tmp;
     uint8_t n = 0, i, j;
-    if ((thirds & (thirds - 1)) || (sevens & (sevens - 1)) || (has6 && sevens))
-        return out;                                   /* two of a slot / 6 with a 7th */
+    if ((thirds & (thirds - 1)) || (sevens & (sevens - 1)))
+        return out;                                   /* two of a slot */
+    /* 6 + a seventh is legal now: the fifth gives way at n==5 below
+     * (6+7 = the 13th chord's voicing, 6+M7 = maj13 — John: 支持) */
     t[n++] = 0;                                       /* the root */
     int aug = (thirds & (1u << OC_DIM)) && (mask & 1u);   /* MAJ+DIM = augmented */
     if (thirds & (1u << OC_MIN))      t[n++] = 3;
@@ -282,6 +284,10 @@ static uint8_t scale_key_hook(uint8_t key, uint8_t down)
      * gesture decision. Component keys TOGGLE: press a lit one to unselect. */
     if (focus_layer) return 0;                    /* EDIT layer keeps raw notes */
     if (key <= 6) {                               /* DEGREES I..VII: the chord walks */
+        if (sc_kind == SC_CHR)
+            return 1;                             /* John: CHR has no scale degrees —
+                                                   * the object doesn't exist; chord
+                                                   * input = the root keys only */
         if (down && sc_gate != 0xFF && sc_deg_key != key) {
             sc_deg_key = key;                     /* the scale re-voices, live */
             sc_revoice(sc_root_note(sc_gate));
