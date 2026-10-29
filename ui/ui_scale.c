@@ -38,8 +38,8 @@ static const uint16_t SC_SET[SC_NKIND] = {
     0x0FFF                                     /* CHR  everything */
 };
 
-enum { OC_MAJ, OC_MIN, OC_DIM, OC_SIX, OC_SEV, OC_M7, OC_SUS, OC_ADD9, OC_NCOMP };
-static const char *const OC_NAME[OC_NCOMP] = {"MAJ", "MIN", "DIM", "6", "7", "M7", "SUS4", "ADD9"};
+enum { OC_MAJ, OC_SEV, OC_M7, OC_MIN, OC_DIM, OC_ADD9, OC_SUS, OC_SIX, OC_NCOMP };
+static const char *const OC_NAME[OC_NCOMP] = {"MAJ", "7", "M7", "MIN", "DIM", "ADD9", "SUS4", "6"};
 
 typedef struct { uint8_t n; int8_t t[4]; } Chord;   /* semitones above the root, sorted */
 
@@ -398,7 +398,11 @@ static void draw_scale(void)
             for (t = 0; OC_NAME[i][t]; t++)
                 tw += 5;
             tw -= 2;
-            int x = keyx + (KB[i] ? 3 : 5) - tw / 2;
+            int x = keyx + (KB[i] ? 3 : 5) - tw / 2;    /* centred on the key */
+            if (!KB[i]) {                               /* whites: stay in the column */
+                if (x < keyx - 2) x = keyx - 2;
+                if (x + tw > keyx + 13) x = keyx + 13 - tw;
+            }
             int y = y0 + 70 + (KB[i] ? 0 : 15);
             uint16_t col = (sc_mask >> i & 1) ? C_HI : C_GRAY;   /* held = lit */
             cv_text(x, y, &FONT_T, OC_NAME[i], col);
