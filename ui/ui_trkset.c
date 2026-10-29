@@ -73,6 +73,17 @@ static const char *const GM_PROG[128] = {
 
 static const char *const TS_ROUTE_NAME[3] = {"USB", "GM", "USB+GM"};
 
+/* On the drum channel a program change picks a KIT, not an instrument, so the
+ * PROGRAM row must not say "ACOUSTIC GRAND" on a track whose notes are 36..51.
+ * These are the GM2 kit numbers EAS honours; anything else is a kit we have no
+ * name for, and the row then says just the number. */
+static const struct { uint8_t prog; const char *name; } GM_KIT[] = {
+    {0,  "STANDARD KIT"}, {8,  "ROOM KIT"},   {16, "POWER KIT"},
+    {24, "ELECTRONIC KIT"}, {25, "TR-808 KIT"}, {32, "JAZZ KIT"},
+    {40, "BRUSH KIT"},    {48, "ORCHESTRA KIT"}, {56, "SFX KIT"}
+};
+#define GM_KIT_N ((int)(sizeof GM_KIT / sizeof GM_KIT[0]))
+
 /* A CH or PROG change must re-send the program change, or the new sound only
  * arrives at the next PLAY: emit_pc runs once per track per run (pc_sent).
  * Clearing the flag makes the engine's next tick send it, which is what "I
@@ -200,9 +211,20 @@ static uint8_t trkset_button(uint8_t btn)
 static void ts_prog_text(char *b)
 {
     int32_t p = (int32_t)TRK()->prog;
+    int k;
     if (p < 9)      *b++ = '0', *b++ = '0';
     else if (p < 99) *b++ = '0';
     fmt_int(b, p + 1);                           /* GM numbers are 1-based on paper */
+    if (TRK()->channel == 9) {                   /* a drum track: program = kit */
+        for (k = 0; k < GM_KIT_N; k++) {
+            if (GM_KIT[k].prog != p)
+                continue;
+            strcpy_(txt_end(b), " ");
+            strcpy_(txt_end(b), GM_KIT[k].name);
+            return;
+        }
+        return;                                  /* a kit with no name: the number says it */
+    }
     strcpy_(txt_end(b), " ");
     strcpy_(txt_end(b), GM_PROG[TRK()->prog & 127]);
 }

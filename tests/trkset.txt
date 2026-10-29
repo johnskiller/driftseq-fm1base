@@ -59,29 +59,50 @@ turn K2 -1
 wait 10
 expect ts_ch 9
 
-# --- PROGRAM: 0..127, and the row draws "0NN <NAME>" ---
+# --- PROGRAM on a DRUM track: a program selects a KIT, so the row names kits ---
 turn K1 1
 wait 10
 expect ts_row 1
 expect ts_prog 0
-expect ts_prog_hash 58237
+expect ts_prog_hash 49231          # "001 STANDARD KIT"
 shot trk_prog0.png
+turn K2 24
+wait 10
+expect ts_prog 24
+expect ts_prog_hash 15916          # "025 ELECTRONIC KIT"
+shot trk_prog_kit.png
+turn K2 14
+wait 10
+expect ts_prog 38
+expect ts_prog_hash 34273          # "039": no kit has that number, so the number alone
+turn K2 -38
+wait 10
+expect ts_prog 0
+
+# --- the same field on a MELODIC channel names the instrument instead ---
+turn K1 -1
+wait 10                          # back to CHANNEL
+turn K2 1
+wait 10
+expect ts_ch 10                  # ch11: melodic, same 16-bit program
+turn K1 1
+wait 10
+expect ts_row 1
+expect ts_prog 0
+expect ts_prog_hash 58237          # "001 ACOUSTIC GRAND"
+shot trk_prog_melodic.png
 turn K2 38
 wait 10
 expect ts_prog 38
-expect ts_prog_hash 9361
+expect ts_prog_hash 9361           # "039 SYNTH BASS 1"
 shot trk_prog.png
-turn K2 -60
-wait 10
-expect ts_prog 0
-expect ts_prog_hash 58237
-turn K2 60
-wait 10
-expect ts_prog 60
-turn K2 68
+turn K2 89
 wait 10
 expect ts_prog 127
-expect ts_prog_hash 46248
+expect ts_prog_hash 46248          # "128 GUNSHOT": 1-based
+turn K2 40
+wait 10
+expect ts_prog 127
 turn K2 9
 wait 10
 expect ts_prog 127
