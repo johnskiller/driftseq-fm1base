@@ -59,11 +59,14 @@ static Chord oc_resolve(uint8_t mask)
     if ((thirds & (thirds - 1)) || (sevens & (sevens - 1)) || (has6 && sevens))
         return out;                                   /* two of a slot / 6 with a 7th */
     t[n++] = 0;                                       /* the root */
+    int aug = (thirds & (1u << OC_DIM)) && (mask & 1u);   /* MAJ+DIM = augmented */
     if (thirds & (1u << OC_MIN))      t[n++] = 3;
+    else if (aug)                     t[n++] = 4;     /* the major third returns */
     else if (thirds & (1u << OC_DIM)) t[n++] = 3;
     else if (thirds & (1u << OC_SUS)) t[n++] = 5;     /* the 4th replaces the 3rd */
     else                              t[n++] = 4;     /* implied MAJ */
-    if (thirds & (1u << OC_DIM)) t[n++] = 6;          /* the dim's flat fifth */
+    if (thirds & (1u << OC_DIM))
+        t[n++] = aug ? 8 : 6;                         /* aug's #5 vs dim's b5 */
     else if (!has6)              t[n++] = 7;          /* the fifth (the 6th replaces it) */
     else                         t[n++] = 9;
     if (sevens & (1u << OC_SEV)) t[n++] = 10;
@@ -417,6 +420,7 @@ static void draw_scale(void)
             uint16_t col = (sc_mask >> i & 1) ? C_HI : C_GRAY;   /* held = lit */
             cv_text(x, y, &FONT_T, OC_NAME[i], col);
         }
+        cv_text(x0 + 2 + 20 - 30, y0 + 100, &FONT_T, "MAJ+DIM = AUG", C_GRAY);
     }
     cv_blit_band(0, 0, 216);                          /* the footer painter owns 216+ */
     ui_draw_footer();                                 /* the SCALE footer (else stale pixels stay) */
