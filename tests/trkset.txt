@@ -154,6 +154,7 @@ turn K2 -60
 wait 10
 expect ts_swing 0
 shot trk_swing0.png
+# the row says the truth about its own zero: weight with no global makes nothing
 turn K2 1
 wait 10
 expect ts_swing 5

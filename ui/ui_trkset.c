@@ -84,10 +84,11 @@ static const struct { uint8_t prog; const char *name; } GM_KIT[] = {
 };
 #define GM_KIT_N ((int)(sizeof GM_KIT / sizeof GM_KIT[0]))
 
-/* A CH or PROG change must re-send the program change, or the new sound only
- * arrives at the next PLAY: emit_pc runs once per track per run (pc_sent).
- * Clearing the flag makes the engine's next tick send it, which is what "I
- * turned the knob and heard it change" requires. */
+/* A CH or PROG change must re-send the program change while the transport runs,
+ * or the new sound waits for the next PLAY: emit_pc runs once per track per run
+ * (pc_sent) and lives in the playing branch. Clearing the flag makes the next
+ * tick send it. Stopped, nothing is sent - there is no run to send into, and
+ * the PC that PLAY emits will carry the new number anyway. */
 static void ts_resend_pc(void)
 {
     eng.pc_sent[sel_track] = 0;
@@ -277,6 +278,14 @@ static void draw_trkset(void)
             val = v;
         }
         cv_text(96, y, &FONT_T, val, BRIGHTTX);
+        if (i == TS_SWING && !eng.global_swing) {
+            /* per-track swing is a WEIGHT (global x track x 0.5), so with the
+             * global at zero this percentage produces nothing. Say why here
+             * rather than let the row read as a live control; K4 turns it up and
+             * the hint disappears, which is the whole lesson. */
+            int w = cv_text_w(&FONT_T, val);
+            cv_text(96 + w + 8, y, &FONT_T, "GLOBAL 0", RGB565(150, 104, 48));
+        }
     }
     /* ---- the channel map: who else lives on each channel ---- */
     cv_text(8, 138, &FONT_T, "CHANNELS IN USE", C_GRAY);
