@@ -307,8 +307,7 @@ key 7 down
 key 22 down
 key 21 down
 wait 40
-expect ofc_name 42681
-                             # CmM7
+expect ofc_name 42681   # CmM7
 out
 key 7 up
 key 19 up
@@ -340,8 +339,7 @@ key 7 down
 key 23 down
 key 21 down
 wait 40
-expect ofc_name 61634
-                             # Cdim(maj7)
+expect ofc_name 61634   # Cdim(maj7)
 out
 key 7 up
 key 19 up
@@ -373,8 +371,7 @@ key 7 down
 key 25 down
 key 20 down
 wait 40
-expect ofc_name 64238
-                             # C7sus4
+expect ofc_name 64238   # C7sus4
 out
 key 7 up
 key 19 up
@@ -406,8 +403,7 @@ key 7 down
 key 24 down
 key 20 down
 wait 40
-expect ofc_name 29473
-                             # C9
+expect ofc_name 29473   # C9
 out
 key 7 up
 key 19 up
