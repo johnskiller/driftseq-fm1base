@@ -126,13 +126,13 @@ typedef struct {
     uint32_t    out_len;
 
     /* live keyboard (step-entry preview): small pool of held notes */
-    struct { uint8_t trk, note; double t; } live[16];
+    struct { uint8_t trk, note, ch; double t; } live[16];
     uint8_t     live_n;
 
     /* scheduled note-offs for sequenced notes (gate). Lives in the state, not
      * in a file-static, so two engines in one process cannot cross-talk
      * (host tests run two states side by side). */
-    struct { uint8_t trk, note; double t; } gates[DS_GATES];
+    struct { uint8_t trk, note, ch; double t; } gates[DS_GATES];
     uint8_t     gates_n;
 
     /* realtime jam capture: always armed. The ring IS a ds_track (64 steps of

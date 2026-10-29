@@ -124,6 +124,7 @@ int ds_live_on(ds_state *s, uint8_t trk, uint8_t note, uint8_t vel) {
         if (s->live[i].trk == trk && s->live[i].note == note) { s->live[i].t = 0; return 0; }
     if (s->live_n >= 16) return -2;                  /* pool full: oldest is dropped by caller policy */
     s->live[s->live_n].trk = trk; s->live[s->live_n].note = note; s->live[s->live_n].t = 0;
+    s->live[s->live_n].ch = (uint8_t)(s->pat.track[trk].channel & 0x0F);   /* where the on went */
     s->live_n++;
     return 0;
 }
@@ -133,7 +134,7 @@ int ds_live_off(ds_state *s, uint8_t trk, uint8_t note) {
         if (s->live[i].trk == trk && s->live[i].note == note) { held = 1; break; }
     if (!held) return 0;                             /* stale: auto gate already sent the note-off */
     if (s->out_len + 3 > sizeof s->out) return -1;
-    s->out[s->out_len++] = 0x80 | (s->pat.track[trk].channel & 0x0F);
+    s->out[s->out_len++] = 0x80 | s->live[i].ch;     /* the channel the note-on used */
     s->out[s->out_len++] = note;
     s->out[s->out_len++] = 0;
     for (i = 0; i < s->live_n; i++) {
@@ -152,7 +153,7 @@ void ds_set_bpm(ds_state *s, double bpm) { if (bpm >= 20.0 && bpm <= 300.0) s->b
  * note until the next all-notes-off. Gate unit = steps of the track's own
  * division (01 §2); 0xFF = hold until the next event in the window or the
  * loop end, resolved at emit time so live edits take effect immediately. */
-typedef struct { uint8_t trk, note; double t; } ds_gate_ev;
+typedef struct { uint8_t trk, note, ch; double t; } ds_gate_ev;   /* (the pool lives in ds_state) */
 static double cell_seconds(double bpm, int div);   /* defined below */
 static void jam_advance(ds_state *s, double dt);   /* jam ring clock (defined below) */
 
@@ -189,6 +190,11 @@ static void gate_schedule(ds_state *s, const ds_track *t, uint8_t trk,
     need = steps * cell_seconds(s->bpm, t->division);
     s->gates[s->gates_n].trk = trk;
     s->gates[s->gates_n].note = n->note;
+    /* the channel is captured HERE, not read back at fire time: the Track
+     * Settings page can change a track's channel while its note is sounding,
+     * and an off sent to the new channel would leave the note stuck on the old
+     * one. The off must go where the on went. */
+    s->gates[s->gates_n].ch = (uint8_t)(t->channel & 0x0F);
     s->gates[s->gates_n].t = need;
     s->gates_n++;
 }
@@ -204,7 +210,7 @@ static int gate_advance(ds_state *s, double dt)
             s->gates[i].t = 0.0;                /* keep it: retry next tick */
             continue;
         }
-        s->out[s->out_len++] = 0x80 | (s->pat.track[s->gates[i].trk].channel & 0x0F);
+        s->out[s->out_len++] = 0x80 | s->gates[i].ch;
         s->out[s->out_len++] = s->gates[i].note & 0x7F;
         s->out[s->out_len++] = 0;
         if (s->mono_note[s->gates[i].trk] == s->gates[i].note)

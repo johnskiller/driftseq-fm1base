@@ -225,10 +225,71 @@ static void test_swing(void) {
     (void)hops_a; (void)hops_b;
 }
 
+static void test_channel_change_while_sounding(void) {
+    ds_state s;
+    int i, off_on_old = 0, off_on_new = 0, on_seen = 0;
+    double dt = 64.0 / 44100.0;
+    one_track(&s, 5);
+    s.pat.track[0].voice_mode = DS_VOICE_POLY;
+    ds_play(&s);
+    ds_tick(&s, dt);
+    {   /* the first tick's own stream (the note-ons) */
+        uint32_t k = 0;
+        while (k + 2 < s.out_len) {
+            uint8_t b = s.out[k];
+            if (b < 0x80) { k++; continue; }
+            if ((b & 0xF0) == 0xC0 || (b & 0xF0) == 0xD0) { k += 2; continue; }
+            if ((b & 0xF0) == 0x90 && s.out[k + 2] > 0) on_seen = 1;
+            k += 3;
+        }
+    }
+    /* the note-on has gone out on ch5; the page now moves the track to ch7 */
+    s.pat.track[0].channel = 7;
+    for (i = 0; i < 4000 && !(off_on_old || off_on_new); i++) {
+        uint32_t k = 0;
+        ds_tick(&s, dt);
+        while (k < s.out_len) {
+            uint8_t b = s.out[k];
+            if (b < 0x80) { k++; continue; }
+            if ((b & 0xF0) == 0xC0 || (b & 0xF0) == 0xD0) { k += 2; continue; }
+            if (k + 2 >= s.out_len) break;
+            if ((b & 0xF0) == 0x90 && s.out[k + 2] > 0) on_seen = 1;
+            if ((b & 0xF0) == 0x80) {
+                if ((b & 0x0F) == 5) off_on_old = 1;
+                if ((b & 0x0F) == 7) off_on_new = 1;
+            }
+            k += 3;
+        }
+    }
+    if (!on_seen) FAIL("channel change: nothing ever sounded");
+    if (off_on_new && !off_on_old)
+        FAIL("channel change: the off chased the NEW channel and the note is stuck on the old one");
+    if (!off_on_old)
+        FAIL("channel change: the note that sounded on ch5 never got an off on ch5");
+    OK("channel change: a sounding note is offed on the channel it started on");
+
+    /* dz_live_off is the same class of bug for the held key */
+    {
+        ds_state l;
+        int j, live_off_ch = -1;
+        one_track(&l, 5);
+        ds_live_on(&l, 0, 60, 100);
+        l.pat.track[0].channel = 7;
+        ds_live_off(&l, 0, 60);
+        for (j = 0; j + 2 < (int)l.out_len; j++)
+            if (l.out[j] >= 0x80 && (l.out[j] & 0xF0) == 0x80 && l.out[j + 1] == 60)
+                live_off_ch = l.out[j] & 0x0F;
+        if (live_off_ch != 5)
+            FAIL("live off: a held key moved to ch7 must still be offed on ch5 (got %d)", live_off_ch);
+        OK("channel change: a held key is offed on the channel it started on");
+    }
+}
+
 int main(void) {
     test_route_masks();
     test_mono();
     test_swing();
+    test_channel_change_while_sounding();
     printf("TRACK SETTINGS ENGINE TESTS PASSED\n");
     return 0;
 }
