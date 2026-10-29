@@ -83,13 +83,12 @@ static Chord oc_resolve(uint8_t mask)
 }
 
 /* ---- state ---- */
-static uint8_t sc_kind = SC_MAJ;                  /* K1 */
+static uint8_t sc_kind = SC_CHR;                  /* K1 (John: chromatic by default) */
 static uint8_t sc_tonic = 0;                      /* K2, pitch class 0..11 (0=C) */
 static uint8_t sc_ofc;                            /* K3: one-finger chords on */
 static uint8_t sc_root_key = 0xFF;                /* held root's KEY ID, 0xFF none */
 static uint8_t sc_deg_key = 0xFF;                 /* held degree key (0..6), 0xFF none */
 static uint8_t sc_mask;                           /* held component keys' bitmask */
-static uint8_t sc_last_valid;                     /* the last set that resolved (LED aid) */
 
 /* snap a MIDI note into the scale: nearest scale tone, tie takes the lower */
 static int ui_snap(int note)
@@ -278,8 +277,7 @@ static uint8_t scale_key_hook(uint8_t key, uint8_t down)
             if (sc_tones_n == 0) {                /* the set went nonsense: silence */
                 return 1;
             }
-            sc_last_valid = sc_mask;
-            sc_apply();
+                        sc_apply();
             if (ui_mode == M_GRID) {              /* the GRID write: once, when the set resolves */
                 ds_track *tr = TRK();
                 ds_step *st = &tr->steps[cursor];
@@ -382,10 +380,16 @@ static void draw_scale(void)
         cv_text(x0 + 4 * kp + (7 * kp - 4 * 7) / 2, y0 + 50, &FONT_T, "ROOT", C_GRAY);
         cv_rect(x0 + 11 * kp, y0 + 43, 5 * kp - 2, 3, C_HI);
         cv_text(x0 + 11 * kp, y0 + 50, &FONT_T, "CHORD", C_HI);
-        /* the component legend (the CHORD zone's keys), lit when in the set */
+        /* the component legend: 3 + 5 in two rows, matching the CHORD zone's
+         * physical split (keys 19-21 = the top cluster, 22-26 = the rest);
+         * a held component's text lights */
         for (i = 0; i < OC_NCOMP; i++) {
-            int x = 8 + (i % 4) * 58, y = y0 + 70 + (i / 4) * 15;
-            uint16_t col = (sc_last_valid >> i & 1) ? C_HI : C_GRAY;
+            int row = i < 3 ? 0 : 1;
+            int col_n = row ? 5 : 3, ci = row ? i - 3 : i;
+            int span = 15 * kp - 4;                     /* the keybed's width */
+            int x = x0 + 2 + ci * (span - 26) / (col_n - 1);
+            int y = y0 + 70 + row * 15;
+            uint16_t col = (sc_mask >> i & 1) ? C_HI : C_GRAY;   /* held = lit */
             cv_text(x, y, &FONT_T, OC_NAME[i], col);
         }
     }
@@ -411,7 +415,7 @@ static void scale_encoder(uint8_t enc, int8_t det)
         /* John: no cycling — left detent = OFF, right detent = ON, dead stops */
         if (det < 0) sc_ofc = 0;
         if (det > 0) sc_ofc = 1;
-        if (!sc_ofc) { sc_mask = 0; sc_last_valid = 0; }
+        if (!sc_ofc) sc_mask = 0;
     }                                                  /* K4: spare */
     kn_poke(enc);
 }

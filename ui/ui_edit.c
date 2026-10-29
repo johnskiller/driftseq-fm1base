@@ -682,6 +682,6 @@ static void ui_init(void)
     sc_root_key = 0xFF;
     sc_deg_key = 0xFF;
     sc_mask = 0;
-    sc_last_valid = 0;
+    sc_mask = 0;
     sc_tones_n = 0;
 }
