@@ -69,6 +69,11 @@ void ds_init(ds_state *s, uint64_t seed) {
 #endif
     s->bpm = 120.0;
     s->global_swing = 0;
+    {   int k;
+        for (k = 0; k < DS_TRACKS; k++)
+            s->mono_note[k] = 0xFF;          /* MONO starts holding nothing (memset's 0 = note 0) */
+    }
+    ds_route_sync(s);                        /* memset left every route at USB-only */
     ds_rng_seed(&s->rng, seed);
     ds_jam_reset(s);                         /* the jam ring starts empty and armed */
 }
@@ -86,6 +91,7 @@ void ds_play(ds_state *s) {
      * only its phase re-anchors so ring step 0 = the next bar line. */
     for (i = 0; i < DS_TRACKS; i++) {
         s->pc_sent[i] = 0;
+        s->mono_note[i] = 0xFF;                  /* MONO holds nothing after a rewind */
         s->pos16[i] = s->pat.track[i].loop_start;  /* each track launches on its own start */
         s->frac16[i] = 0.0;
         s->pending[i] = 1;                          /* start step sounds at t=0 */
@@ -96,6 +102,8 @@ void ds_stop(ds_state *s) {
     int i;
     s->playing = 0;
     s->gates_n = 0;                                  /* pending gate-offs die with the transport */
+    for (i = 0; i < DS_TRACKS; i++)
+        s->mono_note[i] = 0xFF;                      /* nothing is held after an all-notes-off */
     s->out_len = 0;                                  /* stop's bytes are the whole message */
     for (i = 0; i < DS_TRACKS; i++) {               /* all notes off, part of the stream */
         s->out[s->out_len++] = 0xB0 | (s->pat.track[i].channel & 0x0F);
@@ -148,6 +156,27 @@ typedef struct { uint8_t trk, note; double t; } ds_gate_ev;
 static double cell_seconds(double bpm, int div);   /* defined below */
 static void jam_advance(ds_state *s, double dt);   /* jam ring clock (defined below) */
 
+/* routing: two destinations, per channel. USB and BLE share one wire (the
+ * platform's TO_USB|TO_BLE is one send), GM is the local synth. DS_ROUTE_* is
+ * per track, but the wire and GM are per CHANNEL, so two tracks on one channel
+ * OR their bits. Recomputed rather than stored per track so a fresh unpacked
+ * pattern needs no fixup pass; ds_tick calls it, and the UI calls it after a
+ * ROUTE edit so the very next drain already respects the change. */
+void ds_route_sync(ds_state *s)
+{
+    int i;
+    s->wire_mask = 0;
+    s->gm_mask = 0;
+    for (i = 0; i < DS_TRACKS; i++) {
+        const ds_track *t = &s->pat.track[i];
+        uint16_t bit = (uint16_t)(1u << (t->channel & 0x0F));
+        if (t->route != DS_ROUTE_GM)
+            s->wire_mask |= bit;
+        if (t->route != DS_ROUTE_USB)
+            s->gm_mask |= bit;
+    }
+}
+
 void ds_gates_reset(ds_state *s) { s->gates_n = 0; }
 static void gate_schedule(ds_state *s, const ds_track *t, uint8_t trk,
                           const ds_note *n, double steps)
@@ -178,6 +207,8 @@ static int gate_advance(ds_state *s, double dt)
         s->out[s->out_len++] = 0x80 | (s->pat.track[s->gates[i].trk].channel & 0x0F);
         s->out[s->out_len++] = s->gates[i].note & 0x7F;
         s->out[s->out_len++] = 0;
+        if (s->mono_note[s->gates[i].trk] == s->gates[i].note)
+            s->mono_note[s->gates[i].trk] = 0xFF;   /* MONO: the held note just died */
         s->gates[i] = s->gates[s->gates_n - 1];
         s->gates_n--;
         fired = 1;
@@ -343,8 +374,31 @@ static void land(ds_state *s, ds_track *t, int trk, uint32_t pos) {
         uint32_t r = ds_rng_next(&s->rng);
         if ((int)(r % 100u) < (int)st->prob) {
             int vi;
-            for (vi = 0; vi < st->nvoices; vi++) {
+            /* MONO: one voice per track, and it is the TOP pitch of the step
+             * (a chord played into a mono track should sound its melody, not
+             * an arbitrary member of the chord). The previous note is offed
+             * first: without that the old note has no off at all, because its
+             * gate entry got replaced — the classic mono hang. */
+            int first = 0, last = st->nvoices;
+            if (t->voice_mode == DS_VOICE_MONO) {
+                int hi = 0;
+                for (vi = 1; vi < st->nvoices; vi++)
+                    if (st->v[vi].note > st->v[hi].note) hi = vi;
+                first = hi;
+                last = hi + 1;
+                if (s->mono_note[trk] != 0xFF && s->mono_note[trk] != st->v[hi].note) {
+                    if (s->out_len + 3 <= sizeof s->out) {
+                        s->out[s->out_len++] = 0x80 | (t->channel & 0x0F);
+                        s->out[s->out_len++] = s->mono_note[trk];
+                        s->out[s->out_len++] = 0;
+                    }
+                    s->mono_note[trk] = 0xFF;
+                }
+            }
+            for (vi = first; vi < last; vi++) {
                 emit_note(s, t, &st->v[vi]);
+                if (t->voice_mode == DS_VOICE_MONO)
+                    s->mono_note[trk] = st->v[vi].note;
                 {   /* gate: steps of this division, 0xFF = until next event.
                      * Tie steps never attack, so a run of them after this one
                      * belongs to this note: count them into the length. */
@@ -377,6 +431,7 @@ static void land(ds_state *s, ds_track *t, int trk, uint32_t pos) {
 
 void ds_tick(ds_state *s, double dt_seconds) {
     int trk;
+    ds_route_sync(s);                        /* ROUTE is editable live: 16 iterations, once a block */
     {   /* solo is a live-only mask: recompute the union each tick (16 bytes) */
         int t2;
         s->any_solo = 0;

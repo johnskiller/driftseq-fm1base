@@ -354,11 +354,17 @@ static void engine_drain(void)
          * never does; the event is consumed either way — the platform's send
          * drops on a full ring itself, and a disconnected wire has no listener
          * to lose. */
-        if (plat_midi_out_room(TO_USB | TO_BLE))
+        if (plat_midi_out_room(TO_USB | TO_BLE) &&
+            (eng.wire_mask >> (st & 0x0Fu)) & 1u)
             plat_midi_send(pkt, TO_USB | TO_BLE);
         eng_sent += n;
-        /* and into the GM synth: the wire hears it, the local sound does too.
-         * d1/d2 live just past the status byte. */
+        /* and into the GM synth: the wire hears it, the local sound does too —
+         * unless this channel's tracks are routed away from GM (ROUTE = USB on
+         * every track sharing the channel). d1/d2 live just past the status. */
+        if (!((eng.gm_mask >> (st & 0x0Fu)) & 1u)) {
+            i += n;
+            continue;
+        }
         if ((st & 0xF0u) == 0x90u)
             gm_on(st & 15u, (uint8_t)(pkt >> 16), (uint8_t)(pkt >> 24));
         else if ((st & 0xF0u) == 0x80u)

@@ -101,6 +101,18 @@ typedef struct {
     double      frac16[DS_TRACKS];      /* sub-cell accumulator, [0,1) */
     uint8_t     pending[DS_TRACKS];     /* fire loop_start on next tick after play */
     uint8_t     pc_sent[DS_TRACKS];     /* program-change sent once per run */
+    /* MONO's memory: the one note this track is holding, 0xFF = silent. The
+     * sequencer collapses a step's voices to the highest pitch and offs the
+     * previous note first; without the byte the "previous" is unknowable and
+     * every mono step would leave a note hanging. */
+    uint8_t     mono_note[DS_TRACKS];
+    /* per-channel routing, recomputed from track[].route: bit set = this channel
+     * is allowed to that destination. Two tracks sharing a channel OR their
+     * bits (one channel cannot carry two routes, and GM gives them one program
+     * anyway). The engine does not send anywhere — it fills s->out — so the
+     * masks are the contract the drain side (app.c) reads. */
+    uint16_t    wire_mask;              /* USB/BLE */
+    uint16_t    gm_mask;                /* the local GM synth */
     uint8_t     any_solo;               /* recomputed each tick: 1 = some track.solos */
     uint8_t     playing;
     double      tick_acc;               /* absolute time in ticks @24 PPQ since play (hero axis) */
@@ -161,6 +173,7 @@ void     ds_clear_track(ds_track *t);
 void     ds_play(ds_state *s);
 void     ds_stop(ds_state *s);
 void     ds_set_bpm(ds_state *s, double bpm);
+void     ds_route_sync(ds_state *s);            /* rebuild wire_mask/gm_mask from track[].route */
 
 /* the engine tick: call once per audio block (64 frames @ 44100).
  * advances time, fills s->out with MIDI bytes for this tick, resets out_len.
