@@ -404,35 +404,45 @@ void sc_chord_name(char *buf, uint8_t n)
     uint16_t iv = 0;
     const char *nm;
     char *q = buf;
-    uint8_t i, maj3, min3, sus4, p2, p5, b5, s5, m7, M7, s6, ninth, third;
+    uint8_t i, maj3, min3, sus4, p2, p5, b5, s5, m7, M7, s6, ninth;
     if (!n) { *buf = 0; return; }
     nm = ui_note_name((uint8_t)(sc_tones[0] % 12));
     while (*nm) *q++ = *nm++;
     for (i = 1; i < n; i++)                          /* intervals above the root */
         iv |= (uint16_t)(1u << ((sc_tones[i] - sc_tones[0]) % 12));
     if (!iv) { *q = 0; return; }                     /* a single note: its name only */
-    maj3 = (iv >> 4) & 1u;
-    min3 = (iv >> 3) & 1u;
-    sus4 = (iv >> 5) & 1u;
-    p2   = (iv >> 2) & 1u;                           /* sus2, or the 9th closed down */
-    p5   = (iv >> 7) & 1u;
-    b5   = (iv >> 6) & 1u;
-    s5   = (iv >> 8) & 1u;
-    s6   = (iv >> 9) & 1u;
-    m7   = (iv >> 10) & 1u;
-    M7   = (iv >> 11) & 1u;
+    maj3  = (iv >> 4) & 1u;
+    min3  = (iv >> 3) & 1u;
+    sus4  = (iv >> 5) & 1u;
+    p2    = (iv >> 2) & 1u;
+    p5    = (iv >> 7) & 1u;
+    b5    = (iv >> 6) & 1u;
+    s5    = (iv >> 8) & 1u;
+    s6    = (iv >> 9) & 1u;
+    m7    = (iv >> 10) & 1u;
+    M7    = (iv >> 11) & 1u;
     ninth = p2 && (maj3 || min3);                    /* a third plus a 2nd = add9 */
-    third = maj3 || min3 || sus4 || (p2 && !ninth);
-    if (!third && !p5 && !b5 && !s5 && !m7 && !M7 && !s6) { *q = 0; return; }  /* no name */
-    #define PUT(s) do { const char *z_ = (s); while (*z_) *q++ = *z_++; } while (0)
-    if (min3 && b5 && s6 && !m7 && !M7)      { PUT("dim7"); goto done; }   /* 0,3,6,9 */
-    if (min3 && b5 && !s6 && !m7 && !M7)     { PUT("dim");  goto done; }   /* 0,3,6   */
-    if (!min3 && maj3 && s5 && !m7 && !M7 && !s6) { PUT("aug"); goto done; } /* 0,4,8 */
-    if (min3)        PUT("m");
-    else if (sus4)   PUT("sus4");
-    else if (!maj3 && p2) PUT("sus2");
-    if (ninth && (m7 || M7))            PUT(m7 ? "9" : "M9");
-    else if (s6 && (m7 || M7))          PUT(m7 ? "13" : "M13");
+    #define PUT(z_) do { const char *w_ = (z_); while (*w_) *q++ = *w_++; } while (0)
+    /* the special shapes first: they do not follow the tertian template */
+    if (min3 && b5 && s6 && !m7 && !M7)   { PUT("dim7"); goto done; }
+    if (min3 && b5 && M7 && !s6)          { PUT("dim(maj7)"); goto done; }
+    if (min3 && b5 && !s6 && !m7 && !M7)  { PUT("dim"); goto done; }
+    if (maj3 && s5 && !M7 && !s6 && !ninth) { PUT("aug"); goto done; }
+    /* sus chords name the EXTENSION first — C7sus4, CM7sus4, C9sus4 (as
+     * players write them), never Csus47 */
+    if (sus4) {
+        if (ninth)      PUT("9");
+        else if (s6)    PUT("13");
+        else if (m7)    PUT("7");
+        else if (M7)    PUT("M7");
+        PUT("sus4");
+        if (b5)         PUT("b5");
+        if (!ninth && !s6 && m7 == 0 && M7 == 0) { /* a plain sus triad: nothing more */ }
+        goto done;
+    }
+    if (min3)      PUT("m");
+    if (ninth && (m7 || M7))        PUT(m7 ? "9" : "M9");
+    else if (s6 && (m7 || M7))      PUT(m7 ? "13" : "M13");
     else {
         if (m7)      PUT("7");
         else if (M7) PUT("M7");
@@ -441,7 +451,7 @@ void sc_chord_name(char *buf, uint8_t n)
     }
     if (b5)          PUT("b5");
     else if (s5)     PUT("(#5)");
-    if (!third)      PUT("5");                       /* just a root and a fifth */
+    if (!maj3 && !min3 && p5 && !b5 && !m7 && !M7 && !s6) PUT("5");  /* root + fifth */
 done:
     *q = 0;
     #undef PUT
@@ -596,12 +606,12 @@ static void draw_scale(void)
                                                       * this row is the page's answer, so
                                                       * it gets the room the footer left */
             int32_t cw = text_w(&FONT_M, chord);      /* real advance, not a guess */
-            if (6 + cw + 8 + text_w(&FONT_S, notes) > 232) {
+            if (6 + cw + 12 + text_w(&FONT_S, notes) > 232) {
                 cv_text(6, 190, &FONT_B, chord, C_AMB);
                 cv_text(6 + text_w(&FONT_B, chord) + 6, 190, &FONT_T, notes, C_HI);
             } else {
                 cv_text(6, 186, &FONT_M, chord, C_AMB);
-                cv_text(6 + cw + 8, 190, &FONT_S, notes, C_HI);
+                cv_text(6 + cw + 12, 190, &FONT_S, notes, C_HI);
             }
         }
     }

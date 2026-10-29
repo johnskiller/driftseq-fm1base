@@ -54,6 +54,7 @@ wait 20
 out
 key 14 up
 key 7 up
+key 19 up                        # MAJ was still down from this block
 wait 20
 
 # --- C6 keeps the fifth: 60 64 67 69
@@ -276,7 +277,146 @@ wait 40
 expect ofc_keys 280704          # keys 7 (C4), 11 (E4), 14 (G4), 18 (B4)
 expect ofc_name 55820           # "CM7" (John's shorthand)
 out
-key 20 up
+key 21 up
 key 19 up
 key 7 up
 wait 40
+
+# -- the chord NAME is derived from the interval set; these are the shapes the
+#    old lookup table could not name (it answered "C?" for them) --
+#    each case: release every key, K3 OFF (clears the latched selection), K3 ON
+tap SEL
+turn K3 -1
+tap SEL
+key 7 up
+key 19 up
+key 20 up
+key 21 up
+key 22 up
+key 23 up
+key 24 up
+key 25 up
+key 26 up
+tap SEL
+turn K3 -1
+tap SEL
+tap SEL
+turn K3 1
+tap SEL
+key 7 down
+key 22 down
+key 21 down
+wait 40
+expect ofc_name 42681
+                             # CmM7
+out
+key 7 up
+key 19 up
+key 20 up
+key 21 up
+key 22 up
+key 23 up
+key 24 up
+key 25 up
+key 26 up
+wait 20
+
+key 7 up
+key 19 up
+key 20 up
+key 21 up
+key 22 up
+key 23 up
+key 24 up
+key 25 up
+key 26 up
+tap SEL
+turn K3 -1
+tap SEL
+tap SEL
+turn K3 1
+tap SEL
+key 7 down
+key 23 down
+key 21 down
+wait 40
+expect ofc_name 61634
+                             # Cdim(maj7)
+out
+key 7 up
+key 19 up
+key 20 up
+key 21 up
+key 22 up
+key 23 up
+key 24 up
+key 25 up
+key 26 up
+wait 20
+
+key 7 up
+key 19 up
+key 20 up
+key 21 up
+key 22 up
+key 23 up
+key 24 up
+key 25 up
+key 26 up
+tap SEL
+turn K3 -1
+tap SEL
+tap SEL
+turn K3 1
+tap SEL
+key 7 down
+key 25 down
+key 20 down
+wait 40
+expect ofc_name 64238
+                             # C7sus4
+out
+key 7 up
+key 19 up
+key 20 up
+key 21 up
+key 22 up
+key 23 up
+key 24 up
+key 25 up
+key 26 up
+wait 20
+
+key 7 up
+key 19 up
+key 20 up
+key 21 up
+key 22 up
+key 23 up
+key 24 up
+key 25 up
+key 26 up
+tap SEL
+turn K3 -1
+tap SEL
+tap SEL
+turn K3 1
+tap SEL
+key 7 down
+key 24 down
+key 20 down
+wait 40
+expect ofc_name 29473
+                             # C9
+out
+key 7 up
+key 19 up
+key 20 up
+key 21 up
+key 22 up
+key 23 up
+key 24 up
+key 25 up
+key 26 up
+wait 20
+

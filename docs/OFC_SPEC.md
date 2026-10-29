@@ -21,7 +21,7 @@
 | C6 五音问题 | ✓ 修为 0,4,7,9（原实现漏五音，属 bug 非取舍） |
 | DIM+7 命名 | ✓ 实现是 0,3,6,10 = **m7♭5（半减七）**，文档已按此命名；**减七（0,3,6,9）= DIM+6**（本次一并实现，原来 6 被静默忽略） |
 | 最大音符数与截断优先级 | ✓ 4 音，规则见 §4.4 |
-| Chromatic 下级数键行为 | ⚠ 行为已核实但**音乐性存疑**（§6 开放问题 1） |
+| Chromatic 下级数键行为 | ✓ 已定（John：选项 c）——CHR 下无级数概念，级数键静默无效 |
 | 编辑层（EDIT）语义 | ✓ 修复：OFC 不再吞 EDIT 层按键（bug） |
 
 ## 1. 状态模型（三个概念，两个变量 + 一个门控）
@@ -37,7 +37,7 @@
 
 以 C → MIN → G 为例（评审 §三 的例子）：
 
-1. 按 C → Root Selection = C，Active = C（单音，snap）
+1. 按 C → Root Selection = C，Active = C（单音，**不 snap**：OFC 下 root 区是调外路径）
 2. 松开 C → 静音，Selection 不变
 3. 按 MIN → Chord Selection = MIN（无 root 按住 = 只登记不出声）
 4. 松开 MIN → Selection 不变
@@ -47,17 +47,18 @@
 - 清除全部成分：逐个 toggle 掉，或按 MAJ（等价于"隐含大三度"，见 §4.1），或 K3 OFF。
 - K3 OFF：**全部复位**（silence + root/mask/deg 清空）——可预测的"总清"。
 
-## 3. 发音（两种模式，K4 切换）
+## 3. 发音（两种模式，K3 三档切换）
 
 ### 3.1 规则
 
-- **root 按下**：按当前 Selection 打击 Active Chord（无成分 = 单个 snap 音，吸附当前 scale）
+- **root 按下**：按当前 Selection 打击 Active Chord（无成分 = 该 root 的原音值单音，不 snap）
 - **root 按住期间**：
   - 改成分 → 立即重击（re-strike：旧音符全 Note Off → 新和弦全 Note On），不需要重新按 root
   - 走级数键 → 换配级数和弦，同样重击
 - **root 松开**：对该次发音有效的全部音符 Note Off。Selection 不变
 - **按住 A 再按 B（root）**：B 接管 selection + gate；旧和弦全部 Note Off → 新和弦 On。之后 A 松开 = 无事发生（gate 已在 B）
-- **无 root 按住时**：按成分/级数 = 只改 Selection，不出声
+- **级数键在 GATE 下自己是门**：它的音高挂在 tonic 上，不需要先按 root（John 1b 之后的必然结果）
+- **无 root 按住时按成分** = 只改 Selection，不出声（级数键不在此列：它自己发声）
 
 ### 3.2 MIDI 事件原则（评审 §六）
 
@@ -98,7 +99,7 @@
 
 | key | 键 | 成分 | 单按（root=C） |
 |---|---|---|---|
-| 19 | C5 | MAJ | 0,4,7 —— MAJ 位是"隐含大三度"，与无成分**同音**（灯亮音不变，有意） |
+| 19 | C5 | MAJ | 0,4,7 —— MAJ = "强制大三度"，与无成分**同音**（灯亮音不变，有意）。级数路径同理：ii+MAJ = D F# A（Dmaj），**不会**变成 Ddom7 |
 | 20 | C#5 | 7 | 0,4,7,10 属七 |
 | 21 | D5 | M7 | 0,4,7,11 大七 |
 | 22 | D#5 | MIN | 0,3,7 |
@@ -133,9 +134,9 @@
 
 ### 4.3 级数和弦（key 0..6）
 
-- 前提：**gate root 按住**（无 root 时级数键无声无状态）
+- 前提：**级数键自己就是门**（John 1b 之后音高挂在 tonic 上，按 root 是空动作；GATE 下抬键静音、LATCH 下保持）
 - 和弦 = 当前 Scale（SCALE 页 K1/K2）的调内音**堆叠三度**：默认 **3 音三和弦**（1-3-5），按 7/M7 才加七音（4 音）。C 大调：i=Cmaj、ii=Dmin、iii=Emin、iv=Fmaj、v=Gmaj、vi=Amin、vii=Bdim（John 2026-10-29：这才是"最自然的级数"）
-- degree root 取离 gate root 最近的八度（±6 半音最短路径）
+- **degree 的音高挂在 tonic 上，不随 root 移动**（John 1b）：`60 + (tonic + deg_pc) % 12 + OCT`。ROOT 区只管调外和弦，音区归 OCT± 键
 - 成分键修饰（`sc_flavor`）：MIN 强制小三、MAJ 强制大三（**只动三度**，不加七音）、SUS4 换四度、6 换六度、M7 强制大七、7 保留音阶自身的七音、ADD9 加九音
 - 级数键抬 = 静音（不回落）
 - **Scale 复用**：不引入第二套调式配置，直接读 SCALE 页的 `sc_kind`/`sc_tonic`
@@ -149,8 +150,8 @@
 
 ## 5. Grid Step Record（OFC 在 GRID 页）
 
-- **写入时机**：Selection 变化导致 Active Chord 变化的**按下瞬间**——root 按下写一步，成分按下（root 已在 gate）再写一步
-- **写入内容**：Active Chord 的全部 MIDI 音符（无成分时 = 单个 snap 音——root 单按也写 step，新增能力）
+- **写入时机**：**"演奏性"的按下瞬间**（John 2026-10-29 四规则）——root 按下写一步；**激活**成分写一步；**取消**成分不写（选择是编辑，不是演奏）
+- **写入内容**：Active Chord 的全部 MIDI 音符（无成分时 = root 的原音值单音——root 单按也写 step）
 - **Step 处理**：替换 cursor 所在 step 的全部 voice，`on = 1`，cursor+1（63 封底）
 - **松开不影响**：物理释放只管 Gate 发音，已写入 step 不动（Gate/选择分离的自然结果）
 - Home Jam 的 Gate/Latch 设置不影响 GRID 行为（§3.3 的模式只影响实时发音，GRID 写入在按下瞬间完成）
@@ -159,8 +160,10 @@
 
 - **第三行 CHORD KEYS = K3 的读数**：`OFF` / `ON GATE` / `ON LATCH` 三态，一个旋钮一段行程
 - **和弦名行**（y≈186，AUG 提示行下方）：左侧 **和弦名**（琥珀，FONT_M 24px 当宽度够，否则 FONT_B 16px），右侧**实际音名**（FONT_S 16px，亮色），如 `Cm7 C Eb G Bb`。
-  - 记法用演奏者习惯的简写，不是全大写：`C` `Cm` `C7` `CM7` `Cm7` `C6` `Csus4` `Cdim` `Cdim7` `Caug` `Cadd9` `Cmadd9` `C13` `CM13` `Bm7b5`（不用 `CMAJ7` 这类全称）
-  - 和弦名由**实际音程集反查**生成（规则而非查表，40 种可达集合全覆盖），名字与发声永不矛盾；无通用名的集合打印 `C?`
+  - 记法用演奏者习惯的简写，不是全大写：`C` `Cm` `C7` `CM7` `Cm7` `CmM7` `C6` `Cm6` `Csus4` `C7sus4` `Cdim` `Cdim7` `Cdim(maj7)` `Caug` `Cadd9` `Cmadd9` `C9` `Cm9` `C13` `CM13` `Cm7b5`（不用 `CMAJ7` 这类全称）
+  - 八度/五音/扩展的写法规则：sus 类和弦把扩展写在前面（`C7sus4`、`C9sus4`，不是 `Csus47`）；13 和弦按定义是 `6+7`（`C13` = 1 3 5 6 b7），maj13 = `6+M7`；加了九音又没七音才用 `add9`
+  - 和弦名行排版：名字与音名之间 12px 固定间隙，名字用 `text_w()` 实测宽度，超 232px 自动降档 FONT_B+FONT_T
+  - 和弦名由**实际音程集反查**生成（规则而非查表）：256 种成分键组合全部可命名（探针穷举，命名与实际发声的键床掩码逐条对齐），名字与发声永不矛盾；规则外的集合打 `C?`（当前不可达）
   - 音名按功能拼写：b3/b5/b7/b9 用降号（Cm = `C Eb G`，不是 `C D# G`），#5 用升号
 - **键盘灯**（OFC 打开且非鼓轨时）：
   - 成分区 8 键 = **dim 常亮底**，被选中的成分 **点亮**
@@ -171,8 +174,8 @@
 
 ## 6. 开放问题（评审 §九.4：列出待定，不自行扩展）
 
-1. **Chromatic 级数键的音乐性**：当前 = 半音堆叠簇（0,2,4,6…）。可选：CHR 时级数键回退到大调堆叠？或 CHR 时级数键禁用（只留 root 路径）？**待 John 拍板**
-2. ~~Latch 停止手势~~ **已定（2026-10-29 John）**：K4 切换 Gate/Latch（SCALE 页）；停止 = K3 OFF 或切回 GATE
+1. ~~Chromatic 级数键~~ **已定（2026-10-29 John：选项 c）**：CHR 下"级数"没有音乐含义，级数键静默无效，和弦输入只剩 root 路径。**遗留议题**：这 7 个键后续可用于和弦转位（未设计，等 John 提交互模型）
+2. ~~Latch 停止手势~~ **已定**：K3 三档（OFF/GATE/LATCH，死停两端）；停止 = 回到 OFF 或退回 GATE（K4 被腾空）
 3. ~~级数 + Latch~~ **已定**：Latch 下级数键同样锁存（松开不打断）
 4. ~~6+7 / 6+M7~~ **已定（2026-10-29 John：支持）**：= C13(no5) / Cmaj13(no5)，走现有砍五音截断
 
@@ -193,7 +196,11 @@
 7. ✓ K3 OFF 全清（无悬挂）
 8. ✓ EDIT 层 bypass（raw 音符）
 9. ✓ demo 回归 -12.0 dBFS
-10. ✓ Latch 模式：root 松开继续响、成分 toggle、K4 边界静音、K3 OFF 全清（tests/scale.txt LATCH 节）
+10. ✓ Latch 模式：root 松开继续响、成分 toggle、LATCH→GATE 边界静音、K3 OFF 全清
+11. ✓ 级数音高挂 tonic（root 不转调、OCT 管音区）：degree i 单按 C E G、root G 持住仍 C4E4G4、OCT+ 移八度
+12. ✓ OFC 下 root 不 snap（Eb 单按 = 3F 真 Eb）；OFC 关时全键盘仍 snap
+13. ✓ 成分键规则：激活=整和弦重击+写 GRID、取消=只停该音不重写（John 2026-10-29 四规则）
+14. ✓ 和弦名回读（ofc_name 哈希）与键床标记（ofc_keys 位掩码）与发声一致
 
 ## 9. 与实现对应的代码位置
 
@@ -205,11 +212,16 @@
 | 级数堆叠 | `sc_degree_chord`（SC_STEP 宏）+ `sc_flavor` |
 | 重击 | `sc_restrike`（全 off → 全 on） |
 | GRID 写入 | `sc_grid_write`（root-down / component-down / degree-down 共用） |
-| K3 复位 | `scale_encoder` EN_K3 分支 |
-| K4 模式 | `scale_encoder` EN_K4 分支（sc_latch；SCALE 页专属，K4 原空闲） |
+| K3 三档（OFF/GATE/LATCH） | `scale_encoder` EN_K3 分支（`sc_ofc` 0/1/2，死停两端；K4 现空闲） |
+| 和弦名 | `sc_chord_name`（音程集 → 规则命名）+ `sc_tone_name`（按功能拼写） |
+| 键床标记 | `sc_marks`（发声音 → 键 id 位掩码，画家与探针共用） |
+| 级数音高 | `sc_revoice` 级数分支（`60 + (sc_tonic + deg_pc) % 12 + key_shift`） |
 | 发音执行 | `sc_apply`（diff）+ `ds_live_on/off` + `ds_jam_capture` |
 
 ## 10. 未验证/待真机
 
-- 全部结论来自 host 探针（L1-L6/M1-M5 + tests/scale.txt）；真机固件 `d0ce22d0` 未刷
-- LED 语义：成分灯 = Selection（含未发声的登记），root 灯 = Selection——审查时注意"灯亮"现在表示"选中"而非"按住"
+- 全部结论来自 host 探针（L1-L6/M1-M5 + tests/scale.txt）；真机固件仍 `8412daad`，最新待刷包 `25a08fb0`
+- LED 语义：成分灯 = Selection（含未发声的登记），root 灯 = Selection——"灯亮"表示"选中"而非"按住"
+- **dim 亮度在真机的实际对比度未验证**（仿真里 dim 是像素值；硬件是 ~8% 占空比脉冲，观感可能偏暗或偏亮）
+- 和弦名行 FONT_M 24px 在真机 240×240 屏的可读性未验证
+- `C?` 兜底分支在当前命名规则下不可达（256 种 mask 组合全部有名，已用探针穷举验证）

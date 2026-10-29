@@ -228,6 +228,22 @@ AC79_SDK=/tmp/fw-AC79_AIoT_SDK JIELI_TOOLCHAIN=/home/john/.jieli/toolchain \
 
 手机访问 `https://192.168.31.129:8933/`（自签证书，要接受）。iOS 的 audioWorklet 只在 secure context 下工作，所以 HTTP 不行。
 
+## 和弦命名（2026-10-29，唱名规则化 + 小写）
+
+字体原本 CAPS ONLY（`felucca_font_t {h,pad,first,last}`，全部 role `last=95`，`glyph()` 把 a-z 折叠成 A-Z）。
+`fm1.toml` 加 `font_full = ["M"]` → FONT_M 带到 126（+33,602 B flash），`C` `Cm` `CM7` 这种大小写对比才画得出来。
+
+命名从查表改为规则（`ui/ui_scale.c: sc_chord_name()`）：按三度/五度/六度/七度/九度的有无与升降逐项拼后缀。
+- 记法＝演奏者简写：`Cm` `C7` `CM7` `Cm7` `CmM7` `C6` `Cm6` `C13` `CM13` `C9` `Cm9` `Cadd9` `Cmadd9` `Cdim` `Cdim7` `Cdim(maj7)` `Caug` `Csus4` `C7sus4` `C9sus4` `Cm7b5` `CM7(#5)` `C6add9`
+- sus 的扩展写在前面（`C7sus4` 不是 `Csus47`）；13 = `6+7`，maj13 = `6+M7`
+- 名称来源是**实际发声音程集**，不是选择猜测 —— 名字与键床掩码永远一致
+- 音名按功能拼写：`Cm` = `C Eb G`（此前是 `C D# G`，全域升号的表）
+- 探针 `ofc_name`（djb2-16 哈希）+ `ofc_keys`（键床位掩码）**穷举 256 种成分键组合**：全部有名字，哈希与独立 Python 重算逐条一致（0 mismatch）
+
+和弦行排版：名字与音名固定 12px 间隙；名字 `text_w()` 实测超 232px 降档 FONT_B+FONT_T（`Cdim(maj7)` 这类长名走降档，实测名 x8..108 + 音名 x123..175 不重叠）。
+
+实测尺寸：image **513,500 B** / slot 581,564 → 余 **68,064 B**；fwsc 611,547 B。
+
 ## 未验证（真机一次没刷过）
 
 - **不变砖**：9/10 信心，无实测
