@@ -94,13 +94,13 @@ sizeof(ds_pattern) 17,616 B
 固件构建（`build.py`，最后一次 = Track Settings 之后）：
 
 ```
-image 517,644 B of 581,564   余 63,920
+image 517,740 B of 581,564   余 63,824
 RAM   .data+.bss 68,612 B of 98,304   余 29,692
 pool  254,776 B of 344,064            余 89,288
-fwsc  611,547 B, identity FM-1_9200
+fwsc  611,547 B, identity FM-1_9200  (md5 前缀 9b5f510c，未刷机)
 ```
 
-Track Settings 一页的代价（实测）：**+4,144 B flash**（含 128 条 GM 名表 ≈1.4 KB、`ds_route_sync`、MONO），RAM **±0**（`mono_note[16]` 与 gate/live 各 +1 字节抵消 memset 里的冗余赋值）。
+Track Settings 一页的代价（实测）：**+4,240 B flash**（含 128 条 GM 名表 ≈1.4 KB、`ds_route_sync`、MONO），RAM **±0**（`mono_note[16]` 与 gate/live 各 +1 字节抵消 memset 里的冗余赋值）。
 
 `eng`（`ds_state`）在 `.pool`，不在 DRAM。这是 `9744689` 的成果：DRAM 94,436 → 68,276。
 
