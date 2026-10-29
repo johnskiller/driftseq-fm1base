@@ -653,7 +653,7 @@ int app_expect(const char *what, int *got)
     else if (!strcmp(what, "scale"))             /* the SCALE page: kind<<8 | tonic */
         *got = (sc_kind << 8) | sc_tonic;
     else if (!strcmp(what, "ofc"))
-        *got = sc_ofc;
+        *got = sc_ofc | (sc_latch << 1);             /* bit0 = on, bit1 = latch */
     else if (!strcmp(what, "ofc_mask"))
         *got = (sc_mask << 8) | (sc_root_key == 0xFF ? 0x7F : sc_root_key);
     else if (!strcmp(what, "step0"))             /* step 0's voice count + first voice */

@@ -94,6 +94,7 @@ static uint8_t sc_root_key = 0xFF;               /* Root SELECTION: persists aft
 static uint8_t sc_gate = 0xFF;                   /* the physically held root (GATE): 0xFF = silent */                /* held root's KEY ID, 0xFF none */
 static uint8_t sc_deg_key = 0xFF;                 /* held degree key (0..6), 0xFF none */
 static uint8_t sc_mask;                           /* held component keys' bitmask */
+static uint8_t sc_latch;                          /* K4: sounding mode, 0 = GATE, 1 = LATCH */
 
 /* snap a MIDI note into the scale: nearest scale tone, tie takes the lower */
 static int ui_snap(int note)
@@ -287,8 +288,10 @@ static uint8_t scale_key_hook(uint8_t key, uint8_t down)
             sc_restrike();
             sc_grid_write();
         } else if (!down && sc_deg_key == key) {
-            sc_deg_key = 0xFF;                    /* the walk ends: silence */
-            sc_tones_n = 0;
+            sc_deg_key = 0xFF;
+            if (sc_latch) return 1;               /* LATCH: the latched chord keeps
+                                                   * sounding (selection persists) */
+            sc_tones_n = 0;                       /* GATE: the walk ends: silence */
             sc_apply();
         }
         return 1;                                 /* degree keys never sound alone */
@@ -306,9 +309,12 @@ static uint8_t scale_key_hook(uint8_t key, uint8_t down)
             sc_restrike();
             sc_grid_write();
         } else if (sc_gate == key) {
-            sc_gate = 0xFF;                       /* root up = sound off; the
-                                                   * selection stays */
             sc_deg_key = 0xFF;
+            if (sc_latch) return 1;               /* LATCH: the release keeps the
+                                                   * chord sounding (review §五.2);
+                                                   * the gate stays latched */
+            sc_gate = 0xFF;                       /* GATE: root up = sound off; the
+                                                   * selection stays */
             sc_tones_n = 0;
             sc_apply();
         }
@@ -368,7 +374,10 @@ static void draw_scale(void)
     cv_text(8, 28, &FONT_T, "TONIC", C_AMB);
     cv_text(96, 28, &FONT_T, ui_note_name(sc_tonic), TB_TX);
     cv_text(8, 46, &FONT_T, "CHORD KEYS", C_AMB);
-    cv_text(96, 46, &FONT_T, sc_ofc ? "ON" : "OFF", sc_ofc ? C_HI : C_GRAY);
+    if (sc_ofc)                                     /* John: K4 = GATE / LATCH */
+        cv_text(96, 46, &FONT_T, sc_latch ? "ON LATCH" : "ON GATE", C_HI);
+    else
+        cv_text(96, 46, &FONT_T, "OFF", C_GRAY);
 
 
 
@@ -463,7 +472,17 @@ static void scale_encoder(uint8_t enc, int8_t det)
             sc_root_key = 0xFF;
             sc_deg_key = 0xFF;
         }
-    }                                                  /* K4: spare */
+    } else if (enc == EN_K4) {                       /* John: K4 = the sounding mode */
+        if (det < 0) sc_latch = 0;                   /* left = GATE, right = LATCH */
+        if (det > 0) sc_latch = 1;                   /* dead stops, like K3 */
+        if (!sc_latch) {                             /* LATCH -> GATE: a clear boundary —
+                                                      * silence, so no stuck notes when the
+                                                      * player believes the mode is gate */
+            sc_tones_n = 0;
+            sc_apply();
+            sc_gate = 0xFF;
+        }
+    }
     kn_poke(enc);
 }
 

@@ -21,7 +21,7 @@ wait 20
 key 14 down 100                   # G: strikes G MAJ (55 59 62)
 wait 20
 out
-expect ofc_mask == 0x010E         # MAJ bit + root 14 (G4)
+expect ofc_mask 0x010E         # MAJ bit + root 14 (G4)
 key 14 up
 key 19 up
 
@@ -112,4 +112,29 @@ wait 20
 out                               # silence (the walk ends)
 key 19 up
 key 7 up
+wait 20
+
+# -- LATCH (K4 right, on the SCALE page — K4 was spare): release keeps sounding --
+tap SEL                           # the SCALE page owns K1..K4
+turn K4 1                         # LATCH
+tap SEL                           # back
+expect ofc 3
+key 7 down 100                    # C
+key 22 down 100                   # MIN: C Eb G
+wait 20
+key 7 up                          # root up: NO offs — the chord keeps sounding
+wait 100
+out                               # (nothing new: still sounding)
+key 22 up                         # component up: no-op in latch
+wait 50
+key 22 down 100                   # press again = toggle off: offs + single C
+wait 20
+out                               # 80 3C 80 3F 80 43 then 90 3C
+tap SEL
+turn K4 -1                        # LATCH -> GATE boundary: silence
+tap SEL
+wait 50
+out                               # 80 3C (the latched single goes off)
+expect ofc 1
+key 22 up
 wait 20

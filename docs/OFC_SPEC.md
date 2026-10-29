@@ -13,7 +13,7 @@
 | 三组按键分工保留（级数/绝对根音/和弦类型） | ✓ 保留不变 |
 | Root/Chord 采用**锁存选择**语义 | ✓ 已实现（§2） |
 | 区分 Root Selection / Chord Selection / Active Chord | ✓ 按此模型重构（§1） |
-| 发音分 Gate / Latch 两种模式 | Gate 已实现为唯一模式；**Latch 待定**（§6 开放问题） |
+| 发音分 Gate / Latch 两种模式 | ✓ 已实现：**K4 切换**（SCALE 页，K4 原本空闲，John 拍板） |
 | 松开事件不得隐式撤销选择 | ✓ 已实现（旧的"抬键清位"全部移除） |
 | 按住 Root 时切另一个 Root 需明确处理 | ✓ 新 root 接管：旧和弦先 Note Off，新和弦打击（§3.2） |
 | GRID 写入行为需明确 | ✓ root 按下也写 step；游标规则见 §5 |
@@ -47,7 +47,7 @@
 - 清除全部成分：逐个 toggle 掉，或按 MAJ（等价于"隐含大三度"，见 §4.1），或 K3 OFF。
 - K3 OFF：**全部复位**（silence + root/mask/deg 清空）——可预测的"总清"。
 
-## 3. 发音（Gate 模式，v1 唯一模式）
+## 3. 发音（两种模式，K4 切换）
 
 ### 3.1 规则
 
@@ -65,6 +65,16 @@
 - 共同音不追求平滑衔接（legato 归音源）；实现 = 全 off 再全 on，最简且无悬挂
 - 停止清理：root 松开 / K3 OFF / 无效组合 = 全部 Note Off
 - 已修 bug：K3 OFF 原来只清 mask 不发声 off → **挂音**；现在全清（探针 M1 验证）
+
+### 3.3 Latch 模式（K4 右 = LATCH，K4 左 = GATE；SCALE 页操作，死停不循环）
+
+- root 按下 = 打击；**root 松开不打断**，和弦继续响（gate 保持锁住）
+- 按另一个 root = 切换（旧 off → 新 on，继续锁住）
+- 成分松开 = 无操作；成分再按 = toggle（回基础和弦，立即重击）
+- 级数键同理锁存：级数松开不打断
+- **LATCH → GATE 边界 = 静音**（模式切换当作清界，防挂音）
+- 停止手势：K3 OFF（全清）或 切回 GATE；无新增按键
+- GRID 写入不受模式影响（按下瞬间写，写入内容 = 当前 Active Chord）
 
 ## 4. 和弦定义（已按乐理核实/修正）
 
@@ -132,12 +142,8 @@
 ## 6. 开放问题（评审 §九.4：列出待定，不自行扩展）
 
 1. **Chromatic 级数键的音乐性**：当前 = 半音堆叠簇（0,2,4,6…）。可选：CHR 时级数键回退到大调堆叠？或 CHR 时级数键禁用（只留 root 路径）？**待 John 拍板**
-2. **Latch 发音模式**：评审 §五.2 已定义行为，但**停止手势未定**。候选（成本从低到高）：
-   - HOME 键（在 jam 语境下 = 停止全部 OFC 发音；HOME 现有功能 = HOME/GRID 视图切换，GRID 页内长按？）
-   - 再按当前 root（toggle off）——但与"按下另一个 root = 切换"的语义打架
-   - K4 旋钮切换 Gate/Latch 模式（K4 现在空闲）
-   **待 John 选停止手势后再实现**
-3. **级数 + Latch**：级数走位目前绑 gate（物理按住）；Latch 模式下级数键是否也锁存？待定
+2. ~~Latch 停止手势~~ **已定（2026-10-29 John）**：K4 切换 Gate/Latch（SCALE 页）；停止 = K3 OFF 或切回 GATE
+3. ~~级数 + Latch~~ **已定**：Latch 下级数键同样锁存（松开不打断）
 4. 6+7 / 6+M7 目前维持静音（互斥）；若要支持（C6/7 等），需明确 5 音截断的优先级——暂不做
 
 ## 7. MIDI 事件与 Legato 边界
@@ -157,7 +163,7 @@
 7. ✓ K3 OFF 全清（无悬挂）
 8. ✓ EDIT 层 bypass（raw 音符）
 9. ✓ demo 回归 -12.0 dBFS
-10. ⬜ Latch 模式（待 §6.2 拍板后补）
+10. ✓ Latch 模式：root 松开继续响、成分 toggle、K4 边界静音、K3 OFF 全清（tests/scale.txt LATCH 节）
 
 ## 9. 与实现对应的代码位置
 
@@ -170,6 +176,7 @@
 | 重击 | `sc_restrike`（全 off → 全 on） |
 | GRID 写入 | `sc_grid_write`（root-down / component-down / degree-down 共用） |
 | K3 复位 | `scale_encoder` EN_K3 分支 |
+| K4 模式 | `scale_encoder` EN_K4 分支（sc_latch；SCALE 页专属，K4 原空闲） |
 | 发音执行 | `sc_apply`（diff）+ `ds_live_on/off` + `ds_jam_capture` |
 
 ## 10. 未验证/待真机
