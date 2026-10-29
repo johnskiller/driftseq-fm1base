@@ -1,172 +1,178 @@
-# OFC（One-Finger Chords）完整规格 — 供审查
+# OFC（One-Finger Chords）完整规格 v2 — 按评审重构
 
-来源：`ui/ui_scale.c`（逐段核对源码，2026-10-29，wasm `e1f7b547`）。
-审查提示：所有行为都标注了源码依据（函数名/分支），发现与实际手感不符处直接指出来。
+来源：`ui/ui_scale.c` + 本次评审（2026-10-29，John）。实现与文档同步改齐（commit `749bf71`，wasm `054799eb`，fwsc `d0ce22d0`）。
+
+设计定位：OFC 是**轻量和弦输入与演奏界面**，不是编曲工作站。转位与音符级修改交给 Step Edit。真实场景 = MIDI 驱动外部音源；内置 GM 只为试听。
 
 ---
 
-## 1. 总开关与作用范围
+## 0. 评审意见 → 处理对照
 
-| 项 | 值 | 依据 |
+| 评审点 | 处理 |
+|---|---|
+| 三组按键分工保留（级数/绝对根音/和弦类型） | ✓ 保留不变 |
+| Root/Chord 采用**锁存选择**语义 | ✓ 已实现（§2） |
+| 区分 Root Selection / Chord Selection / Active Chord | ✓ 按此模型重构（§1） |
+| 发音分 Gate / Latch 两种模式 | Gate 已实现为唯一模式；**Latch 待定**（§6 开放问题） |
+| 松开事件不得隐式撤销选择 | ✓ 已实现（旧的"抬键清位"全部移除） |
+| 按住 Root 时切另一个 Root 需明确处理 | ✓ 新 root 接管：旧和弦先 Note Off，新和弦打击（§3.2） |
+| GRID 写入行为需明确 | ✓ root 按下也写 step；游标规则见 §5 |
+| MIDI 生命周期 / hanging notes | ✓ K3 OFF 挂音 bug 修掉；事件配对规则见 §7 |
+| C6 五音问题 | ✓ 修为 0,4,7,9（原实现漏五音，属 bug 非取舍） |
+| DIM+7 命名 | ✓ 实现是 0,3,6,10 = **m7♭5（半减七）**，文档已按此命名；**减七（0,3,6,9）= DIM+6**（本次一并实现，原来 6 被静默忽略） |
+| 最大音符数与截断优先级 | ✓ 4 音，规则见 §4.4 |
+| Chromatic 下级数键行为 | ⚠ 行为已核实但**音乐性存疑**（§6 开放问题 1） |
+| 编辑层（EDIT）语义 | ✓ 修复：OFC 不再吞 EDIT 层按键（bug） |
+
+## 1. 状态模型（三个概念，两个变量 + 一个门控）
+
+| 概念 | 载体 | 语义 |
 |---|---|---|
-| OFC 开关 | SCALE 页 K3（左扭=OFF，右扭=ON，死停不循环） | `scale_encoder` EN_K3 |
-| 默认值 | OFF（`static uint8_t sc_ofc;` = 0） | 源码 init |
-| 关闭 OFC 时清空 | `sc_mask = 0`（已按住的成分位全部作废） | `scale_encoder` |
-| 生效范围 | **所有页面**（hook 在 `panel_key_handler` 最顶部，无 ui_mode 判断）；**鼓轨除外**（ch9 全 raw）；**EDIT 层除外**（编辑已写入 voice 时 hook 不接管） | `ui.c:183`、`scale_key_hook` |
-| OFC OFF 时按键 | 单音，过 `ui_snap` 吸附到当前 scale | `scale_key_hook` snap 分支 |
-| LED | OFC 开时 8 个成分键（19..26）常亮 + 按住的 root 键亮 | `scale_leds` |
+| Root Selection | `sc_root_key` | 当前选中的根音。**松开 root 键不清除** |
+| Chord Selection | `sc_mask` | 当前选中的成分集合。**松开成分键不清除** |
+| Active Chord | `sc_tones[]` | 当前实际发声/写入的和弦 = Selection 经 `oc_resolve` 的结果 |
+| （门控） | `sc_gate` | 当前**物理按住**的 root 键（0xFF = 无）。Gate 发音的开关 |
 
-## 2. 键位映射（27 键，OFC ON 时三分区）
+## 2. 锁存语义（核心交互）
 
-| 键 | 区 | 功能 |
-|---|---|---|
-| 0..6 | 左手 7 键 | 级数 I..VII（scale 相对） |
-| 7..18 | 中 12 键 | root，C4..B4 半音序（`sc_root_note`: 60 + key − 7 + key_shift） |
-| 19..26 | 右 8 键 | 成分（chord flavors），见 §4 |
+以 C → MIN → G 为例（评审 §三 的例子）：
 
-- OCT± 按钮 = `key_shift`（±24 上限），影响 root 音高与 OFC OFF 时的音符。
-- key 0..6 在 OFC OFF 时是普通琴键（F3 起半音序，`53 + key + key_shift`），OFC ON 时变级数键——**不再发声单独的音**。
+1. 按 C → Root Selection = C，Active = C（单音，snap）
+2. 松开 C → 静音，Selection 不变
+3. 按 MIN → Chord Selection = MIN（无 root 按住 = 只登记不出声）
+4. 松开 MIN → Selection 不变
+5. 按 G → Active = **Gm**（新 Root + 保留的 MIN）——发声
 
-## 3. 左手：级数走位（key 0..6）
+- **成分键 = 触发器（toggle）**：按亮着的键 = 取消该成分（回到基础和弦的路径）。未亮的键按下 = 加入。
+- 清除全部成分：逐个 toggle 掉，或按 MAJ（等价于"隐含大三度"，见 §4.1），或 K3 OFF。
+- K3 OFF：**全部复位**（silence + root/mask/deg 清空）——可预测的"总清"。
 
-- **触发条件：必须已有 root 按住**（`sc_root_key != 0xFF`）。没有 root 时按级数键 = 无声、无状态（返回 1 吞掉）。
-- 按下 → `sc_deg_key = key`，实时换配和弦：`sc_degree_chord` = 当前 scale 的调内音堆叠三度到七音（4 音：1、3、5、7 级），degree root 取**离按住 root 最近八度**（±6 半音内找最短路径）。
-- 成分键的修饰照常叠加（`sc_flavor`）。
-- **抬键 → 静音**（2026-10-29 John 规则：松手不发声）。不回落到 root 和弦。
-- 同按多个级数键：直接切换到新按的级数（`sc_deg_key != key` 允许覆盖）；同键重复按忽略。
-- 级数性质由 scale 决定（如 MAJ scale：I maj7、ii m7、iii m7、IV maj7、V7、vi m7、vii m7♭5——全部堆叠到七音）。
+## 3. 发音（Gate 模式，v1 唯一模式）
 
-## 4. 右手：root + 成分（key 7..26）
+### 3.1 规则
 
-### 4.1 root（key 7..18）
+- **root 按下**：按当前 Selection 打击 Active Chord（无成分 = 单个 snap 音，吸附当前 scale）
+- **root 按住期间**：
+  - 改成分 → 立即重击（re-strike：旧音符全 Note Off → 新和弦全 Note On），不需要重新按 root
+  - 走级数键 → 换配级数和弦，同样重击
+- **root 松开**：对该次发音有效的全部音符 Note Off。Selection 不变
+- **按住 A 再按 B（root）**：B 接管 selection + gate；旧和弦全部 Note Off → 新和弦 On。之后 A 松开 = 无事发生（gate 已在 B）
+- **无 root 按住时**：按成分/级数 = 只改 Selection，不出声
 
-- 按下：若当前无 root → 接管为 root，发声。**已有 root 时按第二个 root = 忽略**（一只左手）。
-- 抬键：清 root、清级数、**静音**。成分位保留（还物理按着的话），下一个 root 落下时立即重新配音。
-- **root 单按（无成分）= 一个吸附音**（过 `ui_snap`，跟随当前 scale），不是三和弦。
-- 换 root（先抬后按）= 新和弦完整重新打击。
+### 3.2 MIDI 事件原则（评审 §六）
 
-### 4.2 成分（key 19..26，按 v3.7 人体工学序）
+- 事件配对：每次状态变更 = 一组完整的 off+on；同一音高连续出现 = off→on（重触发），不悬挂
+- 共同音不追求平滑衔接（legato 归音源）；实现 = 全 off 再全 on，最简且无悬挂
+- 停止清理：root 松开 / K3 OFF / 无效组合 = 全部 Note Off
+- 已修 bug：K3 OFF 原来只清 mask 不发声 off → **挂音**；现在全清（探针 M1 验证）
 
-| key | 键名 | 成分 | 黑/白 | 单按语义 |
-|---|---|---|---|---|
-| 19 | C5 | **MAJ** | 白 | 大三和弦（其实 MAJ 是"无位"——implied，见 §5） |
-| 20 | C#5 | **7** | 黑 | 属七（0,4,7,10） |
-| 21 | D5 | **M7** | 白 | 大七（0,4,7,11） |
-| 22 | D#5 | **MIN** | 黑 | 小三（0,3,7） |
-| 23 | E5 | **DIM** | 白 | 减三（0,3,6） |
-| 24 | F5 | **ADD9** | 白 | 加九（0,4,7,14） |
-| 25 | F#5 | **SUS4** | 黑 | 挂四（0,5,7） |
-| 26 | G5 | **6** | 白 | 六和弦（0,4,9） |
+## 4. 和弦定义（已按乐理核实/修正）
 
-- 排序原则（v3.7 John 拍板）：常用组合相邻——MAJ+7（属七）、MAJ+M7（大七）、MIN+7（相邻两黑键一指滚）、MIN+DIM（m7♭5）、MIN+ADD9（m9）。
-- **无 root 按成分 = 只登记（LED/图例亮），不出声**；root 落下瞬间成型。
-- **按下（有 root）= 全和弦重新打击**（`sc_restrike`：先全 off 再全 on，不是只补 delta 音）。
-- **抬键 = 静音**（不回落到 root 三和弦）。
-- 已按住再按同键 = 忽略（`!(sc_mask & bit)` 守卫）。
+### 4.1 成分键（key 19..26，v3.7 人体工学序）
 
-### 4.3 组合规则（`oc_resolve`）
+| key | 键 | 成分 | 单按（root=C） |
+|---|---|---|---|
+| 19 | C5 | MAJ | 0,4,7 —— MAJ 位是"隐含大三度"，与无成分**同音**（灯亮音不变，有意） |
+| 20 | C#5 | 7 | 0,4,7,10 属七 |
+| 21 | D5 | M7 | 0,4,7,11 大七 |
+| 22 | D#5 | MIN | 0,3,7 |
+| 23 | E5 | DIM | 0,3,6 |
+| 24 | F5 | ADD9 | 0,4,7,14 |
+| 25 | F#5 | SUS4 | 0,5,7 |
+| 26 | G5 | 6 | **0,4,7,9**（本次修正：原 0,4,9 漏五音） |
 
-三类槽位冲突即**整个静音**（`c.n == 0` → 无声，等价于松手）：
-
-- 三度槽：MIN / DIM / SUS4 互斥（MAJ 例外，见 Aug）
-- 七度槽：7 / M7 互斥
-- 6 与任何七度互斥
-
-有效组合表（root=C 为例）：
+### 4.2 组合表（root=C）
 
 | 按键 | 和弦 | 音 |
 |---|---|---|
-| MAJ（或无成分） | — | MAJ 位是"隐含大三度"，单按 = 大三和弦 0,4,7 |
-| 7 | C7 | 0,4,7,10 |
-| M7 | Cmaj7 | 0,4,7,11 |
-| MIN | Cm | 0,3,7 |
 | MIN+7 | Cm7 | 0,3,7,10 |
 | MIN+M7 | CmMaj7 | 0,3,7,11 |
 | MIN+DIM | Cm7♭5 | 0,3,6,10 |
+| MIN+6 | Cm6 | 0,3,7,9 |
 | MIN+ADD9 | Cmadd9 | 0,3,7,14 |
-| DIM | Cdim | 0,3,6 |
-| DIM+7 | Cm7♭5 | 0,3,6,10 |
-| DIM+M7 | Cdim maj7 | 0,3,6,11 |
-| **DIM+MAJ** | **Caug** | 0,4,8（2026-10-29 新增：三度回大、五度 #5） |
-| SUS4 | Csus4 | 0,5,7 |
+| MIN+ADD9+7 | Cm9 | 0,3,10,14（五音让位，见截断规则） |
+| DIM+7 | Cm7♭5 | 0,3,6,10（= 半减七；**不是**减七） |
+| DIM+M7 | Cdim(maj7) | 0,3,6,11 |
+| **DIM+6** | **Cdim7 减七** | 0,3,6,9（本次新增：原来 6 静默忽略） |
+| **DIM+MAJ** | **Caug** | 0,4,8 |
 | SUS4+7 | C7sus4 | 0,5,7,10 |
 | SUS4+M7 | Cmaj7sus4 | 0,5,7,11 |
-| 6 | C6 | 0,4,9 |
-| ADD9 | Cadd9 | 0,4,7,14 |
-| ADD9+7 | C9 | 0,4,10,14（省五音） |
-| ADD9+M7 | Cmaj9 | 0,4,11,14（省五音） |
-| ADD9+MIN | Cmadd9 | 0,3,7,14 |
-| ADD9+MIN+7 | Cm9 | 0,3,10,14（省五音） |
-| MIN+SUS4 / 7+M7 / 6+7 / 6+M7 | 静音 | 槽位冲突 |
-| 5 音封顶 | n==5 砍五音 | `oc_resolve` n==5 分支 |
+| 6+7 | 静音 | 保留的互斥规则（避免 5 音截断的歧义） |
+| 6+M7 | 静音 | 同上 |
+| ADD9+7 | C9 | 0,4,10,14 |
+| ADD9+M7 | Cmaj9 | 0,4,11,14 |
+| MIN+SUS4 | 静音 | 三度槽互斥 |
 
-## 5. MAJ 位的特殊性（审查重点）
+冲突规则：三度槽（MIN/DIM/SUS4）互斥（MAJ+DIM=Aug 例外）；七度槽（7/M7）互斥；6 与七度互斥。冲突 = **整体静音**（无错误 MIDI 事件，Selection 保留，可继续 toggle 修正）。
 
-MAJ 是 8 个成分之一（bit 0），但 `oc_resolve` 的三度槽**不含 MAJ**——它只在两处起作用：
+### 4.3 级数和弦（key 0..6）
 
-1. **DIM+MAJ = Aug**（§4.3）
-2. **级数走位的 flavor**（`sc_flavor`）：MAJ 位强制三度回大（scale 堆叠的 iii/vi 级本是小三，按 MAJ 纠正成大三）
+- 前提：**gate root 按住**（无 root 时级数键无声无状态）
+- 和弦 = 当前 Scale（SCALE 页 K1/K2）的调内音**堆叠三度到七音**（固定 4 音：1、3、5、7 级）
+- degree root 取离 gate root 最近的八度（±6 半音最短路径）
+- 成分键可继续修饰（`sc_flavor`：MIN 强制小三、MAJ 强制大三、SUS4 换四度、6 加六度、7/M7 覆盖七音、ADD9 加九音）
+- 级数键抬 = 静音（不回落）
+- **Scale 复用**：不引入第二套调式配置，直接读 SCALE 页的 `sc_kind`/`sc_tonic`
+- **Chromatic 模式**：调内音 = 全部 12 个，"堆叠三度"按音级取前 7 个（C D E F G A B）→ 级数和弦变成 **0,2,4,6 型的叠四度/二度簇**（I = C D E F#）。可解释为"按半音级的堆叠"，但音乐性存疑 → 开放问题 1
 
-所以"单按 MAJ"和"什么都不按"在 root 和弦上是**同一个音**（0,4,7）——MAJ 灯亮但音不变。这是有意设计（MAJ 作为"默认三度"的显式表达），审查时请确认你接受这个语义。
+### 4.4 音符数上限与截断
 
-## 6. GRID 写入（录音行为）
+- 上限 **4 音**（`sc_tones[4]`）
+- `oc_resolve` 组合达 5 音（如 ADD9+7）时：**先砍五音**（t[2]），保 root/三度/七度/九音 → C9 = 0,4,10,14
+- 级数路径（固定 4 音）+ ADD9 = 5 → **砍掉后加的九音**（保堆叠的 1/3/5/7）——两条路径截断优先级不同，已文档化（`.c` 内注释）
 
-- **仅成分按下且 root 已按住且当前在 GRID 页**时触发：把当前和弦写到 cursor 所在 step（替换该 step 全部 voice），`st->on = 1`，cursor+1（63 封底）。
-- root 按下、成分抬起、级数按下/抬起**都不写**。
-- 写入的和弦由 seq 回放——在 demo 播放中测试时，听到的"再次发声"可能是回放而非 live（之前误判过一次）。
-- 成分按下时若解析结果无效（静音）：**不写 step**（`sc_tones_n == 0` 提前返回）。
+## 5. Grid Step Record（OFC 在 GRID 页）
 
-## 7. SCALE 页三设置（影响级数与 snap）
+- **写入时机**：Selection 变化导致 Active Chord 变化的**按下瞬间**——root 按下写一步，成分按下（root 已在 gate）再写一步
+- **写入内容**：Active Chord 的全部 MIDI 音符（无成分时 = 单个 snap 音——root 单按也写 step，新增能力）
+- **Step 处理**：替换 cursor 所在 step 的全部 voice，`on = 1`，cursor+1（63 封底）
+- **松开不影响**：物理释放只管 Gate 发音，已写入 step 不动（Gate/选择分离的自然结果）
+- Home Jam 的 Gate/Latch 设置不影响 GRID 行为（Latch 尚未实现，见 §6）
 
-| 旋钮 | 设置 | 范围 | 默认 |
-|---|---|---|---|
-| K1 | scale | MAJOR / MINOR / DORIAN / MIXOLYDIAN / HARM.MINOR / PENT.MAJOR / PENT.MINOR / BLUES / CHROMATIC（死停不循环） | **CHROMATIC** |
-| K2 | tonic | C..B（0..11 死停） | C |
-| K3 | OFC | OFF/ON 死停 | OFF |
-| K4 | 空闲 | — | — |
+## 6. 开放问题（评审 §九.4：列出待定，不自行扩展）
 
-scale/tonic 影响：① OFC OFF 时的单音吸附 ② root 单按的吸附音 ③ 级数走位的和弦内音。**不影响**成分组合和弦的音程（那些是固定半音结构，"flavor tones: no snap (deliberate)"）。
+1. **Chromatic 级数键的音乐性**：当前 = 半音堆叠簇（0,2,4,6…）。可选：CHR 时级数键回退到大调堆叠？或 CHR 时级数键禁用（只留 root 路径）？**待 John 拍板**
+2. **Latch 发音模式**：评审 §五.2 已定义行为，但**停止手势未定**。候选（成本从低到高）：
+   - HOME 键（在 jam 语境下 = 停止全部 OFC 发音；HOME 现有功能 = HOME/GRID 视图切换，GRID 页内长按？）
+   - 再按当前 root（toggle off）——但与"按下另一个 root = 切换"的语义打架
+   - K4 旋钮切换 Gate/Latch 模式（K4 现在空闲）
+   **待 John 选停止手势后再实现**
+3. **级数 + Latch**：级数走位目前绑 gate（物理按住）；Latch 模式下级数键是否也锁存？待定
+4. 6+7 / 6+M7 目前维持静音（互斥）；若要支持（C6/7 等），需明确 5 音截断的优先级——暂不做
 
-### SC_SET 掩码（半音位，bit0=C）
+## 7. MIDI 事件与 Legato 边界
 
-| scale | 掩码 | 含音 |
-|---|---|---|
-| MAJ | 0x0AB5 | 0 2 4 5 7 9 11 |
-| MIN | 0x05AD | 0 2 3 5 7 8 10 |
-| DOR | 0x06AD | 0 2 3 5 7 9 10 |
-| MIX | 0x06B5 | 0 2 4 5 7 9 10 |
-| HMI | 0x09AD | 0 2 3 5 7 8 11 |
-| PMAJ | 0x0295 | 0 2 4 7 9 |
-| PMIN | 0x04A9 | 0 3 5 7 10 |
-| BLU | 0x04E9 | 0 3 5 6 7 10 |
-| CHR | 0x0FFF | 全部 |
+- CFW 职责：生成音符、正确配对 on/off、变化时清理旧音符、停止时无悬挂——全部已实现并有探针覆盖
+- 音源职责：legato/portamento/包络/释放——CFW 不模拟
+- 第一版不做共同音追踪；`re-strike`（全 off → 全 on）是明确的最低复杂度方案
 
-## 8. 状态生命周期速查
+## 8. 测试覆盖（tests/scale.txt 已重写，全部通过）
 
-| 事件 | sc_root_key | sc_deg_key | sc_mask | 声音 |
-|---|---|---|---|---|
-| root 按下 | = key | 不变 | 不变 | 单音（snap）或和弦（有成分） |
-| root 抬起 | 0xFF | 0xFF | **保留** | 静音 |
-| 第二个 root 按下 | 不变 | 不变 | 不变 | 忽略 |
-| 级数按下（需 root） | 不变 | = key | 不变 | 级数和弦（flavor 叠加） |
-| 级数抬起 | 不变 | 0xFF | 不变 | 静音 |
-| 成分按下 | 不变 | 不变 | \| bit | 全和弦重击（或无效=静音） |
-| 成分抬起 | 不变 | 不变 | & ~bit | 静音 |
-| K3 OFF | 不变 | 不变 | 0 | — |
-| 鼓轨 / EDIT 层 | hook 不接管（原逻辑直通） | | | |
+1. ✓ 锁存选择：root 松开 → 保留；成分无 root 登记 → 新 root 落下时成型（G maj 用例）
+2. ✓ 成分 toggle-off 回基础和弦（CmajAdd9 → C maj）
+3. ✓ 按住 root 切另一个 root（旧 off → 新 on）
+4. ✓ C6 = 0,4,7,9；DIM+6 = 0,3,6,9
+5. ✓ 无效组合静音（7+M7）
+6. ✓ 级数走位（ii → Dm7；抬键静音）
+7. ✓ K3 OFF 全清（无悬挂）
+8. ✓ EDIT 层 bypass（raw 音符）
+9. ✓ demo 回归 -12.0 dBFS
+10. ⬜ Latch 模式（待 §6.2 拍板后补）
 
-## 9. 已知的"奇怪但有意"点（审查清单）
+## 9. 与实现对应的代码位置
 
-1. MAJ 单按与无成分同音（§5）——灯亮音不变。
-2. 成分和弦**不做 scale 吸附**（故意：C#maj 里出 E# 等音是 OK 的，pc 语义）。
-3. 级数和弦固定 4 音（堆到七音），没有纯三和弦模式。
-4. 级数 root 八度选择 = 离按住 root 最近（可能比 root 高也可能低）。
-5. 无效组合的反馈 = 无声 + 图例灯亮（没有额外的屏上提示）。
-6. OFC ON 时 key 0..6 从"琴键"变"级数键"——低音区不能弹单音（要弹低音得用 root 区 + OCT-）。
-7. GRID 写入只认成分按下瞬间，root 按下不写——单按 root 想写单音 step 得走老路（OFC OFF 或 EDIT 层）。
-8. jam capture 只挂在 sc_apply / snap 分支（OFC 和弦走 `sc_apply` → 会进 jam ring）。
+| 行为 | 位置 |
+|---|---|
+| 选择/门控状态 | `ui/ui_scale.c` 顶部 `sc_root_key` / `sc_mask` / `sc_gate` / `sc_deg_key` |
+| 三分区按键 | `scale_key_hook`（hook 顶部有 `focus_layer` bypass） |
+| 组合解析 | `oc_resolve`（冲突→0 音；n==5 砍五音） |
+| 级数堆叠 | `sc_degree_chord`（SC_STEP 宏）+ `sc_flavor` |
+| 重击 | `sc_restrike`（全 off → 全 on） |
+| GRID 写入 | `sc_grid_write`（root-down / component-down / degree-down 共用） |
+| K3 复位 | `scale_encoder` EN_K3 分支 |
+| 发音执行 | `sc_apply`（diff）+ `ds_live_on/off` + `ds_jam_capture` |
 
-## 10. 未验证/待真机确认
+## 10. 未验证/待真机
 
-- 全部手感结论来自 host 探针 + 源码；真机（fwsc `ff34f3e3` 未刷）行为理论上一致，但 LED/键扫描延迟未实测。
-- `tests/scale.txt` 基准：ofc_mask 263 (MAJ+root7) / 828 / 6154；DSL 的 expect 比较坏（FAIL 前缀），以 got 值为准。
+- 全部结论来自 host 探针（L1-L6/M1-M5 + tests/scale.txt）；真机固件 `d0ce22d0` 未刷
+- LED 语义：成分灯 = Selection（含未发声的登记），root 灯 = Selection——审查时注意"灯亮"现在表示"选中"而非"按住"
