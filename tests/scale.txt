@@ -274,7 +274,7 @@ key 19 down
 key 21 down                     # M7: Cmaj7
 wait 40
 expect ofc_keys 280704          # keys 7 (C4), 11 (E4), 14 (G4), 18 (B4)
-expect ofc_name 55735           # "Cmaj7"
+expect ofc_name 55820           # "CM7" (John's shorthand)
 out
 key 20 up
 key 19 up

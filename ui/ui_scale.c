@@ -375,35 +375,76 @@ static uint8_t scale_key_hook(uint8_t key, uint8_t down)
 }
 
 
+/* a chord tone's NAME with the spelling its function calls for: a flat third,
+ * fifth and seventh read Eb / Gb / Bb (NOTE_NAMES is sharp-only, which turns
+ * a C minor into "C D# G"). i = 0 is the root. */
+static const char *sc_tone_name(uint8_t i)
+{
+    static const char *const FLAT[12] = {"C", "Db", "D", "Eb", "E", "F",
+                                         "Gb", "G", "Ab", "A", "Bb", "B"};
+    static const char *const SHARP[12] = {"C", "C#", "D", "D#", "E", "F",
+                                          "F#", "G", "G#", "A", "A#", "B"};
+    uint8_t iv;
+    if (!i) return ui_note_name((uint8_t)(sc_tones[0] % 12));
+    iv = (uint8_t)((sc_tones[i] - sc_tones[0]) % 12);
+    if (iv == 3 || iv == 6 || iv == 10 || iv == 1)   /* b3, b5, b7, b9 */
+        return FLAT[(sc_tones[i]) % 12];
+    if (iv == 8)                                     /* #5 */
+        return SHARP[(sc_tones[i]) % 12];
+    return FLAT[(sc_tones[i]) % 12];                 /* naturals spell the same */
+}
+
 /* the ACTIVE chord's NAME, read back from the interval set it will send
- * (John 2026-10-29: "除了音名，也要写出和弦名"). The table is the truth table
- * of what oc_resolve + the degree stack can produce; an unknown set prints
- * the root with a "?" rather than inventing a name. */
+ * (John 2026-10-29: "除了音名，也要写出和弦名", written the way players write
+ * them: Cm, CM7, C7sus4 — not CMAJ7). Rules, not a lookup table, so every set
+ * the panel can build gets an honest name; a set with no common name prints
+ * "C?" rather than something invented. */
 void sc_chord_name(char *buf, uint8_t n)
 {
-    static const struct { uint16_t iv; const char *sfx; } TBL[] = {
-        {0x0091, ""},  {0x0089, "m"},   {0x0049, "dim"},  {0x0111, "aug"},
-        {0x00A1, "sus4"}, {0x0085, "sus2"},
-        {0x0891, "maj7"}, {0x0491, "7"}, {0x0489, "m7"}, {0x0291, "6"},
-        {0x008D, "madd9"}, {0x0095, "add9"},
-        {0x0449, "m7b5"}, {0x0249, "dim7"}, {0x0289, "m6"}, {0x04A1, "7sus4"},
-        {0x0611, "13(no5)"}, {0x0A11, "maj13(no5)"}
-    };
-    const char *nm, *sfx = "?";
     uint16_t iv = 0;
-    uint8_t i;
+    const char *nm;
     char *q = buf;
+    uint8_t i, maj3, min3, sus4, p2, p5, b5, s5, m7, M7, s6, ninth, third;
     if (!n) { *buf = 0; return; }
     nm = ui_note_name((uint8_t)(sc_tones[0] % 12));
     while (*nm) *q++ = *nm++;
     for (i = 1; i < n; i++)                          /* intervals above the root */
         iv |= (uint16_t)(1u << ((sc_tones[i] - sc_tones[0]) % 12));
     if (!iv) { *q = 0; return; }                     /* a single note: its name only */
-    iv |= 1u;                                        /* the root is always there */
-    for (i = 0; i < sizeof TBL / sizeof TBL[0]; i++)
-        if (TBL[i].iv == iv) { sfx = TBL[i].sfx; break; }
-    while (*sfx) *q++ = *sfx++;
+    maj3 = (iv >> 4) & 1u;
+    min3 = (iv >> 3) & 1u;
+    sus4 = (iv >> 5) & 1u;
+    p2   = (iv >> 2) & 1u;                           /* sus2, or the 9th closed down */
+    p5   = (iv >> 7) & 1u;
+    b5   = (iv >> 6) & 1u;
+    s5   = (iv >> 8) & 1u;
+    s6   = (iv >> 9) & 1u;
+    m7   = (iv >> 10) & 1u;
+    M7   = (iv >> 11) & 1u;
+    ninth = p2 && (maj3 || min3);                    /* a third plus a 2nd = add9 */
+    third = maj3 || min3 || sus4 || (p2 && !ninth);
+    if (!third && !p5 && !b5 && !s5 && !m7 && !M7 && !s6) { *q = 0; return; }  /* no name */
+    #define PUT(s) do { const char *z_ = (s); while (*z_) *q++ = *z_++; } while (0)
+    if (min3 && b5 && s6 && !m7 && !M7)      { PUT("dim7"); goto done; }   /* 0,3,6,9 */
+    if (min3 && b5 && !s6 && !m7 && !M7)     { PUT("dim");  goto done; }   /* 0,3,6   */
+    if (!min3 && maj3 && s5 && !m7 && !M7 && !s6) { PUT("aug"); goto done; } /* 0,4,8 */
+    if (min3)        PUT("m");
+    else if (sus4)   PUT("sus4");
+    else if (!maj3 && p2) PUT("sus2");
+    if (ninth && (m7 || M7))            PUT(m7 ? "9" : "M9");
+    else if (s6 && (m7 || M7))          PUT(m7 ? "13" : "M13");
+    else {
+        if (m7)      PUT("7");
+        else if (M7) PUT("M7");
+        if (s6)      PUT("6");
+        if (ninth)   PUT("add9");
+    }
+    if (b5)          PUT("b5");
+    else if (s5)     PUT("(#5)");
+    if (!third)      PUT("5");                       /* just a root and a fifth */
+done:
     *q = 0;
+    #undef PUT
 }
 
 /* the keybed's chord markers as a bitmask (the painter and the host probe) */
@@ -544,7 +585,8 @@ static void draw_scale(void)
         sc_chord_name_str(chord);
         *q = 0;
         for (i = 0; i < sc_tones_n; i++) {
-            const char *nm = ui_note_name((uint8_t)(sc_tones[i] % 12));
+            const char *nm = sc_tone_name(i);        /* interval-aware spelling:
+                                                      * Cm is C Eb G, not C D# G */
             while (*nm) *q++ = *nm++;
             if (i + 1 < sc_tones_n) *q++ = ' ';
         }

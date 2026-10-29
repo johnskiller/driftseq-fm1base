@@ -29,6 +29,9 @@ include = ["eas", "eas_inc"]   # app.c includes eas.h; eas_inc also answers <str
 # the like are waveform data, not registers).
 vendored = ["eas/", "eas_inc/"]
 words = "words.tsv"
+font_full = ["M"]              # FONT_M carries lower case: chord names are written
+                               # Cm / Cmaj7 / Csus4, not CM / CMAJ7 (+33 KB flash;
+                               # the app slot has ~74 KB spare, so this fits)
 ble = true                     # Bluetooth MIDI: the reason for this port
 ble_central = true             # and the FM-1 may connect to BLE MIDI devices
 # DriftSeq is a MIDI sequencer: it sends messages and makes no sound of its
