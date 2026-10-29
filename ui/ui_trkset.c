@@ -215,7 +215,14 @@ static void draw_trkset(void)
     cv_begin(240, 224, C_BLACK);
     {
         hdr_t h;
-        h.ctx = is_drum_trk() ? "DRUM" : "MELODIC";   /* what CH=10 means, stated once */
+        /* The context says what the channel MEANS (CH=10 is the drum channel),
+         * and appends MUTE/SOLO when that is why the track is silent — on a page
+         * that edits what a track sounds like, "why don't I hear it" has to be
+         * answerable without leaving. */
+        static const char *const CTX_DRUM[3] = {"DRUM", "DRUM MUTE", "DRUM SOLO"};
+        static const char *const CTX_MEL[3]  = {"MELODIC", "MELODIC MUTE", "MELODIC SOLO"};
+        uint8_t st = tr->mute ? 1 : (tr->solo ? 2 : 0);
+        h.ctx = (char *)(is_drum_trk() ? CTX_DRUM[st] : CTX_MEL[st]);
         h.right = (char *)0;
         h.right_c = TB_TX;
         h.dots = 1;
