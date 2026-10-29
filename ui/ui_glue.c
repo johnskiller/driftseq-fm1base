@@ -25,6 +25,7 @@ static void draw_home(void);
 static void draw_grid_melodic(void);
 static void draw_grid_drum(void);
 static void draw_arp(void);
+static void draw_trkset(void);
 static void ui_draw_footer(void);
 
 /* edit/card/arp internals (ui_edit.c) */
@@ -34,6 +35,8 @@ static void ui_arp_encoder(uint8_t enc, int8_t det);
 static void ui_edit_encoder(uint8_t enc, int8_t det);
 static void ui_grid_encoder(uint8_t enc, int8_t det);
 static void ui_home_encoder(uint8_t enc, int8_t det);
+static void trkset_encoder(uint8_t enc, int8_t det);
+static uint8_t trkset_button(uint8_t btn);
 
 /* routing + lifecycle (ui.c / ui_edit.c / ui_input.c) */
 static void ui_encoder(uint8_t enc, int8_t det);

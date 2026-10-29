@@ -544,6 +544,7 @@ static void ui_arp_encoder(uint8_t enc, int8_t det)
  * EN_ALGO=1, EN_PRESET=2, EN_K1..K4=3..6. */
 static void ui_encoder(uint8_t enc, int8_t det)
 {
+
     /* the SAVE menu swallows the four knobs: K1..K4 all rotate the highlight
      * (one list, four entries — which knob you grab should not matter) */
     if (jam_menu) {
@@ -558,6 +559,11 @@ static void ui_encoder(uint8_t enc, int8_t det)
     }
     if (ui_mode == M_SCALE) {                     /* the SCALE page owns K1..K4 */
         scale_encoder(enc, det);
+        return;
+    }
+    if (ui_mode == M_TRKSET) {                    /* TRACK SET owns them too */
+        trkset_encoder(enc, det);
+        kn_poke(enc);
         return;
     }
     /* r16j panelEnc: SELECT is context-aware, not global —
@@ -594,6 +600,8 @@ static void ui_button(uint8_t btn, uint8_t down, uint8_t released)
         return;                                   /* everything fires on the release edge */
     if (scale_button(btn))
         return;                                   /* SEL/the SCALE page consumed it */
+    if (trkset_button(btn))
+        return;                                   /* ENV (toggle) + leaves */
     if (jam_menu) {                               /* the menu owns SAVE/HOME until it closes */
         if (btn == B_SAVE) {
             jam_menu_act(jam_menu_sel);

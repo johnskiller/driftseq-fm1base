@@ -348,6 +348,13 @@ static void ui_draw_footer(void)
         static const char *const FOOT_SCALE[4] = {"KIND", "KEY", "OFC", ""};
         for (k = 0; k < 4; k++)
             cv_text(FX[k], 6, &FONT_T, FOOT_SCALE[k], FOOT_GRAY);
+    } else if (ui_mode == M_TRKSET) {
+        /* K1 row, K2 value, K3 the MUTE/SOLO slider it is everywhere else,
+         * K4 the GLOBAL swing (the one number this page edits that is not
+         * per-track, so it names itself rather than hiding behind the row) */
+        static const char *const FOOT_TRKSET[4] = {"ROW", "VALUE", "MUTE", "SWING"};
+        for (k = 0; k < 4; k++)
+            cv_text(FX[k], 6, &FONT_T, FOOT_TRKSET[k], FOOT_GRAY);
     } else if (glo_held && ui_mode != M_ARP) {
         const char *const *f = (ui_mode == M_HOME) ? FOOT_GLO_HOME : FOOT_GLO_GRID;
         for (k = 0; k < 4; k++)

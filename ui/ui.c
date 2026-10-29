@@ -7,7 +7,7 @@
  * v1 scope (b42a5eb): step rec/play/edit + USB out. EAS GM = batch 2. */
 
 /* ---- UI state (emu globals parity) ---- */
-enum { M_HOME = 0, M_GRID, M_ARP, M_SCALE };
+enum { M_HOME = 0, M_GRID, M_ARP, M_SCALE, M_TRKSET };
 static uint8_t ui_mode = M_HOME;
 static uint8_t focus_layer;                  /* 0 base 1 EDIT (GRID only) */
 static uint8_t cursor;                       /* 0..63, dead-stop */
@@ -26,6 +26,9 @@ static uint8_t scale_key_hook(uint8_t key, uint8_t down);
 static void scale_encoder(uint8_t enc, int8_t det);
 static uint8_t scale_button(uint8_t btn);
 static void draw_scale(void);
+static void draw_trkset(void);
+static uint8_t trkset_button(uint8_t btn);
+static void trkset_encoder(uint8_t enc, int8_t det);
 static void scale_leds(uint32_t *litK, uint32_t *dimK, uint32_t *litB, uint8_t is_drum);
 void sc_chord_name(char *buf, uint8_t n);
 void sc_chord_name_str(char *buf);
@@ -107,6 +110,7 @@ static void ui_draw(void)
     else if (ui_mode == M_GRID) {
         if (is_drum_trk()) draw_grid_drum(); else draw_grid_melodic();
     } else if (ui_mode == M_SCALE) draw_scale();
+    else if (ui_mode == M_TRKSET) draw_trkset();
     else draw_arp();
 }
 
@@ -532,6 +536,7 @@ static void ui_leds(uint32_t *litK, uint32_t *dimK, uint32_t *litB, uint32_t *di
     if (eng.playing)   *litB |= 1u << B_PLAY;
     if (focus_layer) *litB |= 1u << B_EDIT;
     if (jam_menu) *litB |= 1u << B_SAVE;     /* the SAVE menu is open: SAVE is live */
+    if (ui_mode == M_TRKSET) *litB |= 1u << B_ENV;   /* this page's door is ENV */
 }
 
 /* Push the masks above onto the panel. fm1-base already keys its light map the

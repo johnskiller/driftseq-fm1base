@@ -601,6 +601,8 @@ static void ble_device_button(void)
 #include "ui/ui_input.c"
 #include "ui/ui_screens.c"
 #include "ui/ui_scale.c"
+#include "ui/ui_trkset.c"          /* TRACK SET: after ui_scale (k3_state_slider, txt_*)
+                             * and before ui_edit (its routing calls in) */
 #include "ui/ui_edit.c"
 
 void app_input_only(void)
@@ -677,6 +679,29 @@ int app_expect(const char *what, int *got)
         *got = (TRK()->steps[0].nvoices << 8) | (TRK()->steps[0].nvoices ? TRK()->steps[0].v[0].note : 0);
     else if (!strcmp(what, "snapped"))           /* the cursor step's first voice, post-snap */
         *got = TRK()->steps[cursor].nvoices ? TRK()->steps[cursor].v[0].note : -1;
+    else if (!strcmp(what, "ts_row"))            /* TRACK SET: the row K2 edits */
+        *got = ts_row;
+    else if (!strcmp(what, "ts_ch"))             /* and the five fields under test */
+        *got = TRK()->channel;
+    else if (!strcmp(what, "ts_prog"))
+        *got = TRK()->prog;
+    else if (!strcmp(what, "ts_route"))
+        *got = TRK()->route;
+    else if (!strcmp(what, "ts_voice"))
+        *got = TRK()->voice_mode;
+    else if (!strcmp(what, "ts_swing"))
+        *got = TRK()->swing_amt;
+    else if (!strcmp(what, "ts_gswing"))         /* K4: the global it multiplies by */
+        *got = eng.global_swing;
+    else if (!strcmp(what, "ts_prog_hash"))      /* the PROGRAM row as drawn (name+number) */
+    {
+        char b[40];
+        uint16_t h = 5381;
+        uint8_t i;
+        ts_prog_text(b);
+        for (i = 0; b[i]; i++) h = (uint16_t)(h * 33u + (uint8_t)b[i]);
+        *got = (int)h;
+    }
     else
         return 0;
     return 1;
