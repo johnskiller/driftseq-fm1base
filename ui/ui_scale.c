@@ -271,8 +271,12 @@ static uint8_t scale_key_hook(uint8_t key, uint8_t down)
     }
     if (key >= 19) {                              /* a component */
         uint8_t bit = (uint8_t)(1u << (key - 19));
-        if (down && sc_root_key != 0xFF && !(sc_mask & bit)) {
+        if (down && !(sc_mask & bit)) {
+            /* the bit registers with or without a root: the legend lights the
+             * moment you press, and the chord voices as soon as the root lands */
             sc_mask |= bit;
+            if (sc_root_key == 0xFF)
+                return 1;
             sc_revoice(sc_root_note(sc_root_key));
             if (sc_tones_n == 0) {                /* the set went nonsense: silence */
                 return 1;
