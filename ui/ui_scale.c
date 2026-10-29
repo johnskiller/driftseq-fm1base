@@ -261,9 +261,11 @@ static uint8_t scale_key_hook(uint8_t key, uint8_t down)
             }
             /* a second root while one is held is ignored: one left hand */
         } else if (sc_root_key == key) {
-            sc_root_key = 0xFF;
+            sc_root_key = 0xFF;                   /* the components stay held:
+                                                   * their bits survive (they are
+                                                   * still physically down) — the
+                                                   * next root picks them up */
             sc_deg_key = 0xFF;
-            sc_mask = 0;
             sc_tones_n = 0;
             sc_apply();
         }
