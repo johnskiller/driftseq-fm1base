@@ -217,8 +217,7 @@ static void sc_revoice(uint8_t root_note)            /* rebuild sc_tones from st
     if (sc_deg_key != 0xFF) {                        /* a degree walk is live: the scale speaks */
         int8_t t[4];
         uint8_t n = sc_degree_chord(sc_deg_key, t), d;
-        int deg_pc, root_pc, delta;
-        /* the degree root, nearest to the held root's register */
+        int deg_pc;
         d = sc_deg_key;
         deg_pc = -1;
         {   uint8_t k = 0;
@@ -229,9 +228,10 @@ static void sc_revoice(uint8_t root_note)            /* rebuild sc_tones from st
                 }
         }
         if (deg_pc < 0) return;                      /* no scale: silence */
-        root_pc = ((root_note % 12) + 12) % 12;
-        delta = ((deg_pc - root_pc) + 18) % 12 - 6;  /* the shortest way round (+-6) */
-        root_note = (uint8_t)(root_note + delta);
+        /* the degree's pitch hangs off the TONIC, never off the held root
+         * (John 2026-10-29: the root zone is for out-of-key chords; the OCT
+         * keys own the register, so a root must not transpose the walk) */
+        root_note = (uint8_t)(60 + (sc_tonic + deg_pc) % 12 + key_shift);
         sc_flavor(t, &n);
         sc_tones_n = 0;
         for (i = 0; i < (int)n && sc_tones_n < 4; i++)
@@ -240,8 +240,12 @@ static void sc_revoice(uint8_t root_note)            /* rebuild sc_tones from st
     }
     if (sc_mask && c.n == 0) { sc_tones_n = 0; return; }   /* nonsense set: silence */
     sc_tones_n = 0;
-    if (!sc_mask) {                                  /* root alone: one snapped note */
-        sc_tones[sc_tones_n++] = (uint8_t)ui_snap(root_note);
+    if (!sc_mask) {                                  /* root alone: its own pitch.
+                                                      * NO snap (John 2026-10-29): OFC's
+                                                      * root zone is the out-of-key
+                                                      * path, and with OFC off the whole
+                                                      * keybed is already the snap */
+        sc_tones[sc_tones_n++] = (uint8_t)root_note;
         return;
     }
     for (i = 0; i < c.n && sc_tones_n < 4; i++)      /* flavor tones: no snap (deliberate) */
@@ -294,19 +298,25 @@ static uint8_t scale_key_hook(uint8_t key, uint8_t down)
             return 1;                             /* John: CHR has no scale degrees —
                                                    * the object doesn't exist; chord
                                                    * input = the root keys only */
-        if (down && sc_gate != 0xFF && sc_deg_key != key) {
-            sc_deg_key = key;                     /* the scale re-voices, live */
-            sc_revoice(sc_root_note(sc_gate));
+        /* the degree key IS its own gate (John's 1b): its pitch hangs off the
+         * tonic, so holding a root first would be an empty gesture. sc_gate
+         * carries the degree key id (0..6) while the walk sounds. */
+        if (down) {
+            sc_deg_key = key;
+            sc_gate = key;
+            sc_revoice(0);                        /* the root arg is moot on this path */
+            if (sc_tones_n == 0) return 1;
             sc_restrike();
             sc_grid_write();
-        } else if (!down && sc_deg_key == key) {
-            sc_deg_key = 0xFF;
+        } else if (sc_deg_key == key) {
             if (sc_ofc == 2) return 1;            /* LATCH: the latched chord keeps
                                                    * sounding (selection persists) */
+            sc_deg_key = 0xFF;
+            sc_gate = 0xFF;
             sc_tones_n = 0;                       /* GATE: the walk ends: silence */
             sc_apply();
         }
-        return 1;                                 /* degree keys never sound alone */
+        return 1;
     }
     if (key >= 7 && key <= 18) {                  /* a root */
         if (down) {
@@ -335,6 +345,10 @@ static uint8_t scale_key_hook(uint8_t key, uint8_t down)
     if (key >= 19) {                              /* a component: TOGGLE */
         uint8_t bit = (uint8_t)(1u << (key - 19));
         if (down) {
+            uint8_t activating = !(sc_mask & bit);    /* John's rule: SELECTING a
+                                                       * component strikes the chord,
+                                                       * UNSELECTING only edits the
+                                                       * selection (no new notes) */
             sc_mask ^= bit;                       /* press lit = unselect (the
                                                    * way back to the basic chord) */
             if (sc_gate == 0xFF)
@@ -346,13 +360,66 @@ static uint8_t scale_key_hook(uint8_t key, uint8_t down)
                 sc_apply();
                 return 1;
             }
-            sc_restrike();
-            sc_grid_write();
+            if (activating) {                     /* the new chord speaks */
+                sc_restrike();
+                sc_grid_write();
+            } else {
+                sc_apply();                       /* a diff: the dropped tone goes
+                                                   * off, nothing re-articulates,
+                                                   * the step is untouched */
+            }
         }
         return 1;
     }
     return 0;                                     /* keys 1..5 spare: fall through */
 }
+
+
+/* the ACTIVE chord's NAME, read back from the interval set it will send
+ * (John 2026-10-29: "除了音名，也要写出和弦名"). The table is the truth table
+ * of what oc_resolve + the degree stack can produce; an unknown set prints
+ * the root with a "?" rather than inventing a name. */
+void sc_chord_name(char *buf, uint8_t n)
+{
+    static const struct { uint16_t iv; const char *sfx; } TBL[] = {
+        {0x0091, ""},  {0x0089, "m"},   {0x0049, "dim"},  {0x0111, "aug"},
+        {0x00A1, "sus4"}, {0x0085, "sus2"},
+        {0x0891, "maj7"}, {0x0491, "7"}, {0x0489, "m7"}, {0x0291, "6"},
+        {0x008D, "madd9"}, {0x0095, "add9"},
+        {0x0449, "m7b5"}, {0x0249, "dim7"}, {0x0289, "m6"}, {0x04A1, "7sus4"},
+        {0x0611, "13(no5)"}, {0x0A11, "maj13(no5)"}
+    };
+    const char *nm, *sfx = "?";
+    uint16_t iv = 0;
+    uint8_t i;
+    char *q = buf;
+    if (!n) { *buf = 0; return; }
+    nm = ui_note_name((uint8_t)(sc_tones[0] % 12));
+    while (*nm) *q++ = *nm++;
+    for (i = 1; i < n; i++)                          /* intervals above the root */
+        iv |= (uint16_t)(1u << ((sc_tones[i] - sc_tones[0]) % 12));
+    if (!iv) { *q = 0; return; }                     /* a single note: its name only */
+    iv |= 1u;                                        /* the root is always there */
+    for (i = 0; i < sizeof TBL / sizeof TBL[0]; i++)
+        if (TBL[i].iv == iv) { sfx = TBL[i].sfx; break; }
+    while (*sfx) *q++ = *sfx++;
+    *q = 0;
+}
+
+/* the keybed's chord markers as a bitmask (the painter and the host probe) */
+uint32_t sc_marks(void)
+{
+    uint32_t m = 0;
+    uint8_t i;
+    for (i = 0; i < sc_tones_n; i++) {
+        int k = (int)sc_tones[i] - 53 - key_shift;
+        if (k >= 0 && k <= 26) m |= 1u << k;
+    }
+    return m;
+}
+
+/* the name of the current Active Chord, for the painter and the host probe */
+void sc_chord_name_str(char *buf) { sc_chord_name(buf, sc_tones_n); }
 
 /* the panel's key lights for this layer: with OFC on the whole right zone
  * sits DIM (John 2026-10-29) and each pressed/selected key lights — the
@@ -411,6 +478,8 @@ static void draw_scale(void)
         const uint8_t BLACK_LOW[11] = {0, 1, 2, 4, 5, 7, 8, 9, 11, 12, 14};  /* key -> lower white ordinal */
         const uint8_t BLACK_KEY[11] = {1, 3, 5, 8, 10, 13, 15, 17, 20, 22, 25};
         int x0 = 14, y0 = 72, kw = 11, kp = 13;
+        uint32_t marked = sc_marks();                /* the Active Chord's own keys
+                                                      * (John: 音名同时在上方键盘反映) */
         for (i = 0; i < 16; i++) {                   /* the white keys */
             uint8_t k = WHITE_KEYS[i];
             int pc = (k + 5) % 12;                   /* id 0 = F3: pc = (F3 + k) % 12 */
@@ -419,6 +488,8 @@ static void draw_scale(void)
             uint16_t col = in_scale ? C_WHITE : C_GRAY;
             if (sc_root_key != 0xFF && k == sc_root_key) col = C_AMB;
             cv_rect(x0 + i * kp, y0, kw, 40, col);
+            if (marked >> k & 1u)                    /* a chord tone: its foot goes amber */
+                cv_rect(x0 + i * kp + 1, y0 + 34, kw - 2, 5, C_HI);
             if (tonic) {                             /* the tonic: an outline (4 rules) */
                 cv_rect(x0 + i * kp - 1, y0 - 1, kw + 2, 1, C_AMB);
                 cv_rect(x0 + i * kp - 1, y0 + 40, kw + 2, 1, C_AMB);
@@ -434,6 +505,8 @@ static void draw_scale(void)
             uint16_t col = in_scale ? C_BLACK : C_GRAY;   /* out of scale: the greyed family, same as the whites */
             if (sc_root_key != 0xFF && k == sc_root_key) col = C_AMB;
             cv_rect(x, y0, 7, 24, col);
+            if (marked >> k & 1u)                    /* a chord tone (black): its foot */
+                cv_rect(x + 1, y0 + 19, 5, 4, C_HI);
         }
         /* zone brackets: a 3px rule under each zone + its label. The zones are
          * key-id ranges but the geometry is white-ordinal space (the blacks
@@ -465,9 +538,10 @@ static void draw_scale(void)
     /* the ACTIVE chord as it will be sent (John 2026-10-29: show the notes
      * so the player can verify OFC is doing what he thinks). Empty = silence. */
     if (sc_ofc && !is_drum_trk()) {
-        char names[20];
-        char *q = names;
-        uint8_t i;
+        char chord[22], notes[20];
+        char *q = notes;
+        uint8_t i, w;
+        sc_chord_name_str(chord);
         *q = 0;
         for (i = 0; i < sc_tones_n; i++) {
             const char *nm = ui_note_name((uint8_t)(sc_tones[i] % 12));
@@ -475,9 +549,12 @@ static void draw_scale(void)
             if (i + 1 < sc_tones_n) *q++ = ' ';
         }
         *q = 0;
-        if (names[0])
-            cv_text(6, 186, &FONT_T, names, C_HI);   /* under the AUG hint (y 172+14);
-                                                      * footer owns 216+ */
+        if (chord[0]) {                              /* the NAME first (John), then the
+                                                      * notes it actually sends */
+            cv_text(6, 186, &FONT_T, chord, C_AMB);
+            for (w = 0; chord[w]; w++) ;
+            cv_text(6 + w * 5 + 6, 186, &FONT_T, notes, C_HI);
+        }
     }
     cv_blit_band(0, 0, 216);                          /* the footer painter owns 216+ */
     ui_draw_footer();                                 /* the SCALE footer (else stale pixels stay) */

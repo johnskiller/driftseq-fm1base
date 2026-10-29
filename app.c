@@ -656,6 +656,17 @@ int app_expect(const char *what, int *got)
         *got = sc_ofc;                               /* 0 = OFF, 1 = GATE, 2 = LATCH */
     else if (!strcmp(what, "ofc_mask"))
         *got = (sc_mask << 8) | (sc_root_key == 0xFF ? 0x7F : sc_root_key);
+    else if (!strcmp(what, "ofc_keys"))           /* the keybed's chord markers (bit per key) */
+        *got = (int)sc_marks();
+    else if (!strcmp(what, "ofc_name"))           /* the chord name row: a checksum of it */
+    {
+        char nm[20];
+        uint16_t h = 5381;
+        uint8_t i;
+        sc_chord_name_str(nm);
+        for (i = 0; nm[i]; i++) h = (uint16_t)(h * 33u + (uint8_t)nm[i]);
+        *got = (int)h;
+    }
     else if (!strcmp(what, "step0"))             /* step 0's voice count + first voice */
         *got = (TRK()->steps[0].nvoices << 8) | (TRK()->steps[0].nvoices ? TRK()->steps[0].v[0].note : 0);
     else if (!strcmp(what, "snapped"))           /* the cursor step's first voice, post-snap */

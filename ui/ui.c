@@ -27,6 +27,9 @@ static void scale_encoder(uint8_t enc, int8_t det);
 static uint8_t scale_button(uint8_t btn);
 static void draw_scale(void);
 static void scale_leds(uint32_t *litK, uint32_t *dimK, uint32_t *litB, uint8_t is_drum);
+void sc_chord_name(char *buf, uint8_t n);
+void sc_chord_name_str(char *buf);
+uint32_t sc_marks(void);
 
 static ds_track *TRK(void) { return &eng.pat.track[sel_track]; }
 static uint8_t is_drum_trk(void) { return TRK()->channel == 9; }

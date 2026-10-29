@@ -174,3 +174,109 @@ key 26 up
 key 19 up
 key 7 up
 wait 20
+
+# -- John 2026-10-29 1b: the degree speaks of the tonic, never of the root --
+tap SEL
+turn K1 -8                        # back to C MAJOR (the CHR block left it chromatic)
+tap SEL
+expect scale 0
+tap SEL
+turn K3 -1                        # OFF clears the selection (K3 0 = zero detents = no-op)
+tap SEL
+tap SEL
+turn K3 1                        # back to GATE
+tap SEL
+key 0 down                        # degree i alone: Cmaj, no root held
+wait 60
+expect_out USB 90 3C 64
+expect_out USB 90 40 64
+expect_out USB 90 43 64
+out
+key 0 up
+wait 60
+
+key 14 down                       # hold G4 ...
+wait 40
+key 0 down                        # ... degree i must STAY C4 E4 G4
+wait 60
+expect_out USB 90 3C 64
+expect_out USB 90 40 64
+expect_out USB 90 43 64
+expect_no_out USB 90 48 64       # not the C5 voicing the old code picked
+out
+key 0 up
+key 14 up
+wait 60
+
+tap OCT+
+wait 40
+key 0 down                        # OCT+ owns the register: C5 E5 G5
+wait 60
+expect_out USB 90 48 64
+out
+key 0 up
+tap OCT-
+wait 40
+
+# -- John 2026-10-29 2a: the root zone is the out-of-key path: no snapping --
+key 10 down                       # Eb alone in C major stays Eb (3F), not D (3E)
+wait 60
+expect_out USB 90 3F 64
+expect_no_out USB 90 3E 64
+out
+key 10 up
+wait 40
+key 15 down                       # Ab alone stays Ab (44)
+wait 60
+expect_out USB 90 44 64
+out
+key 15 up
+wait 40
+
+# -- John's rule (2026-10-29): activating a component strikes the chord,
+#    unselecting only edits the selection (no re-articulation) --
+tap SEL
+turn K3 -1                       # OFF: clear the selection
+tap SEL
+tap SEL
+turn K3 1                        # GATE
+tap SEL
+key 7 down                       # C
+key 19 down                      # MAJ: C E G
+wait 40
+out
+key 24 down                      # ADD9 ON: the whole chord strikes again
+wait 40
+expect_out USB 90 3C 65
+expect_out USB 90 40 65
+expect_out USB 90 43 65
+expect_out USB 90 4A 65
+out
+key 24 up
+key 24 down                      # ADD9 OFF: only the ninth goes off
+wait 40
+expect_out USB 80 4A 00
+expect_no_out USB 90 3C 65       # no re-articulation
+out
+key 19 up
+key 7 up
+wait 40
+
+# -- the keybed carries the chord: the marker mask = the sounding keys --
+tap SEL
+turn K3 -1                      # OFF clears the component selection (a toggle
+tap SEL
+tap SEL                         # would otherwise un-press MAJ from the block above)
+turn K3 1
+tap SEL
+key 7 down
+key 19 down
+key 21 down                     # M7: Cmaj7
+wait 40
+expect ofc_keys 280704          # keys 7 (C4), 11 (E4), 14 (G4), 18 (B4)
+expect ofc_name 55735           # "Cmaj7"
+out
+key 20 up
+key 19 up
+key 7 up
+wait 40
