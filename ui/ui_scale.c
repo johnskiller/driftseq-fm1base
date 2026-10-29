@@ -39,7 +39,7 @@ static const uint16_t SC_SET[SC_NKIND] = {
 };
 
 enum { OC_MAJ, OC_SEV, OC_M7, OC_MIN, OC_DIM, OC_ADD9, OC_SUS, OC_SIX, OC_NCOMP };
-static const char *const OC_NAME[OC_NCOMP] = {"MAJ", "7", "M7", "MIN", "DIM", "ADD9", "SUS4", "6"};
+static const char *const OC_NAME[OC_NCOMP] = {"MAJ", "7", "M7", "MIN", "DIM", "ADD", "SUS", "6"};
 
 typedef struct { uint8_t n; int8_t t[4]; } Chord;   /* semitones above the root, sorted */
 
@@ -384,25 +384,18 @@ static void draw_scale(void)
         cv_text(x0 + 4 * kp + (7 * kp - 4 * 7) / 2, y0 + 50, &FONT_T, "ROOT", C_GRAY);
         cv_rect(x0 + 11 * kp, y0 + 43, 5 * kp - 2, 3, C_HI);
         cv_text(x0 + 11 * kp, y0 + 50, &FONT_T, "CHORD", C_HI);
-        /* the component legend sits ON its keys: black-key components in the
-         * upper row at their key's x, white-key components in the lower row
-         * (John: the two rows follow the physical 3 black + 5 white split);
-         * a held component's text lights */
+        /* /* the component legend spreads the CHORD zone across the full keybed width:
+         * the zone's five white columns map to 41px slots (the keybed is too
+         * tight for text at 13px), blacks in the upper row, whites below — the
+         * left-to-right order still reads along the keys (John: 可读性优先) */
         for (i = 0; i < OC_NCOMP; i++) {
-            /* the key's x inside the CHORD zone: white ordinal (blacks ride
-             * the boundary 8px in, like the keybed above) */
-            static const int8_t KX[8] = {11, 11, 12, 12, 13, 14, 14, 15};
-            static const uint8_t KB[8] = {0, 1, 0, 1, 0, 0, 1, 0};  /* black? */
-            int keyx = x0 + KX[i] * kp + (KB[i] ? 8 : 0);
+            static const int8_t KSLOT[8] = {0, 0, 1, 1, 2, 3, 3, 4}; /* white col 0..4 */
+            static const uint8_t KB[8] = {0, 1, 0, 1, 0, 0, 1, 0};   /* black? */
             int t, tw = 0;                              /* FONT_T: ~5px advance */
             for (t = 0; OC_NAME[i][t]; t++)
                 tw += 5;
             tw -= 2;
-            int x = keyx + (KB[i] ? 3 : 5) - tw / 2;    /* centred on the key */
-            if (!KB[i]) {                               /* whites: stay in the column */
-                if (x < keyx - 2) x = keyx - 2;
-                if (x + tw > keyx + 13) x = keyx + 13 - tw;
-            }
+            int x = x0 + 2 + KSLOT[i] * 41 + 20 - tw / 2;
             int y = y0 + 70 + (KB[i] ? 0 : 15);
             uint16_t col = (sc_mask >> i & 1) ? C_HI : C_GRAY;   /* held = lit */
             cv_text(x, y, &FONT_T, OC_NAME[i], col);
