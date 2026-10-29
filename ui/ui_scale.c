@@ -67,8 +67,9 @@ static Chord oc_resolve(uint8_t mask)
     else                              t[n++] = 4;     /* implied MAJ */
     if (thirds & (1u << OC_DIM))
         t[n++] = aug ? 8 : 6;                         /* aug's #5 vs dim's b5 */
-    else if (!has6)              t[n++] = 7;          /* the fifth (the 6th replaces it) */
-    else                         t[n++] = 9;
+    else
+        t[n++] = 7;                                   /* the fifth stays */
+    if (has6)                    t[n++] = 9;          /* the sixth on top (DIM+6: 0,3,6,9 = the dim7) */
     if (sevens & (1u << OC_SEV)) t[n++] = 10;
     if (sevens & (1u << OC_M7))  t[n++] = 11;
     if (has9)                    t[n++] = 14;         /* closed position: the 9 an octave up is 14 */
@@ -89,7 +90,8 @@ static Chord oc_resolve(uint8_t mask)
 static uint8_t sc_kind = SC_CHR;                  /* K1 (John: chromatic by default) */
 static uint8_t sc_tonic = 0;                      /* K2, pitch class 0..11 (0=C) */
 static uint8_t sc_ofc;                            /* K3: one-finger chords on */
-static uint8_t sc_root_key = 0xFF;                /* held root's KEY ID, 0xFF none */
+static uint8_t sc_root_key = 0xFF;               /* Root SELECTION: persists after release */
+static uint8_t sc_gate = 0xFF;                   /* the physically held root (GATE): 0xFF = silent */                /* held root's KEY ID, 0xFF none */
 static uint8_t sc_deg_key = 0xFF;                 /* held degree key (0..6), 0xFF none */
 static uint8_t sc_mask;                           /* held component keys' bitmask */
 
@@ -237,6 +239,23 @@ static void sc_revoice(uint8_t root_note)            /* rebuild sc_tones from st
         sc_tones[sc_tones_n++] = (uint8_t)(root_note + c.t[i]);
 }
 
+
+/* the GRID write: replace the step under the cursor with the Active Chord
+ * (root-down writes the single snapped note when no flavor is selected) */
+static void sc_grid_write(void)
+{
+    ds_track *tr = TRK();
+    ds_step *st = &tr->steps[cursor];
+    uint8_t t;
+    while (st->nvoices)                           /* replace the step, as stepEntry does */
+        ds_voice_remove(tr, cursor, st->v[0].note);
+    for (t = 0; t < sc_tones_n; t++)
+        ds_voice_add(tr, cursor, sc_tones[t], midi_vel, 1);
+    st->on = 1;
+    edit_voice = 0;
+    if (cursor < 63u) cursor++;
+}
+
 /* ---- input ----
  * The hook sits at the TOP of panel_key_handler (before every existing path).
  * Returns 1 = consumed. Drums bypass (ch9 tracks never snap/chord), and the
@@ -255,16 +274,20 @@ static uint8_t scale_key_hook(uint8_t key, uint8_t down)
             ds_live_off(&eng, sel_track, (uint8_t)note);
         return 1;
     }
-    /* OFC on: the three zones */
+    /* OFC on: the three zones. Selection vs sounding (John's review 2026-10-29):
+     * sc_root_key / sc_mask = persistent SELECTIONS (a release keeps them);
+     * sounding is GATE — the notes live while the root is physically held
+     * (sc_gate). A LATCH sounding mode is specced but awaits the stop
+     * gesture decision. Component keys TOGGLE: press a lit one to unselect. */
+    if (focus_layer) return 0;                    /* EDIT layer keeps raw notes */
     if (key <= 6) {                               /* DEGREES I..VII: the chord walks */
-        if (down && sc_root_key != 0xFF && sc_deg_key != key) {
+        if (down && sc_gate != 0xFF && sc_deg_key != key) {
             sc_deg_key = key;                     /* the scale re-voices, live */
-            sc_revoice(sc_root_note(sc_root_key));
-            sc_apply();
+            sc_revoice(sc_root_note(sc_gate));
+            sc_restrike();
+            sc_grid_write();
         } else if (!down && sc_deg_key == key) {
-            sc_deg_key = 0xFF;                    /* the walk ends: silence —
-                                                   * the root chord does not
-                                                   * re-strike itself */
+            sc_deg_key = 0xFF;                    /* the walk ends: silence */
             sc_tones_n = 0;
             sc_apply();
         }
@@ -272,54 +295,41 @@ static uint8_t scale_key_hook(uint8_t key, uint8_t down)
     }
     if (key >= 7 && key <= 18) {                  /* a root */
         if (down) {
-            if (sc_root_key == 0xFF) {            /* first root takes over */
-                sc_root_key = key;
-                sc_revoice(sc_root_note(key));
-                sc_apply();
-            }
-            /* a second root while one is held is ignored: one left hand */
-        } else if (sc_root_key == key) {
-            sc_root_key = 0xFF;                   /* the components stay held:
-                                                   * their bits survive (they are
-                                                   * still physically down) — the
-                                                   * next root picks them up */
+            sc_root_key = key;                    /* the new root takes over the
+                                                   * selection AND the gate — the
+                                                   * old chord's notes go off in
+                                                   * the restrike */
+            sc_gate = key;
+            sc_deg_key = 0xFF;
+            sc_revoice(sc_root_note(key));
+            if (sc_tones_n == 0) return 1;        /* the set went nonsense */
+            sc_restrike();
+            sc_grid_write();
+        } else if (sc_gate == key) {
+            sc_gate = 0xFF;                       /* root up = sound off; the
+                                                   * selection stays */
             sc_deg_key = 0xFF;
             sc_tones_n = 0;
             sc_apply();
         }
         return 1;
     }
-    if (key >= 19) {                              /* a component */
+    if (key >= 19) {                              /* a component: TOGGLE */
         uint8_t bit = (uint8_t)(1u << (key - 19));
-        if (down && !(sc_mask & bit)) {
-            /* the bit registers with or without a root: the legend lights the
-             * moment you press, and the chord voices as soon as the root lands */
-            sc_mask |= bit;
-            if (sc_root_key == 0xFF)
-                return 1;
-            sc_revoice(sc_root_note(sc_root_key));
+        if (down) {
+            sc_mask ^= bit;                       /* press lit = unselect (the
+                                                   * way back to the basic chord) */
+            if (sc_gate == 0xFF)
+                return 1;                         /* selection only: no root held —
+                                                   * the next root-press picks it up */
+            sc_revoice(sc_root_note(sc_gate));
             if (sc_tones_n == 0) {                /* the set went nonsense: silence */
+                sc_tones_n = 0;
+                sc_apply();
                 return 1;
             }
             sc_restrike();
-            if (ui_mode == M_GRID) {              /* the GRID write: once, when the set resolves */
-                ds_track *tr = TRK();
-                ds_step *st = &tr->steps[cursor];
-                uint8_t t;
-                while (st->nvoices)               /* replace the step, as stepEntry does */
-                    ds_voice_remove(tr, cursor, st->v[0].note);
-                for (t = 0; t < sc_tones_n; t++)
-                    ds_voice_add(tr, cursor, sc_tones[t], midi_vel, 1);
-                st->on = 1;
-                edit_voice = 0;
-                if (cursor < 63u) cursor++;
-            }
-        } else if (!down && (sc_mask & bit)) {    /* component up: no write */
-            sc_mask &= (uint8_t)~bit;
-            sc_tones_n = 0;                       /* a release ends the sound —
-                                                   * the chord does not fall back
-                                                   * to the root triad on its own */
-            sc_apply();
+            sc_grid_write();
         }
         return 1;
     }
@@ -333,7 +343,7 @@ static void scale_leds(uint32_t *litK, uint32_t *litB, uint8_t is_drum)
     if (sc_ofc && !is_drum) {
         for (i = 0; i < OC_NCOMP; i++)               /* the 8 component keys */
             *litK |= 1u << (19 + i);
-        if (sc_root_key != 0xFF)                     /* the held root */
+        if (sc_root_key != 0xFF)                     /* the selected root */
             *litK |= 1u << sc_root_key;
     }
     if (ui_mode == M_SCALE)
@@ -444,7 +454,15 @@ static void scale_encoder(uint8_t enc, int8_t det)
         /* John: no cycling — left detent = OFF, right detent = ON, dead stops */
         if (det < 0) sc_ofc = 0;
         if (det > 0) sc_ofc = 1;
-        if (!sc_ofc) sc_mask = 0;
+        if (!sc_ofc) {                            /* full stop: no hanging notes
+                                                   * (the review's MIDI-hygiene rule) */
+            sc_tones_n = 0;
+            sc_apply();
+            sc_mask = 0;
+            sc_gate = 0xFF;
+            sc_root_key = 0xFF;
+            sc_deg_key = 0xFF;
+        }
     }                                                  /* K4: spare */
     kn_poke(enc);
 }

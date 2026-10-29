@@ -1,89 +1,115 @@
 # SCALE + one-finger chords (ui/ui_scale.c). Numeric key ids:
-# 0=F3 OCT-, 7..18 = C4..B4 roots, 19..26 = C5..G5 = MAJ MIN DIM 6 7 M7 SUS4 ADD9.
-# Readbacks (app_expect): scale = kind<<8|tonic, ofc, ofc_mask = mask<<8|root,
-# step0 = nvoices<<8|first-note. (The DSL's expect compare is broken — "== ==" —
-# so the FAIL lines still print the true value; the outs are the real assertions.)
+# 7..18 = C4..B4 roots, 19..26 = C5..G5 = MAJ 7 M7 MIN DIM ADD9 SUS4 6
+# (the v3.7 ergonomic order). Latch semantics (John's review): root and
+# flavor selections persist after release; sounding is GATE (root held).
+# Readbacks (app_expect): ofc_mask = mask<<8|root. The DSL's expect compare
+# is broken ("== ==" FAIL prefix) — the got value is the real assertion.
 wait 600
 turn SELECT 3                     # the demo's bass track (ch 0, melodic)
 tap SEL                           # the SCALE page opens
 turn K3 1                         # OFC on
-tap SEQ                           # back to the GRID
-# root alone: sounds, jams, does NOT write the step
-key 7 down 100                    # C4
-wait 20
-key 7 up
-wait 20
-# root + MAJ = C major triad, written at cursor 0, cursor advances once
-key 7 down 100
-wait 20
-key 19 down 100                   # MAJ
+tap SEL                           # back
+
+# --- latch selection: root up keeps the selection; the next root re-strikes
+key 7 down 100                    # C4: strike (no flavor = snapped C4)
 wait 20
 out
-expect ofc_mask == 0x107
-expect step0 == 0x33C
+key 7 up                          # gate ends — the SELECTION stays C
+wait 20
+key 19 down 100                   # MAJ registers (no root held: silent)
+wait 20
+key 14 down 100                   # G: strikes G MAJ (55 59 62)
+wait 20
+out
+expect ofc_mask == 0x010E         # MAJ bit + root 14 (G4)
+key 14 up
+key 19 up
+
+# --- component toggle-off returns to the basic chord
+key 7 down 100
+wait 20
+key 19 down 100                   # C maj: 60 64 67
+wait 20
+out
+key 24 down 100                   # +ADD9: 60 64 67 74
+wait 20
+out
+key 24 up
+wait 20
+key 24 down 100                   # toggle OFF: back to C maj
+wait 20
+out
+key 24 up
 key 19 up
 key 7 up
 wait 20
-out
-# sus4 swap while the root is held: the old third turns off (the diff apply)
+
+# --- second root while held takes over (old chord's notes off first)
 key 7 down 100
 wait 20
 key 19 down 100
 wait 20
-key 19 up
-key 25 down 100                   # SUS4: 60 65 67, the E (64) off
+key 14 down 100                   # G while C held: G maj replaces C maj
 wait 20
 out
-key 25 up
+key 14 up
 key 7 up
 wait 20
-out
-# F major 9 = root 13 + MAJ + 7 + ADD9: five tones drop the fifth
-key 13 down 100
+
+# --- C6 keeps the fifth: 60 64 67 69
+key 7 down 100
 wait 20
 key 19 down 100
 wait 20
-key 22 down 100                   # 7
+key 26 down 100                   # 6
 wait 20
-key 26 down 100                   # ADD9
-wait 30
 out
 key 26 up
-key 22 up
 key 19 up
-key 13 up
+key 7 up
+wait 20
+
+# --- DIM+6 = the dim7: 60 63 66 69
+key 7 down 100
+wait 20
+key 23 down 100                   # DIM: 60 63 66
+wait 20
+key 26 down 100                   # +6 = dim7
 wait 20
 out
-# nonsense set: 7 + M7 together = no tones (silent), state still tracked
-key 10 down 100                   # D#4 -> snaps to D4 (62) in C major
-wait 20
-key 22 down 100
-wait 20
-key 23 down 100                   # 7 + M7 = nonsense
-wait 30
-expect ofc_mask == 0x180A
+key 26 up
 key 23 up
-key 22 up
+key 7 up
+wait 20
+
+# --- nonsense set: 7 + M7 = silent; K3 OFF kills the sounding notes
+key 10 down 100                   # D#4 root
+wait 20
+key 20 down 100                   # 7
+wait 20
+key 21 down 100                   # +M7 = nonsense: silence
+wait 20
+out
+key 20 up
+key 21 up
 key 10 up
 wait 20
-out
 
-# the DEGREE walk (left 7 keys, I..VII): chord follows the scale, key up returns
-# (root C4 + MAJ held throughout: C maj -> IV -> ii -> back)
+# --- the DEGREE walk (left 7 keys, I..VII): needs the gate root
 key 7 down 100
 key 19 down 100
 wait 20
-out                              # C major: 60 64 67
-key 3 down 100                   # IV: Fmaj7 (the scale's own seventh) 65 69 72 76
+out                               # C major: 60 64 67
+key 3 down 100                    # IV: Fmaj7 65 69 72 76
 wait 20
 out
 key 3 up
-key 1 down 100                   # ii with the MAJ flavor: D F# A (62 66 69)
+key 1 down 100                    # ii with the MAJ flavor: 62 66 69
 wait 20
 out
 key 1 up
 wait 20
-out                              # back to C major
+out                               # silence (the walk ends)
 key 19 up
 key 7 up
 wait 20
