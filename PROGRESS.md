@@ -97,10 +97,11 @@ sizeof(ds_pattern) 17,616 B
 image 518,012 B of 581,564   余 63,552
 RAM   .data+.bss 68,612 B of 98,304   余 29,692
 pool  254,776 B of 344,064            余 89,288
-fwsc  611,547 B, identity FM-1_9200  (未刷机)
+fwsc  611,547 B, identity FM-1_9200  md5 9b5f510c（未刷机）
+wasm  396,378 B  md5 25fa9f67（8930 HTTPS / 8933 HTTP 均在发）
 ```
 
-Track Settings 一页的代价（实测）：**+4,512 B flash**（含 128 条 GM 名表 ≈1.4 KB、`ds_route_sync`、MONO），RAM **±0**（`mono_note[16]` 与 gate/live 各 +1 字节抵消 memset 里的冗余赋值）。
+Track Settings 一页的代价（实测，9807888 → 现 HEAD 两次真建）：**image 513,500 → 518,124 = +4,624 B flash**，**pool 254,760 → 254,776 = +16 B RAM**（`mono_note[16]` + gate/live 各 +1 字节的 `ch` 字段）。构成：128 条 GM 名表 + 9 条鼓组名 ≈1.5 KB、页面绘制 ≈1.2 KB、`ds_route_sync`+MONO+capture-channel ≈0.5 KB、探针与 hint 其余。
 
 `eng`（`ds_state`）在 `.pool`，不在 DRAM。这是 `9744689` 的成果：DRAM 94,436 → 68,276。
 
