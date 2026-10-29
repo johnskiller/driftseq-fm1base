@@ -298,7 +298,7 @@ static uint8_t scale_key_hook(uint8_t key, uint8_t down)
             if (sc_tones_n == 0) {                /* the set went nonsense: silence */
                 return 1;
             }
-                        sc_apply();
+            sc_restrike();
             if (ui_mode == M_GRID) {              /* the GRID write: once, when the set resolves */
                 ds_track *tr = TRK();
                 ds_step *st = &tr->steps[cursor];
@@ -311,13 +311,12 @@ static uint8_t scale_key_hook(uint8_t key, uint8_t down)
                 edit_voice = 0;
                 if (cursor < 63u) cursor++;
             }
-        } else if (!down && (sc_mask & bit)) {    /* component up: live follows, no write */
+        } else if (!down && (sc_mask & bit)) {    /* component up: no write */
             sc_mask &= (uint8_t)~bit;
-            if (sc_root_key != 0xFF) {
-                sc_revoice(sc_root_note(sc_root_key));
-                if (sc_tones_n) sc_restrike();
-                else { sc_prev_n = 0; sc_apply(); }
-            }
+            sc_tones_n = 0;                       /* a release ends the sound —
+                                                   * the chord does not fall back
+                                                   * to the root triad on its own */
+            sc_apply();
         }
         return 1;
     }
