@@ -137,6 +137,19 @@ static void sc_apply(void)
     sc_prev_n = sc_tones_n;
     for (i = 0; i < sc_tones_n; i++) sc_prev[i] = sc_tones[i];
 }
+static void sc_restrike(void)                       /* a new voicing under a
+                                                    * held root re-articulates
+                                                    * the whole chord: the ear
+                                                    * wants the full strike,
+                                                    * not one entering note */
+{
+    uint8_t i;
+    for (i = 0; i < sc_prev_n; i++)
+        ds_live_off(&eng, sel_track, sc_prev[i]);
+    sc_prev_n = 0;
+    sc_apply();
+}
+
 
 /* the ROOT zone's note for key k (the panel's OCT buttons shift everything) */
 static int sc_root_note(uint8_t k)
@@ -246,8 +259,10 @@ static uint8_t scale_key_hook(uint8_t key, uint8_t down)
             sc_revoice(sc_root_note(sc_root_key));
             sc_apply();
         } else if (!down && sc_deg_key == key) {
-            sc_deg_key = 0xFF;                    /* back to the held root's chord */
-            sc_revoice(sc_root_note(sc_root_key));
+            sc_deg_key = 0xFF;                    /* the walk ends: silence —
+                                                   * the root chord does not
+                                                   * re-strike itself */
+            sc_tones_n = 0;
             sc_apply();
         }
         return 1;                                 /* degree keys never sound alone */
@@ -300,7 +315,8 @@ static uint8_t scale_key_hook(uint8_t key, uint8_t down)
             sc_mask &= (uint8_t)~bit;
             if (sc_root_key != 0xFF) {
                 sc_revoice(sc_root_note(sc_root_key));
-                sc_apply();
+                if (sc_tones_n) sc_restrike();
+                else { sc_prev_n = 0; sc_apply(); }
             }
         }
         return 1;
