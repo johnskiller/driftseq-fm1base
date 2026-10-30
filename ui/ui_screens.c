@@ -349,14 +349,15 @@ static void ui_draw_footer(void)
         for (k = 0; k < 4; k++)
             cv_text(FX[k], 6, &FONT_T, FOOT_SCALE[k], FOOT_GRAY);
     } else if (ui_mode == M_GLOBAL) {
-        /* K1 row, K2 edit, K3 track (the TRK SWING row's subject), K4 free */
-        static const char *const FOOT_GLOBAL[4] = {"ROW", "EDIT", "TRACK", ""};
+        /* K1 row, K2 edit. K3/K4 are free: the page has no subject but the
+         * instrument, so nothing here picks a track any more. */
+        static const char *const FOOT_GLOBAL[4] = {"ROW", "EDIT", "", ""};
         for (k = 0; k < 4; k++)
             cv_text(FX[k], 6, &FONT_T, FOOT_GLOBAL[k], FOOT_GRAY);
     } else if (ui_mode == M_TRKSET) {
-        /* K1 row, K2 value, K3 the MUTE/SOLO slider it is everywhere else. K4 is
-         * blank: it was GLOBAL swing, which moved to the GLOBAL page where its
-         * other half (per-track weight) now sits beside it. */
+        /* K1 row, K2 value, K3 the MUTE/SOLO slider it is everywhere else, K4
+         * blank (it was GLOBAL swing; the global half lives on GLOBAL, and this
+         * page keeps its own track's half in the SWING row). */
         static const char *const FOOT_TRKSET[4] = {"ROW", "VALUE", "MUTE", ""};
         for (k = 0; k < 4; k++)
             cv_text(FX[k], 6, &FONT_T, FOOT_TRKSET[k], FOOT_GRAY);

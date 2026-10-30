@@ -9,14 +9,13 @@
  * modifier chord, so it cannot be hit by accident - which is also the reason it
  * must be a chord and not one of the two free buttons.
  */
-#define GL_NROW  5
+#define GL_NROW  4
 #define GL_Y0    30
-#define GL_PITCH 24
+#define GL_PITCH 26
 #define GL_TEMPO 0
 #define GL_SWING 1
-#define GL_TRK   2
-#define GL_GM    3
-#define GL_BT    4
+#define GL_GM    2
+#define GL_BT    3
 
 /* G5, the rightmost white key: out of the way of the four knobs, at the right
  * edge where a tempo tap belongs, and idle on a settings page. */
@@ -31,7 +30,12 @@ static uint8_t gl_row;
  * web build (the host script let GLO go last and hid it). */
 static uint8_t gl_opening;
 
-static const char *const GL_LABEL[GL_NROW] = {"TEMPO", "SWING", "TRK SWING", "GM SYNTH", "BLUETOOTH"};
+/* GLOBAL holds the GLOBAL half of each number and nothing else (John
+ * 2026-10-30: "GLOBAL页可以选trk改trk的swing比较奇怪。还是GLOBAL只改全局swing，
+ * track set改当前track的"). TRK SWING lived here for an hour and asked K3 to go
+ * pick a track on a page that is otherwise about the whole instrument; it is
+ * back on TRACK SET, where the edited track is the page's subject. */
+static const char *const GL_LABEL[GL_NROW] = {"TEMPO", "SWING", "GM SYNTH", "BLUETOOTH"};
 
 /* ---- tempo ---------------------------------------------------------------
  * 1 BPM per detent, 10 with GLO held (John 2026-10-30). GLO is already the
@@ -138,18 +142,12 @@ static void gl_bt_set(int on)
 static void global_encoder(uint8_t enc, int8_t det)
 {
     int v;
-    ds_track *tr;
 
     if (enc == EN_K1) {                  /* row: dead stop, no wrap */
         v = (int)gl_row + (det > 0 ? 1 : -1);
         if (v < 0) v = 0;
         if (v > GL_NROW - 1) v = GL_NROW - 1;
         gl_row = (uint8_t)v;
-        return;
-    }
-    if (enc == EN_K3) {                  /* the track being edited */
-        sel_track = (uint8_t)clamp((int32_t)sel_track + det, 0, DS_TRACKS - 1);
-        gl_row = GL_TRK;
         return;
     }
     if (enc != EN_K2)
@@ -163,13 +161,6 @@ static void global_encoder(uint8_t enc, int8_t det)
         if (v < 0) v = 0;
         if (v > 100) v = 100;
         eng.global_swing = (uint8_t)v;
-        break;
-    case GL_TRK:
-        tr = &eng.pat.track[sel_track];
-        v = (int)tr->swing_amt + det * (glo_held ? 10 : 1);
-        if (v < 0) v = 0;
-        if (v > 100) v = 100;
-        tr->swing_amt = (uint8_t)v;
         break;
     case GL_GM:
         if (det)
@@ -268,15 +259,6 @@ static void draw_global(void)
             strcpy_(txt_end(v), "%");
             val = v;
             break;
-        case GL_TRK:
-            /* The per-track WEIGHT, with the track it belongs to: the number is
-             * meaningless without it, and naming the track here is cheaper than
-             * a second line saying which one K3 picks. */
-            fmt_int(v, (int32_t)eng.pat.track[sel_track].swing_amt);
-            strcpy_(txt_end(v), "% ON T");
-            fmt_int(txt_end(v), (int32_t)sel_track + 1);
-            val = v;
-            break;
         case GL_GM:
             val = glo_gm_on ? "ON" : "OFF";
             break;
@@ -293,11 +275,11 @@ static void draw_global(void)
         cv_text(12, y, &FONT_S, GL_LABEL[i], (i == (int)gl_row) ? C_AMB : C_GRAY);
         cv_text(100, y, &FONT_B, val, BRIGHTTX);
     }
-    /* One fact, said once: SWING is global x track x 50%, so both rows above are
-     * halves of one number (that is why the per-track half is not on TRACK SET
-     * any more). */
-    cv_text(12, 152, &FONT_T, "SWING = GLOBAL X TRK X 50%", RGB565(120, 120, 134));
-    cv_text(12, 170, &FONT_T, "TAP TEMPO: RIGHTMOST KEY", RGB565(120, 120, 134));
+    /* One fact, said once per page, and this page owns the half it shows: the
+     * formula names where the other half lives rather than repeating it. */
+    cv_text(12, 152, &FONT_T, "SWING X TRK SWING X 50%", RGB565(120, 120, 134));
+    cv_text(12, 170, &FONT_T, "TRK SWING IS ON TRACK SET", RGB565(120, 120, 134));
+    cv_text(12, 188, &FONT_T, "TAP TEMPO: RIGHTMOST KEY", RGB565(120, 120, 134));
     cv_blit_band(0, 0, 216);
     ui_draw_footer();
 }

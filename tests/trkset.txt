@@ -24,14 +24,14 @@ tap ENV
 wait 20
 expect mode 4
 
-# --- K1 walks the rows, dead stop at both ends (four since SWING left) ---
+# --- K1 walks the rows, dead stop at both ends ---
 expect ts_row 0
 turn K1 9
 wait 10
-expect ts_row 3
+expect ts_row 4
 turn K1 9
 wait 10
-expect ts_row 3
+expect ts_row 4
 turn K1 -9
 wait 10
 expect ts_row 0
@@ -142,20 +142,50 @@ turn K2 -1
 wait 10
 expect ts_voice 0
 
-# --- SWING left this page on 2026-10-30 ---
-# It is the second half of ONE number (global x track x 0.5), so half of it on a
-# track page read as a track control. Both halves are on the GLOBAL page now
-# (tests/global.txt asserts them). What stays here is the proof that the page
-# cannot reach them any more: K1 stops at the last row and K4 does nothing.
+# --- SWING: this track's weight, 0..100 in steps of 5 ---
+# The global half lives on the GLOBAL page; this is the track's, and K4 does
+# nothing here (John 2026-10-30: "track set改当前track的").
 turn K1 9
 wait 10
-expect ts_row 3
+expect ts_row 4
+expect ts_gswing 0
 turn K4 20
 wait 10
-expect ts_gswing 0
-turn K4 -20
+expect ts_gswing 0                 # K4 is not a global control on this page
+expect ts_swing 100
+turn K2 9
 wait 10
-expect ts_gswing 0
+expect ts_swing 100                # clamped at the top
+turn K2 -20
+wait 10
+expect ts_swing 0
+# the row says why a 0% here produces nothing while the global is 0
+turn K2 1
+wait 10
+expect ts_swing 5
+turn K2 19
+wait 10
+expect ts_swing 100
+# and it is THIS track's: a value that is obvious in a screenshot, then the
+# neighbouring track keeps whatever it had (the demo leaves T1/T2 at 100, so
+# asserting 100 would pass even if the knob wrote to the wrong track).
+turn K2 -13
+wait 10
+expect ts_swing 35
+turn K1 -9
+wait 10
+expect ts_row 0
+turn SELECT 1
+wait 10
+expect track 1
+turn K1 9
+wait 10
+expect ts_row 4
+expect ts_swing 100                # T2 was not touched by the T1 edit
+turn SELECT -1
+wait 10
+expect track 0
+expect ts_swing 35                 # and T1 kept its own
 
 # --- K3 is the MUTE/SOLO slider it is on every other page ---
 turn K1 -9

@@ -103,11 +103,11 @@ check(page.some((v, i) => v !== home[i]), 'GLO+HOME opens a different screen');
 
 /* ---------- five rows at 24px pitch ---------- */
 {
-    const lb = bandsOf(textRows(page, 24, 150, 10, 60));
-    check(lb.length === 5, 'five label rows', JSON.stringify(lb));
-    const want = [32, 56, 80, 104, 128];
-    check(lb.length === 5 && lb.every(([a, b], i) => a === want[i] && b === a + 10),
-          'the rows are 24px apart, each 11px tall', JSON.stringify(lb));
+    const lb = bandsOf(textRows(page, 24, 148, 10, 60));
+    check(lb.length === 4, 'four label rows', JSON.stringify(lb));
+    const want = [32, 58, 84, 110];
+    check(lb.length === 4 && lb.every(([a, b], i) => a === want[i] && b === a + 10),
+          'the rows are 26px apart, each 11px tall', JSON.stringify(lb));
     let worst = 0, missing = 0;
     for (const y of want) {
         let lastv = -1;
@@ -122,15 +122,15 @@ check(page.some((v, i) => v !== home[i]), 'GLO+HOME opens a different screen');
 
 /* ---------- K1 moves the highlight 24px, dead stop at the fifth row ---------- */
 {
-    const bandTop = (fb) => { for (let y = 24; y < 150; y++) if (px(fb, 8, y) === ROWBAND) return y; return -1; };
+    const bandTop = (fb) => { for (let y = 24; y < 148; y++) if (px(fb, 8, y) === ROWBAND) return y; return -1; };
     const a0 = bandTop(page);
     check(a0 > 0, 'the edited row has a band', 'band at ' + a0);
     enc(3, 1);                              /* EN_K1 */
     const a1 = bandTop(mk());
-    check(a1 === a0 + 24, 'K1 moves the highlight one row (24px)', a0 + ' -> ' + a1);
+    check(a1 === a0 + 26, 'K1 moves the highlight one row (26px)', a0 + ' -> ' + a1);
     enc(3, 20);
     const a2 = bandTop(mk());
-    check(a2 === a0 + 96, 'K1 stops at the fifth row, it does not wrap', 'band at ' + a2);
+    check(a2 === a0 + 78, 'K1 stops at the fourth row, it does not wrap', 'band at ' + a2);
     enc(3, -20);
 }
 
@@ -146,9 +146,10 @@ check(page.some((v, i) => v !== home[i]), 'GLO+HOME opens a different screen');
         for (let yy = y; yy < y + 11; yy++) for (let x = 10; x < 230; x++) if (px(page, x, yy) !== 0) n++;
         return n;
     };
-    check(line(152) > 30, 'the swing note is drawn', line(152) + ' px');
-    check(line(170) > 30, 'the tap-tempo note is drawn', line(170) + ' px');
-    check(line(186) === 0, 'and nothing spills below them', 'ink below the notes: ' + line(186));
+    check(line(152) > 30, 'the swing formula is drawn', line(152) + ' px');
+    check(line(170) > 30, 'the page says where TRK SWING lives', line(170) + ' px');
+    check(line(188) > 30, 'the tap-tempo note is drawn', line(188) + ' px');
+    check(line(200) === 0, 'and nothing spills into the footer', 'ink below the notes: ' + line(200));
 }
 
 /* ---------- footer names this page's knobs ---------- */
@@ -160,7 +161,7 @@ check(page.some((v, i) => v !== home[i]), 'GLO+HOME opens a different screen');
     };
     check(ink(8) > 20, 'footer K1 says a word (ROW)', ink(8) + ' px');
     check(ink(69) > 20, 'footer K2 says a word (EDIT)', ink(69) + ' px');
-    check(ink(130) > 20, 'footer K3 says a word (TRACK)', ink(130) + ' px');
+    check(ink(130) === 0, 'footer K3 is blank (nothing to pick here)', ink(130) + ' px');
     check(ink(189) === 0, 'footer K4 is blank', ink(189) + ' px');
 }
 

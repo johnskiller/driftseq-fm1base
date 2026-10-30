@@ -115,63 +115,26 @@ turn K2 -150
 wait 5
 expect swing_global 0
 
-# ---- the per-track half, with the track it belongs to ----
-# The swing block above left the row on SWING; one more detent is TRK SWING.
-# The track is still T1 (K3 is the only thing on this page that moves it).
-turn K1 1
-wait 5
-expect gl_row 2
-expect sel_track 0
-expect swing_track 100          # what the demo left
-# `turn Kn N` is N detents, each 10 with GLO and 1 without: so -10 with GLO is
-# -100, and the second turn is what makes the assertion about the step size and
-# not about the fixture.
-press GLO
-wait 5
-turn K2 -1
-wait 5
-expect swing_track 90          # one detent is TEN here, not one
-turn K2 -9
-wait 5
-expect swing_track 0
-release GLO
-wait 5
-turn K2 30
-wait 5
-expect swing_track 30
-# K3 picks the track, and the row follows it: two tracks have two weights, and
-# editing one must not touch the other. T2's value is whatever the demo left
-# (100), so it is read first and then moved, and the check is that T1 kept 30.
-turn K3 1
-wait 5
-expect sel_track 1
-expect swing_track 100
-turn K2 5
-wait 5
-expect swing_track 100          # already clamped at the top
-press GLO
-wait 5
-turn K2 -5
-wait 5
-release GLO
-wait 5
-expect swing_track 50
-turn K3 -1
-wait 5
-expect sel_track 0
-expect swing_track 30           # T1 untouched by T2's edit
-# dead stop at the last row
-turn K1 5
-wait 5
-expect gl_row 4
-
-# ---- the GM switch: CC123 on the way out, then the feed closes ----
-turn K1 -2
-wait 5
-expect gl_row 2
-turn K1 1
+# ---- TRK SWING is NOT on this page ----
+# John 2026-10-30: "GLOBAL页可以选trk改trk的swing比较奇怪。还是GLOBAL只改全局
+# swing，track set改当前track的". The row list holds four rows, K1 dead-stops at
+# BLUETOOTH, and K3 (which used to pick a track) does nothing at all.
+turn K1 9
 wait 5
 expect gl_row 3
+expect sel_track 0
+turn K3 5
+wait 5
+expect sel_track 0                # K3 no longer picks a track here
+expect gl_row 3
+turn K1 -9
+wait 5
+expect gl_row 0
+
+# ---- the GM switch: CC123 on the way out, then the feed closes ----
+turn K1 2
+wait 5
+expect gl_row 2
 turn K2 1
 wait 5
 expect gl_gm 0
@@ -195,7 +158,7 @@ wait 100
 expect gm_noteons >0
 
 # ---- keys on this page audition and never record ----
-turn K1 -3
+turn K1 -9
 wait 5
 expect gl_row 0
 expect jam_used 0

@@ -94,7 +94,7 @@ sizeof(ds_pattern) 17,616 B
 固件构建（`build.py`，最后一次 = Track Settings 之后）：
 
 ```
-image 520,364 B of 581,564   余 61,200
+image 520,348 B of 581,564   余 61,216
 RAM   .data+.bss 68,612 B of 98,304   余 29,692
 pool  254,776 B of 344,064            余 89,288
 fwsc  611,547 B, identity FM-1_9200  md5 9a07cb18（未刷机）
