@@ -601,3 +601,14 @@ C0 2A 00   SELECT 回 track 3 报 42（去重后仍发，因为接收端是 81�
 **探针**：`tools/preset_probe.mjs`（38 项）在**实际下发的 wasm** 上验证 HOME/ARP/SCALE/TRACK SET/GLOBAL 五页：每转一格都发 PC、popup 出现、2.6 s 后自动收回、收回后回到该页自身基线。两个坑已在文件头记死：① `build/emu/app.wasm` 可能旧于源码（第一次"PRESETS 没反应"就是这个），探针比 mtime；② **按钮 bit 来自 `plat.h` 的顺序** `B_FX 0, B_SEL 1, B_ENV 2, B_LFO 3, B_EDIT 4, B_GLO 5, B_HOME 6, B_ARP 8` —— 按 3 进的是 LFO 不是 TRACK SET，第一版探针因此"验证"了三个它从没进去的页面。页面身份改用各页自身 body ink：HOME 2144 / ARP 1213 / SCALE 9470 / TRACK SET ~3200-3700 / GLOBAL 7125。
 
 **刷机陷阱（2026-10-30 实测）**：`build.py --web` **不会**把新的 `build/driftseq.fwsc` 拷到 `build/emu/`，而 8933/8930 服务的是 `build/emu/`。只跑设备构建再跑 web 构建，网页上下载到的仍是**上一次的 fwsc**（那天 09:34 旧件 `7d539e8a` vs 09:47 新件 `fca76e5b`，两者都是 611,547 B，看大小分辨不出来）。下发前必须 `cp build/driftseq.fwsc build/emu/`，并 `curl | md5sum` 核对。
+**BLE 双向回声：定案不做（2026-10-30，John 拍板 C）**
+
+现象：MPC 建一个 MIDI track，in=all port、out=MPC（即 BT01），MPC pad → FM-1 正常；FM-1 按键 → MPC 后会从 MPC 再回来，形成回灌。电脑走同一台 BT01 也一样，故与 FM-1 无关，是 MPC 那个 track 把自己收到的又送出去。
+
+**但 FM-1 自身也在 echo，实测（host，非推断）**：BLE-DEV 连上后注入 `midi BLE-DEV 90 3C 64` → `out 99 3C 64 -> USB BLE-DEV`；`80 3C 00` → `89 3C 00 -> USB BLE-DEV`。路径 `ui_midi_dispatch` → `ui_midi_note` → `ds_live_on` 写入 `eng.out`，`engine_drain` 按 ROUTE 选 `to`，默认 BOTH 的 `TO_BLE` 同时含 HOST 与 DEV，不分方向。`app.c` 头注释声称遵守 plat.h 的“不回发到来源链路”，但 `plat_midi_in_from()` 在本工程**只出现在那句注释里**，`midi_q` 也只存包不存来源 —— 该约定从未实现。
+
+**否决方案与理由**：
+- **A 抑制来源链路**（midi_q 带来源 + drain 时从 `to` 剔除）：符合平台约定，但会引入“同一音符因到达路径不同而走向不同”的分支，且当前痛点在 MPC 配置而非 FM-1。
+- **B live 音符只喂本地 GM、不出线**：与“外部音源为主”的定位冲突，外部键盘接 FM-1 时演奏传不到下游。
+- **C 维持现状（选定）**：作为 central，FM-1 的动作与电脑完全一致——电脑收到什么就发回什么。行为对齐是本次的目的，回声由 MPC 端关掉回发解决，不在固件里特判。
+
