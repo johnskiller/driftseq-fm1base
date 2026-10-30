@@ -145,3 +145,24 @@ static void preset_draw(void)
     cv_text(120, 6, &FONT_T, "GLO: 8X", FOOT_GRAY);
     cv_blit(0, 216);
 }
+
+/* ---- SELECT: the voice follows the track ----
+ *
+ * SELECT moves which track the panel is talking about, and on a page whose keys
+ * audition, that means the keys change instrument. But the receiver keeps ONE
+ * program per channel, and the tick path only re-states it while the transport
+ * runs - so stopped on TRACK SET, switching to a track with a different program
+ * left the synth on the previous track's voice: the row said "041 VIOLIN" and
+ * the keys still played the bass (John 2026-10-30: "track set画面，chang prg后的
+ * 确起作用了，但是此时SELECT切换track，音色又不对了").
+ *
+ * One place rather than three: every assignment to sel_track (TRACK SET's
+ * SELECT, the bare-page SELECT, NEW TRK in the jam menu) goes through here, so a
+ * future track selector cannot forget. Boot sets sel_track = 0 directly, before
+ * there is a transport to state anything to.
+ */
+static void ui_select_track(uint8_t t)
+{
+    sel_track = t;
+    ds_send_prog(&eng, sel_track);
+}

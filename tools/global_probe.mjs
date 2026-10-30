@@ -325,11 +325,39 @@ check(page.some((v, i) => v !== home[i]), 'GLO+HOME opens a different screen');
     /* the footer on this page: K1 is DEVICE, and K2 says ON/OFF only while the
      * switch row is selected - a device row has no value to turn. */
     const footInk = (fb, x0) => { let n = 0; for (let y = 224; y < 232; y++) for (let x = x0; x < x0 + 50; x++) if (textAt(fb, x, y)) n++; return n; };
-    check(footInk(p2c, 8) > 20, 'footer K1 says a word (DEVICE)', footInk(p2c, 8) + ' px');
-    check(footInk(p2c, 120) === 0, 'footer K2 is blank on a device row', footInk(p2c, 120) + ' px');
+    /* The window, not a point: FONT_T's advance is not fixed, so K1's column
+     * header now ends at x=34 ("DEVICE" used to be painted at a hard-coded 120),
+     * and checking a single x is how this probe first reported a correct footer
+     * as missing. Each column is a 8..60 wide window. */
+    /* Luminance, not textAt: the footer's own background (TB_BG 24,24,32) is a
+     * colour textAt() does not know, so it counted the whole band as ink. Footer
+     * text is FOOT_GRAY (138,138,153), far above the band.
+     *
+     * px() hands back the CANVAS word, which is byte-swapped (gfx.c writes through
+     * swap16); swap() it back before reading channels, or TB_BG (0x18C4) reads as
+     * RGB(24,34,24) = luminance 177 and every pixel of the band counts as text. */
+    const lum = (v) => {
+        const c = swap(v), r = (c >> 11) & 31, g = (c >> 5) & 63, b = c & 31;
+        return (r * 255 / 31 + g * 255 / 63 + b * 255 / 31) / 3;
+    };
+    const footWin = (fb, x0, x1) => {
+        let n = 0;
+        for (let y = 224; y < 236; y++) for (let x = x0; x < x1; x++) if (lum(px(fb, x, y)) > 90) n++;
+        return n;
+    };
+    /* A knob in hand paints its NUMBER over its own footer column for KN_FRAMES
+     * (40 frames, ~640ms) - so a frame taken right after a detent shows "1" in
+     * K1's column, not "DEVICE". That overlay IS the readout; the probe just has
+     * to let it expire before reading the label underneath, or a correct footer
+     * reads as 18px of a digit. */
+    step(900);
+    const p2f = mk();
+    check(footWin(p2f, 8, 60) > 20, 'footer K1 says a word (DEVICE)', footWin(p2f, 8, 60) + ' px');
+    check(footWin(p2f, 60, 120) === 0, 'footer K2 is blank on a device row', footWin(p2f, 60, 120) + ' px');
     enc(3, -9);                              /* back to the switch */
+    step(900);                               /* the readout paints K1 again */
     const p2e = mk();
-    check(footInk(p2e, 120) > 20, 'footer K2 says ON/OFF on the switch row', footInk(p2e, 120) + ' px');
+    check(footWin(p2e, 60, 120) > 20, 'footer K2 says ON/OFF on the switch row', footWin(p2e, 60, 120) + ' px');
 
     /* SAVE connects the picked device. SAVE must be a PRESS ACROSS FRAMES:
      * web_buttons is a level, and a press and release in one step is a level that

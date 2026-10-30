@@ -297,7 +297,7 @@ static void jam_menu_act(uint8_t which)
     } else {
         uint8_t t;
         if (ds_jam_save_new(&eng, &t) == 0) {
-            sel_track = t;
+            ui_select_track(t);
             app_say("JAM", txt_trk("TO ", (uint8_t)(t + 1)));
         } else {
             app_say("JAM", "NO FREE TRK");       /* ring survives (engine kept it) */

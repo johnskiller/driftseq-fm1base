@@ -426,6 +426,12 @@ void ds_send_prog(ds_state *s, uint8_t trk)
 {
     ds_track *t = &s->pat.track[trk & 15u];
     uint8_t ch = (uint8_t)(t->channel & 0x0Fu);
+    /* Same rule as the tick path: state the program when the receiver's copy
+     * differs. Walking a channel's tracks with SELECT therefore sends once, not
+     * once per track, and a program edited back and forth does not spam a module
+     * that is mid-note. sent_prog starts at 0xFF, so the first state always goes. */
+    if (s->sent_prog[ch] == t->prog)
+        return;
     emit_pc(s, t);                               /* bounds-checked; 4096 B out,
                                                   * and one edit queues 2 */
     s->sent_prog[ch] = t->prog;

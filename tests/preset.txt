@@ -1,24 +1,65 @@
 # The PRESET knob (EN_PRESET, the seventh encoder) picks the CURRENT track's
-# voice. It did nothing until John 2026-10-30: "现在的PRESETS旋钮还没有用上，这个
-# 旋钮应该是立刻选择当前track的音色的，旋转的时候屏幕要有提示，可以采取类似popup的
-# 样式，字体大一点，停止旋转后等待几秒popup关闭。可以用GLO+PRESETS加速".
+# voice, and SELECT moves the track. Both are panel-wide controls.
 #
-# Three things are being pinned here: the program actually changes (and reaches
-# the wire, which is what makes the keys audition the voice you chose), the popup
-# says which voice it is, and the popup goes away on its own.
+# PRESET did nothing until John 2026-10-30: "现在的PRESETS旋钮还没有用上，这个旋钮
+# 应该是立刻选择当前track的音色的，旋转的时候屏幕要有提示，可以采取类似popup的样式，
+# 字体大一点，停止旋转后等待几秒popup关闭。可以用GLO+PRESETS加速". Then it was dead
+# on the pages that own the four knobs (TRACK SET, GLOBAL, SCALE): "hero，arp，seq
+# 画面PRESET起作用，但是在track set和scale画面就不起作用了，我认为PRESET是一个全局
+# 旋钮，应该和SELECT一样任何时候都起作用".
+#
+# The demo's tracks: 0..2 are drums (ch10, program 0), 3 is the bass (ch1 on
+# paper = channel index 0, program 38), 4 is the lead (index 1, program 81).
 wait 600
 
-# ---- it picks the current track's voice, and states it on the wire ----
-turn SELECT 3
+# ---- SELECT: the voice follows the track ----
+#
+# The receiver keeps ONE program per channel and the tick path re-states it only
+# while the transport runs, so stopped on TRACK SET, switching to a track on
+# another channel left the synth on the previous voice: the row read "041 VIOLIN"
+# and the keys still played the bass (John 2026-10-30: "track set画面，chang prg后
+# 的确起作用了，但是此时SELECT切换track，音色又不对了").
+#
+# Every assignment to sel_track goes through ui_select_track(), which states the
+# program, and ds_send_prog() keeps the tick path's rule: send when the
+# receiver's copy differs. sent_prog starts at 0xFF, so the first state goes.
+tap ENV
 wait 20
-expect track 3                        # the demo's bass, ch0 program 38
-expect pz_ttl 0                       # nothing has been turned yet
+expect mode 4                         # TRACK SET
+expect track 0
+out
+turn SELECT 1
+wait 20
+expect track 1                        # drums, program 0 - and boot already
+expect_no_out USB C9 00 00            # stated ch10's 0 for track 0
+out
+turn SELECT 1
+wait 20
+expect track 2                        # drums again: the receiver already has it
+expect_no_out USB C9 00 00
+out
+turn SELECT 1
+wait 20
+expect track 3                        # the bass, a different channel
+expect_out USB C0 26 00
+out
+turn SELECT 1
+wait 20
+expect track 4                        # the lead, another channel
+expect_out USB C1 51 00
+out
+
+# ---- PRESET picks the current track's voice, and states it on the wire ----
+turn SELECT -1
+wait 20
+expect track 3                        # the bass: ch0 program 38
+expect_no_out USB C0 26 00            # ch0's copy is already 38
 out
 turn PRESET 1
 wait 10
 expect pz_prog 39                     # one detent, one program
 expect pz_hash 35754                  # "040 SYNTH BASS 2"
-expect_out USB C0 27 00              # ch0 (0xC0) and program 39 (0x27)
+expect_out USB C0 27 00
 out
 turn PRESET -1
 wait 10
@@ -26,14 +67,12 @@ expect pz_prog 38
 expect pz_hash 9361                   # "039 SYNTH BASS 1"
 expect_out USB C0 26 00
 out
-
-# ---- the popup names the neighbours too, so it says where in the bank you are
+# the popup names the neighbours too, so it says where in the bank you are
 # ("038 SLAP BASS 2" above "039 SYNTH BASS 1" is the bank's own order)
 turn PRESET -1
 wait 10
 expect pz_prog 37
-# 37 is index 37, one below the demo's 38
-expect pz_hash 18091                  # "038 SLAP BASS 2"
+expect pz_hash 18091
 out
 
 # ---- GLO accelerates: eight programs a detent ----
@@ -49,15 +88,14 @@ wait 10
 expect pz_prog 44                     # back to one a detent when GLO is up
 out
 
-# ---- dead stops, and a track on the drum channel picks a KIT ----
+# ---- a track on the drum channel picks a KIT, not a voice ----
 turn SELECT -3
-wait 10
+wait 20
 expect track 0
 turn PRESET 1
 wait 10
 expect pz_prog 1
-# "002 KIT", not "002 BRIGHT PIANO": a program change lands on a channel, and
-# ch10 is drums
+# "002 KIT", not "002 BRIGHT PIANO": a program change lands on a channel
 expect pz_hash 15839
 expect_out USB C9 01 00
 out
@@ -69,3 +107,62 @@ expect pz_ttl 0
 
 # ---- the widest name in the bank still fits the screen ----
 expect pz_wmax <224
+
+# ---- PRESET works on EVERY page, including the ones that own the four knobs ----
+#
+# TRACK SET and GLOBAL take every encoder id, so a page dispatch that runs before
+# this one leaves the knob dead exactly where a player is most likely to want it.
+# Found on the web emu at TRACK SET. Each page is entered, one detent turned, and
+# the program read back.
+tap HOME                              # (the page above is TRACK SET: ENV toggles)
+wait 20
+expect mode 0
+tap ENV                               # TRACK SET
+wait 20
+expect mode 4
+turn PRESET 1
+wait 10
+expect pz_prog 2
+expect_out USB C9 02 00
+out
+
+press GLO                             # GLOBAL, page 1
+wait 10
+tap HOME
+wait 20
+release GLO
+wait 20
+expect mode 5
+turn PRESET 1
+wait 10
+expect pz_prog 3
+expect_out USB C9 03 00
+out
+tap HOME
+wait 20
+expect mode 0
+
+tap SEL                               # the SCALE page owns K1..K4 as well
+wait 20
+expect mode 3
+turn PRESET 1
+wait 10
+expect pz_prog 4
+expect_out USB C9 04 00
+out
+tap SEL                               # SEL closes SCALE (a HOME would land on GRID)
+wait 20
+expect mode 0
+
+# and on the ARP page, which never claimed the knob
+tap ARP
+wait 20
+expect mode 2
+turn PRESET 1
+wait 10
+expect pz_prog 5
+expect_out USB C9 05 00
+out
+tap HOME
+wait 20
+expect mode 0

@@ -94,6 +94,7 @@ static void preset_encoder(uint8_t enc, int8_t det);
 static void preset_draw(void);
 static uint16_t preset_ticks(void);
 static void preset_popup_text(char *b);
+static void ui_select_track(uint8_t t);
 static void preset_text(char *b, uint8_t prog, uint8_t is_kit);
 
 static void jam_menu_act(uint8_t which);

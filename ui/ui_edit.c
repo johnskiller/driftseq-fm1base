@@ -558,6 +558,17 @@ static void ui_encoder(uint8_t enc, int8_t det)
         }
         return;
     }
+    /* PRESETS works on EVERY page, including the ones that own the four knobs.
+     * It picks the current track's voice, and SELECT is a global control, so this
+     * has to be handed back before a page claims the whole encoder: TRACK SET and
+     * GLOBAL take every id (ui_trkset.c trkset_encoder, ui_global.c
+     * global_encoder), which made the knob dead exactly where a player is most
+     * likely to want it - on a page about the track's sound. Found on the web emu
+     * at TRACK SET (John 2026-10-30: "webemu上的版本PRESETS没起作用啊"). */
+    if (enc == EN_PRESET) {
+        preset_encoder(enc, det);
+        return;
+    }
     if (ui_mode == M_SCALE) {                     /* the SCALE page owns K1..K4 */
         scale_encoder(enc, det);
         return;
@@ -579,12 +590,7 @@ static void ui_encoder(uint8_t enc, int8_t det)
         int next = sel_track + (det > 0 ? 1 : -1);
         if (next < 0) next = 0;
         if (next > 15) next = 15;
-        sel_track = (uint8_t)next;
-        return;
-    }
-    if (enc == EN_PRESET) {                      /* the voice of the current track,
-                                                  * popup while it turns */
-        preset_encoder(enc, det);
+        ui_select_track((uint8_t)next);
         return;
     }
     if (enc == EN_ALGO)

@@ -81,7 +81,9 @@ static void trkset_encoder(uint8_t enc, int8_t det)
         int v = (int)sel_track + (det > 0 ? 1 : -1);
         if (v < 0) v = 0;
         if (v > DS_TRACKS - 1) v = DS_TRACKS - 1;
-        sel_track = (uint8_t)v;
+        ui_select_track((uint8_t)v);             /* and its voice goes to the wire:
+                                                  * the keys audition it now, not
+                                                  * on the next PLAY */
         ts_row = 0;                              /* a new track starts at the top */
         return;
     }

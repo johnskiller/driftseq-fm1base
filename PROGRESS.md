@@ -570,3 +570,30 @@ header      cv_rect(0,0,240,24,TB_BG)，分隔线 y=23，SEP=0x2946
 `fm1-base` 是 **unity build**（`platform/device/unity.c:355` → `#include "app.c"`）。**没人 `#include` 的 `.c` 静默不编译** —— 曾经 `pack.c` 根本没被编进去过。
 
 目标端无 `<string.h>`，libc 自己声明 `memcmp`。
+
+## SELECT 切轨要报音色（2026-10-30）
+
+**问题**（John）：「track set画面，chang prg后的确起作用了，但是此时SELECT切换track，音色又不对了」
+
+**根因**：接收端每个通道只有一个 program 副本，而 PC 只在 `ds_tick()` 的播放分支里按 owner 规则发。停着的时候在 TRACK SET 上改 PROG 已经能发（`9c46305` 加的 `ds_send_prog()`），但 **SELECT 换轨本身不发 PC** —— 于是选到另一通道的轨，合成器还停在上一个音色：TRACK SET 行里写着 `041 VIOLIN`，琴键弹出来的还是 bass。
+
+**修法**：`sel_track` 的三处写入（TRACK SET 的 SELECT、裸页 SELECT、jam 菜单 NEW TRK 分到新轨）统一走 `ui_select_track()`，它只做两件事：赋值 + `ds_send_prog(&eng, t)`。放在 `ui/ui_preset.c` 里（PRESET 与 SELECT 是同一族：都在描述"当前 track 是什么声音"）。开机 `sel_track = 0` 仍直接赋值 —— 那时还没有传输可报。
+
+**`ds_send_prog()` 补上去重**：原来无条件发，现在和 tick 路径同一条规则 —— 接收端副本相同就不发。走同一个通道的几条轨之间 SELECT 只发一次，来回改同一个 program 也不会在音符中间反复重报（有些模块会听得出来）。`sent_prog` 初值 `0xFF`，所以第一次一定发。
+
+**实测**（host，John 的原始序列）：track 3（ch0，prog 38）改 PRG 到 42 → SELECT 到 track 4（ch1，prog 81）→ SELECT 回 track 3 → PLAY：
+```
+C0 26 00   SELECT 到 ch0 就报 38
+C0 27..2A  改 PRG 的四个 detent，每格一条
+C1 51 00   SELECT 到 track 4 报 ch1 的 81
+C0 2A 00   SELECT 回 track 3 报 42（去重后仍发，因为接收端是 81）
+```
+琴键确认用的是 42，不是 81 也不是 38。
+
+**测试**：`tests/preset.txt` 19 → **45**（SELECT 走一遍 ch10/ch0/ch1 的报音色、同通道不重发、PRESET 每格发 PC、popup 自动关、六个页面 PRESET 都生效）；`tests/trkset_route.txt` 36 → **39**（SELECT 走轨会带出 PC，改用 delta 断言：全 BLE 下 PLAY 前后 `midi_out` 都是 3）。
+
+**PRESETS 全局化**（同轮）：`ui_edit.c` 里把 `EN_PRESET` 拦在页面专用 encoder 分派**之前**，与 SELECT 同级 —— TRACK SET / GLOBAL / SCALE 都把编码器整体拿走，原来 PRESET 在那三页是死的。四个页面实测每格都发 PC（`c9 01`→`c9 02`→…）且 popup 出现。
+
+**探针教训**：`tools/global_probe.mjs` 报 `footer K1 says a word (DEVICE)` 只有 18px。根因不是页脚画错，而是**旋钮在手的读数覆盖层**：`kn_ttl` 给 40 帧（约 640ms），K1 那一栏画的是数字 `1` 而不是 `DEVICE`。取帧必须等读数过期（`step(900)`）。这与页脚闪烁那次同源 —— host 能看见最后一遍，真机看见每一遍。
+
+**尺寸**：image 524,544 / 581,564（余 57,020）；RAM 68,692；fwsc `fca76e5bb44df4ca5c72b9ed715335d5`，611,547 B。

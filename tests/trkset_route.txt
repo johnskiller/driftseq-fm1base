@@ -125,12 +125,27 @@ wait 3
 expect ts_route 1
 expect track 15
 
-# every track on BLE: the cables stay quiet no matter what the engine plays
+# Walking SELECT now STATES each track's program (the voice follows the track:
+# John 2026-10-30 "SELECT切换track，音色又不对了"). This walk crossed ch0, ch1 and
+# ch10 before they were switched to BLE, so it emitted their program changes on
+# USB - a real behaviour of the fix, not a routing hole. Drop those bytes and
+# measure the PLAY that follows.
+out
+
+# every track on BLE: the cables stay quiet no matter what the engine plays.
+#
+# midi_out is a running total and "out" only empties the display buffer, so 3 is
+# the SELECT walk's own three program changes (C0 26, C1 51, C0 00 in the log
+# above) - each stated as the walk LANDED on that track, which was still on BOTH
+# at that moment. The measure is the delta: the same total before and after the
+# transport runs proves the PLAY put nothing on the cable.
+expect midi_out 3
 tap PLAY
 wait 300
 tap PLAY
 wait 20
-expect midi_out 0
+out
+expect midi_out 3
 
 # --- give every track USB back: the full mix returns ---
 # K1 -9 first: the row is still on ROUTE from the loop above, and SELECT is what
@@ -248,12 +263,16 @@ turn K2 -1
 wait 3
 expect ts_route 0
 expect track 0
+out                                  # the walk back states programs too
 tap PLAY
 wait 300
 tap PLAY
 wait 20
-# 29: the demo's own notes and CCs. The three program changes are NOT here:
-# they went out on the earlier PLAY and the receiver's copy has not changed
-# since (sent_prog still agrees), so this run restates nothing. 45 before
-# program changes became per-channel; 32 if this were a first run.
-expect midi_out 29
+# 34 = the demo's own notes and CCs (29) plus 5 program changes this walk added.
+# Those 5 are the SELECT fix, not noise: walking the tracks down to USB states
+# each channel's program as the selection lands on it (C0 00 / C0 26 / C9 00 on
+# the way back), and the PLAY that follows re-states ch0 and ch1 once because
+# the owner rule picked a different track than the walk last left on that
+# channel (C0 26 / C1 51) - the same convergence, one message later.
+# Before SELECT stated programs this run measured 29.
+expect midi_out 34
