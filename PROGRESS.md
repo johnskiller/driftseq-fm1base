@@ -597,3 +597,5 @@ C0 2A 00   SELECT 回 track 3 报 42（去重后仍发，因为接收端是 81�
 **探针教训**：`tools/global_probe.mjs` 报 `footer K1 says a word (DEVICE)` 只有 18px。根因不是页脚画错，而是**旋钮在手的读数覆盖层**：`kn_ttl` 给 40 帧（约 640ms），K1 那一栏画的是数字 `1` 而不是 `DEVICE`。取帧必须等读数过期（`step(900)`）。这与页脚闪烁那次同源 —— host 能看见最后一遍，真机看见每一遍。
 
 **尺寸**：image 524,544 / 581,564（余 57,020）；RAM 68,692；fwsc `fca76e5bb44df4ca5c72b9ed715335d5`，611,547 B。
+
+**探针**：`tools/preset_probe.mjs`（38 项）在**实际下发的 wasm** 上验证 HOME/ARP/SCALE/TRACK SET/GLOBAL 五页：每转一格都发 PC、popup 出现、2.6 s 后自动收回、收回后回到该页自身基线。两个坑已在文件头记死：① `build/emu/app.wasm` 可能旧于源码（第一次"PRESETS 没反应"就是这个），探针比 mtime；② **按钮 bit 来自 `plat.h` 的顺序** `B_FX 0, B_SEL 1, B_ENV 2, B_LFO 3, B_EDIT 4, B_GLO 5, B_HOME 6, B_ARP 8` —— 按 3 进的是 LFO 不是 TRACK SET，第一版探针因此"验证"了三个它从没进去的页面。页面身份改用各页自身 body ink：HOME 2144 / ARP 1213 / SCALE 9470 / TRACK SET ~3200-3700 / GLOBAL 7125。
