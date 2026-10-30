@@ -631,3 +631,18 @@ John 报「SCALE页面的键盘灯有问题，随着弹奏逐渐越亮越多，�
 
 **实测中三个「假 bug」教训**：① 我一开始用 `turn K4` 开 OFC，K4 早已不是 OFC（注释写明 "K4 is freed"），OFC 在 **K3**；② 在 track 0 上测——demo 的 0/1/2 轨都是鼓（ch9），SCALE 的和弦键盘对鼓轨不存在，`is_drum` 直接跳过整段；③ 探针常数写错三处（keys 7..18 是 `0x7ff80` 不是 `0x7f80`；"标尺不存在"不能在整床 dim 的态下判断）。三次都是断言错，不是代码错 —— 先按 `leds` 实际输出反推，再改断言。
 
+
+**鼓组（drum kit）：标准有几个、我们做到哪（2026-10-30，John 拍板暂不做）**
+
+John 问「PRESETS 切换 drum set 的时候一共有多少个 drumset？GM 标准呢？」，追问时定调「不要考虑 EAS 支持多少个，按 GM 标准来」，收到答复后定案：「gs 和 xg 的音源我都有，不过完整的支持工作量太大，暂时不考虑了」。
+
+**标准答案**：
+- **GM Level 1：1 套**。GM1 只规定 Standard Kit，ch10 音符映射固定，规范里没有「换鼓组」这回事。
+- **GM Level 2：9 套**，program（1 起算）= 1 Standard / 9 Room / 17 Power / 25 Electronic / 26 TR-808 / 33 Jazz / 41 Brush / 49 Orchestra / 57 Sound FX。
+- **GS 另有 128 CM-64/CM-32L**（MT-32 兼容鼓组），GM2 规范本身不含；XG 的 kit 表同样是这 9 套加扩展位。
+
+`ui/ui_trkset.c` 的 `GM_KIT[]` 9 条正好就是 GM2 那 9 个，只是用**线缆上的 0 起算号**（0/8/16/24/25/32/40/48/56）。PRESETS 在鼓轨上开放 **0..127**（128 个位置），只有这 9 个有名字，其余 119 个显示纯数字 —— 标准没给它们命名。
+
+**内置 EAS 的实际行为（实测，不是推断）**：鼓通道上**根本不区分 kit**。`eas/wt_200k_G.c` 文件自带统计注释 `Number of banks: 1 / Number of programs: 1`，`eas_banks[]` 只有一个 locale `0x7900`（旋律 bank MSB），鼓 bank `0x7800` 不存在 → `VMFindProgram()`（eas_voicemgt.c:2736）在 `pBanks` 里找不到就回落到 `pPrograms`，而那只有一条 `{ 7864320, 0 }`。实测：鼓轨上 prog 1/8/16/25/56/127 打 kick+snare+tom+hat 五击，WAV 哈希**逐个相同**；prog 0（不发 PC）另有一组哈希。对照实验证明方法有效：旋律轨换 0/24/40/56 音色明显不同（56 与 73 相同，是同一组采样，合理）。
+
+**定案**：GM2 那 9 套鼓要听，得接外部音源（John 有 GS/XG 硬件）。固件侧**不做** kit 支持——要做得把 GM2 的 bank/kit 数据打进固件并让 EAS 查 bank，工作量与收益不成比例。现状保留：鼓轨 PRESETS 照常发 `C9 xx`（外部音源会响应），popup 对 9 个已知号显示名字、其余显示数字。这条不是 bug，是「内置 GM 仅试听」定位下的已知边界。
