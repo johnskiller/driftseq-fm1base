@@ -139,12 +139,24 @@ wait 5
 expect gl_row 0
 
 # ---- the GM switch: CC123 on the way out, then the feed closes ----
+# A two-state value is a SLIDER, not a toggle (John 2026-10-30: "第一页的GM...都
+# 没有做到盲拧效果"): counter-clockwise asks for OFF, clockwise for ON, and a
+# detent towards the state it is already in does nothing. The old code flipped on
+# ANY detent, so turning left turned it on.
 turn K1 2
 wait 5
 expect gl_row 2
+expect gl_gm 1
 turn K2 1
 wait 5
-expect gl_gm 0
+expect gl_gm 1                   # right, already ON: nothing to do
+turn K2 -1
+wait 5
+expect gl_gm 0                   # left asks for OFF
+expect gm_alloff 1
+turn K2 -1
+wait 5
+expect gl_gm 0                   # left again: still OFF, and no second panic
 expect gm_alloff 1
 # zero the window, run a full pattern: nothing reaches the synth
 expect gm_reset 0
@@ -156,7 +168,7 @@ expect gm_noteons 0
 # back on: the same run does reach it
 turn K2 1
 wait 5
-expect gl_gm 1
+expect gl_gm 1                   # right asks for ON
 expect gm_reset 0
 tap PLAY
 wait 700
@@ -216,14 +228,18 @@ expect gl2_sel -1                 # ... which has no device behind it
 # John 2026-10-30: "BLE的开关可以移到第二页，这样第一页空间大一点，第二页也不至于
 # 这么空旷". It is a ROW, not a separate line: K1 walks onto it, K2 turns it, and
 # the page keeps one grammar for both pages.
-turn K2 1
-wait 20
-expect gl_ble 0                   # OFF: the radio stops, and so does the scan
-expect ble_dev 0
-expect gl2_rows 1                 # the switch is the only row left
-turn K2 1
-wait 20
 expect gl_ble 1
+turn K2 1
+wait 20
+expect gl_ble 1                   # right, already ON: nothing to do
+turn K2 -1
+wait 20
+expect gl_ble 0                   # left asks for OFF: the radio stops...
+expect ble_dev 0
+expect gl2_rows 1                 # ...and the switch is the only row left
+turn K2 1
+wait 20
+expect gl_ble 1                   # right asks for ON
 # switching the radio back on restarts it from BLE_OFF: the stack takes a second
 # to come up (host stand-in: 1000 ms), and only then can the scan find anything
 expect ble_dev 0

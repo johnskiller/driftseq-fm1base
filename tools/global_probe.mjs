@@ -369,6 +369,34 @@ check(page.some((v, i) => v !== home[i]), 'GLO+HOME opens a different screen');
     check(stateWord(linked) !== stateWord(after), 'the state word reports the link coming up',
           stateWord(after) + ' -> ' + stateWord(linked) + ' px');
 
+    /* Two-state rows are SLIDERS: left = OFF, right = ON, dead stops. The pixel
+     * fact is that the value word CHANGES when the knob goes one way and does
+     * NOT change when it goes the same way again while already there. Asserted
+     * on the radio switch, which is the one two-state row on this page. */
+    {
+        const valAt = (fb) => {
+            const bits = [];
+            for (let y = 36; y < 50; y++) for (let x = 150; x < 220; x++)
+                if (textAt(fb, x, y)) bits.push(x + ',' + y);
+            return bits.join('|');
+        };
+        enc(3, -9);                          /* back onto the switch row */
+        step(60);
+        const on1 = mk();
+        enc(4, 1); step(120);                /* EN_K2 right: already ON, no change */
+        const on2 = mk();
+        check(valAt(on1) === valAt(on2), 'K2 right on an ON switch changes nothing',
+              valAt(on1).length + ' vs ' + valAt(on2).length + ' ink px');
+        enc(4, -1); step(120);                /* left: OFF */
+        const off = mk();
+        check(valAt(off) !== valAt(on1), 'K2 left on an ON switch turns it OFF',
+              valAt(on1).length + ' -> ' + valAt(off).length + ' ink px');
+        enc(4, 1); step(120);                 /* right: back ON */
+        const on3 = mk();
+        check(valAt(on3) !== valAt(off), 'K2 right turns it back ON',
+              valAt(off).length + ' -> ' + valAt(on3).length + ' ink px');
+    }
+
     /* and back to page 1 with the chord */
     M.web_buttons(1 << 5); step(40);
     M.web_buttons((1 << 5) | (1 << 6)); step(40);

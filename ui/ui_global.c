@@ -133,7 +133,26 @@ static void gl_tap_tap(void)
     }
 }
 
-/* ---- the switches ------------------------------------------------------- */
+/* ---- the switches -------------------------------------------------------
+ *
+ * A two-state row is a SLIDER with two detents, not a toggle: clockwise asks for
+ * ON, counter-clockwise asks for OFF, and the knob dead-stops at both ends
+ * because there is no third state to reach. The panel already works this way -
+ * K3's MUTE/SOLO/ON is a position that dead-stops (ui.c k3_state_slider) - so a
+ * detent that flipped whatever the direction was made these two rows the only
+ * places where turning the knob left did not move the value left. John
+ * 2026-10-30: "第一页的GM，第二页的BLE on/off选择都没有做到盲拧效果".
+ *
+ * So `det > 0` asks for ON, `det < 0` asks for OFF, and asking for the state it
+ * is already in does nothing.
+ */
+static int gl_want(int on, int8_t det)
+{
+    if (det > 0) return 1;
+    if (det < 0) return 0;
+    return on;
+}
+
 
 /* GM on/off is a LISTENER switch: it stops feeding EAS, it does not mute it.
  *
@@ -284,12 +303,14 @@ static void global_encoder(uint8_t enc, int8_t det)
     if (gl_page) {
         /* Row 0 is the switch, and K2 turns it. A device row has no value to
          * turn: its verb is SAVE, because connecting is not a number. */
-        /* K2 TOGGLES. set_ble_off() is 1 when the radio is stored OFF, so the
-         * "on" to ask for is set_ble_off()'s own value; the inverted form
-         * (`? 0 : 1`) asks for ON every time the radio is already ON, which is a
-         * switch that can never be turned off (the test caught it). */
-        if (gl_row == GL2_BT && det)
-            gl_bt_set(set_ble_off());
+        /* Row 0's value is a two-detent slider (see gl_want): right asks for ON,
+         * left asks for OFF. set_ble_off() is 1 when the radio is stored OFF, so
+         * the "on" it is in is !set_ble_off(). */
+        if (gl_row == GL2_BT) {
+            int on = gl_want(!set_ble_off(), det);
+            if (on != (set_ble_off() ? 0 : 1))
+                gl_bt_set(on);
+        }
         return;
     }
     switch (gl_row) {
@@ -303,8 +324,14 @@ static void global_encoder(uint8_t enc, int8_t det)
         eng.global_swing = (uint8_t)v;
         break;
     case GL_GM:
-        if (det)
-            gl_gm_set(!glo_gm_on);
+        /* Same slider: right = ON, left = OFF, and no change when it is already
+         * there (re-sending CC123 on every detent would panic a synth that is
+         * already silent). */
+        {
+            int on = gl_want(glo_gm_on, det);
+            if (on != glo_gm_on)
+                gl_gm_set(on);
+        }
         break;
     default:
         break;
