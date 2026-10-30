@@ -456,6 +456,41 @@ void set_commit(void)
         set_dirty = 0;
 }
 
+/* ------------------------------------------------------------------- SysEx --- */
+/* A SysEx frame the platform did not claim, the bytes between F0 and F7 (plat.h
+ * APP_SYSEX). Only two things here so far, and both are about the transport
+ * rather than a feature: the identity request is what a host uses to find out
+ * what is on the other end, and it is the cheapest proof that a frame made it
+ * all the way in (assembled from its CIN packets), that the app saw the whole
+ * thing, and that the answer goes back out as a whole frame again.
+ *
+ * MMC (docs/MIDI_IMPLEMENTATION.md §6) and the pattern dump (§7) belong here too
+ * once John has decided them; until then this hook deliberately answers nothing
+ * it was not asked, so a stray SysEx cannot move the transport. */
+int app_sysex(const uint8_t *p, uint32_t n)
+{
+    /* universal non-realtime identity request: F0 7E <dev> 06 01 F7 -> p = 7E <dev> 06 01
+     * <dev> is 7F (all call) or this device's own id; anything else is another
+     * box's request and answering it would put two replies on one cable. */
+    if (n == 4u && p[0] == 0x7Eu && p[2] == 0x06u && p[3] == 0x01u &&
+        (p[1] == 0x7Fu || p[1] == 0x7Du)) {
+        /* The identity reply. 7D is the non-commercial manufacturer id — the one this
+         * firmware already uses for every frame it sends (the log's F0 7D 4C 47, the
+         * remote's F0 7D 4C 43), not a registered id it has no right to. Replies with
+         * the device id 7F like the request's, so a host that asked 7F hears back. */
+        static const uint8_t id[] = {
+            0xF0, 0x7E, 0x7F, 0x06, 0x02,             /* universal non-realtime: identity reply */
+            0x7D,                                     /* non-commercial */
+            0x00, 0x01,                               /* family: DriftSeq */
+            0x00, 0x01,                               /* model */
+            0x00, 0x00, 0x00, 0x01,                   /* version 0.0.0.1 */
+            0xF7};
+        plat_sysex_send(id, sizeof id);
+        return 1;
+    }
+    return 1;                                    /* ours to drop: nothing else is understood yet */
+}
+
 /* --------------------------------------------------------------------- UI --- */
 static struct {
     char msg[2][24];                     /* a short message over the header */

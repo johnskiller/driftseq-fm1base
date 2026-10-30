@@ -43,3 +43,17 @@ int app_expect(const char *what, int *got);
  * whatever answers "why is it silent" — the render counter, the live gain, EAS's state */
 #define APP_LOG_HOOK
 void app_log_line(char *b);
+
+/* SysEx the platform does not claim (plat.h APP_SYSEX): p is the bytes BETWEEN F0
+ * and F7 of a complete frame, from USB or Bluetooth. The emulator needs this hook
+ * wired before MMC, the pattern dump or a backup can be tested there at all — until
+ * 2026-10-30 nothing in the app could receive a SysEx frame, so every one of those
+ * features could only be tried on the unit.
+ *
+ * What it does for now is the transport floor, not the features: an identity request
+ * (universal non-realtime, sub-id 06) is answered with the identity reply (sub-id 02),
+ * which is the cheapest way to prove the whole path end to end — in from the port,
+ * assembled by CIN, out again through plat_sysex_send. MMC is §6 of
+ * docs/MIDI_IMPLEMENTATION.md and still waiting on John's decision. */
+#define APP_SYSEX
+int app_sysex(const uint8_t *p, uint32_t n);

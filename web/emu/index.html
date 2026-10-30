@@ -742,6 +742,8 @@ $("again").addEventListener("click", () => last && speak(last.text, true, last.k
 // on, because the firmware echoes nothing back to where it came from.
 const PORT_USB = 0;
 let midiAccess = null, midiInSel = "", midiOutSel = "", midiBound = false;
+/* a SysEx frame (F0..F7) the last Web MIDI event cut off, waiting for the rest */
+let sxIn = null;
 
 /* pack one MIDI message as the firmware's 4-byte USB-MIDI packet: the cable's
  * code index in byte 0, then status, data 1, data 2 (mk_pkt in plat_host.c).
@@ -823,14 +825,62 @@ function ccToPanel(d1, value) {
   return false;
 }
 
+/* A SysEx frame in (F0 .. F7) as the USB-MIDI packets the firmware's port
+ * takes: three bytes to a packet, and the packet that ends the frame says so in
+ * its CIN (5 with one byte of frame left, 6 with two, 7 with three). This is the
+ * spec's side of what the worklet now unpacks on the way out; nothing here
+ * guesses a length from a status byte, because after the first packet there is
+ * no status byte to read. */
+function sendSysexIn(frame) {
+  for (let i = 0; i < frame.length; ) {
+    const k = Math.min(3, frame.length - i);
+    const ends = i + k >= frame.length;
+    const cin = ends ? (k === 3 ? 0x7 : 0x4 + k) : 0x4;
+    const b = [frame[i], frame[i + 1] ?? 0, frame[i + 2] ?? 0];
+    send({ type: "midi", port: PORT_USB, pkt: (cin | b[0] << 8 | b[1] << 16 | b[2] << 24) >>> 0 });
+    i += k;
+  }
+}
+
 function onMidiIn(e) {
   if (!node) return;
-  const d = e.data;
+  let d = e.data;
+  if (sxIn) {                                          // a frame the last event cut off: finish it first
+    let j = 0;
+    const head = sxIn;
+    while (j < d.length && d[j] !== 0xf7) {
+      if (d[j] < 0xf8) head.push(d[j]);              // as below: clock is not part of a frame
+      j++;
+    }
+    if (j >= d.length) return;                        // still cut off: nothing to send yet
+    sxIn = null;
+    head.push(0xf7);
+    sendSysexIn(head);
+    monLine("in ", head);
+    d = d.slice(j + 1);
+  }
   for (let i = 0; i < d.length; ) {
     const st = d[i];
     if (st >= 0xf8) { i++; continue; }                 // real-time: the firmware drops it anyway
     if (st < 0x80) { i++; continue; }                  // running status: wait for a real status byte
-    if (st >= 0xf0) return;                            // SysEx and system common: this page's SysEx is the reader's
+    if (st === 0xf0) {                                 // SysEx: gather the whole frame, then hand it over
+      const frame = [0xf0];
+      let j = i + 1, rest = null;
+      /* F8 (clock) can land between the bytes of a frame and is not part of it —
+       * a port with clock running does this constantly. It is skipped the way the
+       * firmware's own reader skips it (app.c midi_in drops F8), not stored. */
+      while (j < d.length && d[j] !== 0xf7) {
+        if (d[j] < 0xf8) frame.push(d[j]);
+        j++;
+      }
+      if (j >= d.length) { sxIn = frame; return; }      // cut off: keep it for the next event
+      frame.push(0xf7);
+      sendSysexIn(frame);
+      monLine("in ", frame);
+      i = j + 1;
+      continue;
+    }
+    if (st >= 0xf0) { i++; continue; }                 // other system common: the firmware has no use for it
     const t = st & 0xf0, want = t === 0xc0 || t === 0xd0 ? 2 : 3;
     const msg = [st];
     for (i++; msg.length < want && i < d.length; i++) {

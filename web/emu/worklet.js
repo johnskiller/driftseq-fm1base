@@ -9,6 +9,12 @@
 
 const clock = globalThis.performance ? () => globalThis.performance.now() : () => Date.now();
 
+// USB-MIDI CIN -> the bytes that packet carries (the spec's table, USB-MIDI 1.0
+// §4 Table 4-1). 2/3 are the two- and three-byte system common messages, 4
+// continues a SysEx frame, 5..7 end it with that many bytes, 8..11 and 0xE are
+// the three-byte channel messages, 0xC/0xD the two-byte ones, 0xF a single byte.
+const CIN_BYTES = [0, 0, 2, 3, 3, 1, 2, 3, 3, 3, 3, 3, 2, 2, 3, 1];
+
 class Fm1 extends AudioWorkletProcessor {
   constructor() {
     super();
@@ -93,23 +99,23 @@ class Fm1 extends AudioWorkletProcessor {
       transfer.push(msg.fb.buffer);
     }
     // What the app sent: its USB-MIDI packets, as plain bytes for a Web MIDI
-    // output. The length matters more than it looks: a receiver walks this
-    // stream from status byte to status byte, so one wrong length shifts every
-    // message after it. Program change and channel pressure are 2 bytes, system
-    // real-time (clock, start, stop) is 1.
+    // output. The length comes from the packet's own CIN (byte 0's low nibble),
+    // never from the status byte: the two disagree exactly where it matters,
+    // since every SysEx packet after the first holds three bytes that are not a
+    // status, and a truncated F0 would shift every message after it.
+    //   CIN 2/3   channel messages, two or three bytes
+    //   CIN 4-7   SysEx: F0 and continuation (3), and the three ways it ends
+    //   CIN 5/6/7 ends the frame early (1, 2 or 3 bytes of it are in the packet)
+    //   CIN F     a single byte: clock, start, stop, or a lone F7
     const nOut = ex.web_out_n();
     if (nOut) {
       const pk = new Uint32Array(this.mem.buffer, ex.web_out_pkts(), nOut);
       const bytes = [];
       for (const p of pk) {
-        const st = (p >>> 8) & 0xFF, t = st & 0xF0;
-        bytes.push(st);
-        if (st < 0xF0) {                            // a channel message: 2 or 3 bytes
-          bytes.push((p >>> 16) & 0xFF);
-          if (t !== 0xC0 && t !== 0xD0) bytes.push((p >>> 24) & 0xFF);
-        } else if (st === 0xF2) {                   // song position: two data bytes
-          bytes.push((p >>> 16) & 0xFF, (p >>> 24) & 0xFF);
-        }                                           // everything else: its one byte and no more
+        const cin = p & 0xF;                        // byte 0 = cable (high) | CIN (low)
+        const body = [(p >>> 8) & 0xFF, (p >>> 16) & 0xFF, (p >>> 24) & 0xFF];
+        const n = CIN_BYTES[cin];
+        for (let i = 0; i < n; i++) bytes.push(body[i]);
       }
       ex.web_out_clear();
       msg.midi = Uint8Array.from(bytes);

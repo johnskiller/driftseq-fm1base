@@ -45,7 +45,7 @@ Verified by: `tools/midi_probe.mjs` (wire format), `tools/midi_ui_probe.mjs`
 | `Bn` CC | **sent** | 鼓通道换 kit 用的 Bank Select（`CC0=120`、`CC32=0`），见 §3.1 |
 | `F8` Clock | 不发送 | 计划：作为 clock master 输出（§8）；**接收侧也丢弃**，见 §6.4 |
 | `FA/FB/FC` | 不发送（**接收已实现**） | 收：`ui_midi_dispatch` 已处理且边沿触发；发：见 §6（MMC / 走带控制） |
-| SysEx | **app 不发送** | 平台自己在发（log 帧 `F0 7D 4C 47`，走 `plat_sysex_send`）。app 侧待接：`app_sysex()` 未定义（§6.3③④）、backup 未开（§7） |
+| SysEx | **收已实现，发只有一个答复** | 平台在发 log 帧（`F0 7D 4C 47`）；`app_sysex()` 认 identity request 并回 15 字节 reply（§6.3⑥）。pattern dump / backup 待接（§7） |
 
 ### 3.1 鼓通道的 Program Change 必须带 Bank Select
 
@@ -76,8 +76,8 @@ Verified by: `tools/midi_probe.mjs` (wire format), `tools/midi_ui_probe.mjs`
 
 - FW 不响应 CC / Program Change / Song Position / Clock（全部忽略，不崩溃）。
 - FB = FA（从 loop_start 起），不是字面 continue-from-position。
-- **app 层 SysEx 未实现**：`app_sysex()` 未定义，USB 收到的 SysEx 全部丢弃（`app.c` 注释：「SysEx -> ignored for now」）。**平台层不是没能力** —— 发送侧 `plat_sysex_send()` 已成熟（log 帧在用它），接收侧 `APP_SYSEX` 钩子已就位，见 §6.3。
-- emulator 页面拆包把 `0xF0` 当 1 字节，**emu 里看不到也发不出 SysEx**（`web/emu/worklet.js`，§6.3⑥）。
+- **app 层 SysEx 只做了最小一件**（2026-10-30）：`app_sysex()` 已定义，认 identity request 并回 15 字节 reply，**其余帧一律静默丢弃**。MMC 走带解析、pattern dump、backup 都还没写。**平台层早有完整能力** —— 发送侧 `plat_sysex_send()`（log 帧在用它）、接收侧 `APP_SYSEX` 钩子、`backup.c` 全都在，见 §6.3 与 §7。
+- ~~emulator 页面拆包把 `0xF0` 当 1 字节~~ —— **已修（2026-10-30）**：出向按 CIN 解包、入向组帧并处理分片与帧内 clock。emu 现在能看到也能发出 SysEx，见 §6.3⑥。
 - pattern **不写 flash**（没有 `OBJ_PATTERN`），所以重启即丢；backup/restore 也因缺这个对象而无法启用，见 §7。
 - 无 Local Off / Omni / All-notes-off（`Bn cc=123`）处理——外部音源挂起时只能 stop。
 
@@ -173,17 +173,17 @@ log 帧（`F0 7D 4C 47` 头，最长 48 B）同样正确：中间全是 `CIN 4`�
 
 | 缺什么 | 现状 | 影响 |
 |---|---|---|
-| `app_sysex()` | **未定义** | 收不到任何 SysEx；`app.c:225` 注释仍写「SysEx -> ignored for now」——**这句注释已经过时**，平台侧一切就绪 |
+| `app_sysex()` | ~~未定义~~ → **已实现（2026-10-30）** | 认 universal non-realtime identity request（device id 只答 `7F` / `7D`），回 15 字节 identity reply；其余帧静默丢弃并返回 1（「归我，丢掉」）。MMC 与 pattern dump 的解析留在下一步 |
 | `backup = true` | **`fm1.toml` 没有** | 整套 USB backup/restore 没编译进来，见 §7 |
-| emu 侧 `plat_sysex_send` | host 是空实现 `{(void)frame,(void)n;}` | **emu 里发不出 SysEx**，验证只能靠真机 |
+| emu 侧 `plat_sysex_send` | ~~host 是空实现~~ → **已实现**（按 CIN 4/5/6/7 分包进 `out_pkt`，脚本 `sysex_in` / 断言 `expect_sysex` 走同一条） | emu 里能发也能看，`tools/emu_sysex_e2e.mjs` 14 项实测 |
 
 #### ⑤ BLE 那条**只影响「用 BLE 发 SysEx」**，不影响 USB
 
 `le_midi.c` `ble_midi_send_many()` 里 `if (cin == 0xF || cin == 5) { }` 会把 `CIN 5` 的唯一数据字节（终止 `F7`）丢掉，且 SysEx 数据字节会被 `if (st < 0xF0) run = st;` 记成 running status。**USB 走 `plat_sysex_send` 不受影响**；要在 BLE 上发 SysEx（例如无线备份）才需要修。
 
-#### ⑥ emu 的 `worklet.js` out 循环吞 SysEx —— 这条仍然成立
+#### ⑥ ~~emu 的 `worklet.js` out 循环吞 SysEx~~ —— **已修（2026-10-30）**
 
-它按 status 字节解包，`F0` 只送 1 字节，无状态位的数据也只送 1 字节。**emu 要看 SysEx 就得改这里。**
+原来按 status 字节解包：`F0` 只送 1 字节，无状态位的数据也只送 1 字节。现在按 packet 自己的 **CIN**（byte0 低四位）查 `CIN_BYTES` 表。一并修掉的三处：入向 `if (st >= 0xf0) return;` 直接丢 SysEx；跨事件分片没有缓冲；帧内 `F8` clock 被当成数据字节。回归见 `tools/emu_sysex_e2e.mjs`（14）、`emu_sysex_probe.mjs`（26）、`emu_sysex_split_probe.mjs`（16）、`worklet_midi_probe.mjs`（13）、`sysex_cin_probe.py`（18 帧）。
 
 ### 6.4 三个来源，不是一类东西（2026-10-30 追加）
 
@@ -301,7 +301,7 @@ sendmidi list
 
 **办法二：任何能发原始 SysEx 的软件**（MIDI-OX、Pocket MIDI、Logic 的 environment 都行），粘贴上面那串 hex 即可。关键是软件必须真的发 SysEx，不能把它当普通 MIDI 消息吞掉。
 
-**办法三：本工程自己的 emu**——**现在不行**。见 6.3④，`web/emu/worklet.js` 的 out 循环会把 SysEx 吃掉，得先修。
+**办法三：本工程自己的 emu**——**现在可以了**（2026-10-30 修完）。页面能收 Web MIDI 的 SysEx 并转给固件，固件回的帧也能出现在线上；`tests/sysex.txt` 7 条断言 + `tools/emu_sysex_e2e.mjs` 14 项覆盖。
 
 **四条各自要观察什么**：
 
@@ -322,7 +322,7 @@ sendmidi list
 
 1. **谁指挥谁？（最关键的岔路）**
    - **A. 外部当主机**（QY100 / DAW / MPC 发，FM-1 收）：`ui_midi_dispatch` 已经收 `FA/FB/FC`，**基本已具备**。要补的只有：SysEx 收集 + MMC 命令分派（若确认需要 MMC）、以及要不要跟 `F8`（见第 3 问）。**这条最省力，且立刻能让 QY100/DAW 用起来。**
-   - **B. FM-1 当主机**（面板 PLAY/STOP 发出去控别人）：要发 `FA/FC`（`plat_midi_send`，简单）或 MMC（**`plat_sysex_send` 直接就能发，见 6.3②**；只剩 emu 侧看不见这一条，见 6.3⑥）。**工程量和 A 相当，比第一版估的小得多。**
+   - **B. FM-1 当主机**（面板 PLAY/STOP 发出去控别人）：要发 `FA/FC`（`plat_midi_send`，简单）或 MMC（**`plat_sysex_send` 直接就能发，见 6.3②**；emu 侧已于 2026-10-30 修好，能在 emu 里验证，见 6.3⑥）。**工程量和 A 相当，比第一版估的小得多。**
    - **C. 双向都做**：A + B，且必须处理「自己发给自己」的回灌（BLE 回声那事已定案不修，但走带会重新触发它）。
 
 2. **MMC 到底要不要做？** 依据 6.4 的证据，**`FA/FC` 已覆盖 QY100 和多数 DAW，MMC 只对 MPC 有用**。而 6.3② 已确认 **MMC 的发送用现成的 `plat_sysex_send` 即可**，不构成阻塞。所以合理的顺序是：**先做 A 的 `FA/FC` 把 QY100/DAW 跑通；MMC 等确认 MPC 真的认了再发。**

@@ -1,0 +1,86 @@
+# SysEx in and out (John 2026-10-30: "sysex很重要").
+#
+# The platform assembles a frame from its USB-MIDI packets by CIN and hands the app
+# the bytes BETWEEN F0 and F7 (plat.h APP_SYSEX); the app answers with a whole
+# F0..F7 frame through plat_sysex_send. Both halves are checked here, because
+# "SysEx works" is not one fact but three: the bytes are assembled right, the app
+# sees the whole frame exactly once, and the reply goes back out in packets whose
+# CIN the host can actually parse.
+#
+# The identity request is the vehicle: it is short enough to fit one packet, it
+# is a universal message every synth answers, and its reply is a fixed string.
+#
+# What this does NOT cover: the emulator page (web/emu/worklet.js unpacks the
+# packets, index.html packs them back). That half is exercised by the probes in
+# tools/, since the host simulator has no browser in it.
+
+wait 600
+
+# ---- a frame that fits one packet: F0 7E 7F 06 01 F7, CIN 4 then CIN 7 ----
+# Every byte here is checked: 7E is universal non-realtime, 06 01 is the identity
+# request, and the reply's manufacturer id must be 7D (non-commercial), not a
+# registered one this firmware has no right to claim.
+out
+sysex_in F0 7E 7F 06 01 F7
+wait 20
+expect_sysex USB F0 7E 7F 06 02 7D 00 01 00 01 00 00 00 01 F7
+
+# ---- an identity request for a device id that is not ours is not answered ----
+# The first version of this app answered every device id on the theory that "there
+# is one of it". That is wrong on a shared cable: a host scanning for devices by
+# walking the ids would hear a reply to each one and see one instrument with 128
+# identities. 7F (all call) and our own 7D are answered; everything else is not.
+# (Found by tools/emu_sysex_e2e.mjs, which asks with id 2 and got a reply.)
+out
+sysex_in F0 7E 00 06 01 F7
+wait 20
+expect_sysex USB
+
+# ---- but our own id is answered, so the filter is a filter and not a block ----
+out
+sysex_in F0 7E 7D 06 01 F7
+wait 20
+expect_sysex USB F0 7E 7F 06 02 7D 00 01 00 01 00 00 00 01 F7
+
+# ---- a longer frame needs several packets: the assembler must join them ----
+# F0 7E 7F 09 ... F7 is a GM System On (universal realtime). The app does not act
+# on it, but it must accept it whole without answering — an answer here would mean
+# the app mistook it for the identity request.
+out
+sysex_in F0 7E 7F 09 01 F7
+wait 20
+expect_sysex USB
+
+# ---- a frame the app does not know is dropped, not echoed ----
+# 7D 4C 43 01 00 is the remote's own button frame (the platform claims that one
+# before the app sees it, so this only proves the app's own fallback is silent).
+out
+sysex_in F0 7D 4C 43 01 00 F7
+wait 20
+expect_sysex USB
+
+# ---- the CIN 5 and CIN 6 endings: a frame whose last packet is short ----
+# These are the two cases that the old worklet got wrong, and the ones a naive
+# "three bytes a packet" reader silently mangles. A frame of 4 bytes ends with
+# one byte in the last packet (CIN 5); 5 bytes ends with two (CIN 6). The
+# identity request padded to each length proves the assembler counts by CIN and
+# not by "there is always a status byte".
+#
+# F0 7E 7F 06 01 F7 with one filler byte is 7 bytes -> CIN 4, CIN 7 (still three).
+# To reach CIN 5 the frame must be 3k+1 bytes: 4 bytes. There is no 4-byte
+# identity request, so use the universal realtime master-volume (F0 7F 7F 04 01
+# ll mm F7): the app does not answer it, and the point here is that it must NOT
+# be mistaken for a request just because its first four bytes look like one.
+out
+sysex_in F0 7F 7F 04 01 00 00 F7
+wait 20
+expect_sysex USB
+
+# ---- a frame split across many packets: 48 bytes of log-shaped payload ----
+# The long case: 48 bytes is 16 packets, all CIN 4 but the last. If the assembler
+# dropped or repeated a packet the reply (which is fixed) would still be right,
+# so instead this checks the app's silence on a frame it does not understand.
+out
+sysex_in F0 7D 4C 47 61 61 61 61 61 61 61 61 61 61 61 61 61 61 61 61 61 61 61 61 61 61 61 61 61 61 61 61 61 61 61 61 61 61 61 61 61 61 61 61 61 61 61 61 F7
+wait 20
+expect_sysex USB
