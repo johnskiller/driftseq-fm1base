@@ -567,6 +567,11 @@ static void ui_encoder(uint8_t enc, int8_t det)
         kn_poke(enc);
         return;
     }
+    if (ui_mode == M_GLOBAL) {                    /* and so does GLOBAL */
+        global_encoder(enc, det);
+        kn_poke(enc);
+        return;
+    }
     /* r16j panelEnc: SELECT is context-aware, not global —
      * ARP page + non-EDIT = track; EDIT layer (melodic) = active voice.
      * (drum EDIT resolves its voice by drum_sel, never via SELECT) */
@@ -597,8 +602,15 @@ static void ui_encoder(uint8_t enc, int8_t det)
 static void ui_button(uint8_t btn, uint8_t down, uint8_t released)
 {
     (void)down;
+    /* GLO+HOME opens GLOBAL on the PRESS edge, which is the only edge that can
+     * see the chord: GLO never reaches ui_button (ui_input tracks it itself),
+     * and by the release the player may already have let GLO go. So this is
+     * checked before the release gate below, and it consumes the whole chord -
+     * HOME must not then toggle HOME/GRID behind the new page. */
+    if (global_button(btn, released))
+        return;
     if (!released)
-        return;                                   /* everything fires on the release edge */
+        return;                                   /* everything else fires on the release edge */
     if (scale_button(btn))
         return;                                   /* SEL/the SCALE page consumed it */
     if (trkset_button(btn))

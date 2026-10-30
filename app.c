@@ -53,8 +53,9 @@ typedef struct {
     uint32_t magic;
     int8_t octave;                       /* -2 .. +2 */
     uint8_t wave;                        /* 0 sine, 1 triangle */
-    uint8_t ble_off;                     /* Bluetooth switched off (REC held); 0, the default: on */
-    uint8_t rsv[1];
+    uint8_t ble_off;                     /* Bluetooth switched off; 0, the default: on */
+    uint8_t gm_on;                       /* the local GM synth is fed; 1, the default: on */
+    uint8_t rsv[2];
 } settings_t;
 static settings_t set;
 static uint8_t set_dirty;                /* changed since the last save: SAVE is lit */
@@ -126,19 +127,26 @@ static void gm_start(void)
     eas_ok = 1;
 }
 
-static void gm_stop(void)                        /* all notes off, EAS kept (a panic, not a shutdown) */
+static uint32_t gm_noteons, gm_alloff;           /* what EAS was actually given */
+/* The GLOBAL page's GM switch: 1 = feed the synth (kept in set.gm_on, so it
+ * survives a power cycle). Read by the drain below. */
+static uint8_t glo_gm_on;
+static void gm_panic(void)                        /* all notes off, EAS kept (a panic, not a shutdown) */
 {
     static const uint8_t cc[3] = {0xB0, 123, 0};
     if (!eas_ok)
         return;
     EAS_WriteMIDIStream(eas_data, eas_stream, (EAS_U8 *)cc, 3);
+    gm_alloff++;
 }
 
 static void gm_on(uint8_t ch, uint8_t note, uint8_t vel)
 {
     uint8_t b[3] = {(uint8_t)(0x90u | (ch & 15u)), note, vel};
-    if (eas_ok)
+    if (eas_ok) {
         EAS_WriteMIDIStream(eas_data, eas_stream, b, 3);
+        gm_noteons++;
+    }
 }
 static void gm_off(uint8_t ch, uint8_t note)
 {
@@ -290,7 +298,7 @@ void app_panic(void)
 {
     voice_note = -1;
     voice_level = 0.0f;
-    gm_stop();
+    gm_panic();
 }
 
 /* --------------------------------------------------------------- settings --- */
@@ -300,6 +308,7 @@ static void settings_defaults(void)
     set.octave = 0;
     set.wave = 0;
     set.ble_off = 0;
+    set.gm_on = 1;
 }
 
 /* ---------------------------------------------------------------- engine --- */
@@ -366,14 +375,20 @@ static void engine_drain(void)
                 plat_midi_send(pkt, to);
         }
         eng_sent += n;
-        if ((st & 0xF0u) == 0x90u)
-            gm_on(st & 15u, (uint8_t)(pkt >> 16), (uint8_t)(pkt >> 24));
-        else if ((st & 0xF0u) == 0x80u)
-            gm_off(st & 15u, (uint8_t)(pkt >> 16));
-        else if ((st & 0xF0u) == 0xB0u)
-            gm_cc(st & 15u, (uint8_t)(pkt >> 16), (uint8_t)(pkt >> 24));
-        else if ((st & 0xF0u) == 0xC0u)
-            gm_pc(st & 15u, (uint8_t)(pkt >> 16));
+        /* The GM switch is a LISTENER switch: off stops the feed here and
+         * nowhere else (ui_global.c sends CC123 as it closes, so nothing is left
+         * holding a note). The wire links above are unaffected - routing is
+         * per-track and the synth is not one of its destinations. */
+        if (glo_gm_on) {
+            if ((st & 0xF0u) == 0x90u)
+                gm_on(st & 15u, (uint8_t)(pkt >> 16), (uint8_t)(pkt >> 24));
+            else if ((st & 0xF0u) == 0x80u)
+                gm_off(st & 15u, (uint8_t)(pkt >> 16));
+            else if ((st & 0xF0u) == 0xB0u)
+                gm_cc(st & 15u, (uint8_t)(pkt >> 16), (uint8_t)(pkt >> 24));
+            else if ((st & 0xF0u) == 0xC0u)
+                gm_pc(st & 15u, (uint8_t)(pkt >> 16));
+        }
         i += n;
     }
     if (i) {                                       /* drop what went out */
@@ -417,10 +432,28 @@ static void engine_init(void)
 void app_init(void)
 {
     if (plat_store_load(OBJ_SETTINGS, &set, sizeof set) != (int)sizeof set || set.magic != SET_MAGIC
-        || set.octave < -2 || set.octave > 2 || set.wave > 1u || set.ble_off > 1u)
+        || set.octave < -2 || set.octave > 2 || set.wave > 1u || set.ble_off > 1u
+        || set.gm_on > 1u)
         settings_defaults();
+    /* The synth's feed gate, from the settings. The radio needs nothing here:
+     * the platform starts it from APP_BLE_AT_BOOT (app.h -> template_ble_off ->
+     * this same record), and telling it twice would only race the boot. */
+    glo_gm_on = set.gm_on;
     engine_init();
     gm_start();                              /* the GM synth; on failure eas_ok stays 0 and the app runs beep-only */
+}
+
+/* Write the settings record if anything changed since the last write. Called
+ * when the GLOBAL page closes and from the SAVE menu's own commit: flash is
+ * 4 KiB-erase, so writing on every detent would be a wear problem, and a
+ * settings page is exactly the place where "changed a lot, then walked away"
+ * is the normal shape of an edit. */
+void set_commit(void)
+{
+    if (!set_dirty)
+        return;
+    if (plat_store_save(OBJ_SETTINGS, &set, sizeof set) == 0)
+        set_dirty = 0;
 }
 
 /* --------------------------------------------------------------------- UI --- */
@@ -547,6 +580,14 @@ static void octave_step(int32_t d)
 }
 
 int template_ble_off(void) { return set.ble_off; }
+/* the settings page's own accessors: the record is the page's store, and the
+ * page must not reach into a static (it is included into this unity unit, so it
+ * *could*, which is exactly why these exist - the next person should see the
+ * contract, not a name that happens to resolve) */
+uint8_t set_ble_off(void) { return set.ble_off; }
+void set_ble_set(uint8_t v) { set.ble_off = v; set_dirty = 1; }
+uint8_t set_gm_on(void) { return set.gm_on; }
+void set_gm_set(uint8_t v) { set.gm_on = v; set_dirty = 1; }
 
 /* REC held a second: Bluetooth off or on (kept with the settings, so it stays so at the next power-on) */
 static void ble_toggle(void)
@@ -604,6 +645,9 @@ static void ble_device_button(void)
 #include "ui/ui_scale.c"
 #include "ui/ui_trkset.c"          /* TRACK SET: after ui_scale (k3_state_slider, txt_*)
                              * and before ui_edit (its routing calls in) */
+#include "ui/ui_global.c"          /* GLOBAL: after ui.c (glo_held, key_shift, midi_vel)
+                             * and ui_trkset (nothing shared, but the order of the pages
+                             * reads better in the header's dot order) */
 #include "ui/ui_edit.c"
 
 void app_input_only(void)
@@ -694,6 +738,27 @@ int app_expect(const char *what, int *got)
         *got = TRK()->swing_amt;
     else if (!strcmp(what, "ts_gswing"))         /* K4: the global it multiplies by */
         *got = eng.global_swing;
+    else if (!strcmp(what, "bpm"))
+        *got = (int)(eng.bpm + 0.5);
+    else if (!strcmp(what, "sel_track"))
+        *got = (int)sel_track;
+    else if (!strcmp(what, "swing_global"))
+        *got = (int)eng.global_swing;
+    else if (!strcmp(what, "swing_track"))
+        *got = (int)eng.pat.track[sel_track].swing_amt;
+    else if (!strcmp(what, "gl_row"))
+        *got = (int)gl_row;
+    else if (!strcmp(what, "gl_gm"))
+        *got = glo_gm_on ? 1 : 0;
+    else if (!strcmp(what, "gm_noteons"))       /* EAS's own view: notes fed to it */
+        *got = (int)gm_noteons;
+    else if (!strcmp(what, "gm_reset")) {        /* zero the two counters (a window) */
+        gm_noteons = gm_alloff = 0;
+        *got = 0;
+        return 1;                                /* handled: a window, not a value */
+    }
+    else if (!strcmp(what, "gm_alloff"))        /* CC123 sent to EAS, ever */
+        *got = (int)gm_alloff;
     else if (!strcmp(what, "jam_used"))          /* how much the jam ring has taken: 0 = keys auditioned only */
     {
         int t2, used = 0;

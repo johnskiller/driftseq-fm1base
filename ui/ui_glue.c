@@ -62,6 +62,14 @@ static uint8_t key_black_id(uint8_t ord);
 static uint8_t jam_menu;
 static uint8_t jam_menu_sel;
 static uint16_t jam_menu_ttl;
+/* The GLOBAL page (ui_global.c, included after every other page because ui.c
+ * and ui_edit.c both call into it while ui_global itself needs their state:
+ * glo_held, key_shift, midi_vel, txt_*, ui_draw_footer). */
+static uint8_t global_button(uint8_t btn, uint8_t released);
+static void global_encoder(uint8_t enc, int8_t det);
+static uint8_t global_key(uint8_t key, uint8_t down);
+static void draw_global(void);
+
 static void jam_menu_act(uint8_t which);
 static void jam_menu_close(void);
 

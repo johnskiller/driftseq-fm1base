@@ -94,11 +94,11 @@ sizeof(ds_pattern) 17,616 B
 固件构建（`build.py`，最后一次 = Track Settings 之后）：
 
 ```
-image 518,876 B of 581,564   余 62,688
+image 520,364 B of 581,564   余 61,200
 RAM   .data+.bss 68,612 B of 98,304   余 29,692
 pool  254,776 B of 344,064            余 89,288
-fwsc  611,547 B, identity FM-1_9200  md5 d0380536（未刷机）
-wasm  398,289 B  md5 934e0b2a（8930 HTTPS / 8933 HTTP 均在发）
+fwsc  611,547 B, identity FM-1_9200  md5 9a07cb18（未刷机）
+wasm  401,952 B  md5 11cbc614（8930 HTTPS / 8933 HTTP 均在发）
 ```
 
 Track Settings 一页的代价（实测，9807888 → 现 HEAD 两次真建）：**image 513,500 → 518,124 = +4,624 B flash**，**pool 254,760 → 254,776 = +16 B RAM**（`mono_note[16]` + gate/live 各 +1 字节的 `ch` 字段）。构成：128 条 GM 名表 + 9 条鼓组名 ≈1.5 KB、页面绘制 ≈1.2 KB、`ds_route_sync`+MONO+capture-channel ≈0.5 KB、探针与 hint 其余。
@@ -256,6 +256,7 @@ AC79_SDK=/tmp/fw-AC79_AIoT_SDK JIELI_TOOLCHAIN=/home/john/.jieli/toolchain \
 | CHANNEL | `ds_track.channel` | 0..15（屏显 1..16），改到 9 即鼓轨 | `CHANNEL  10` |
 | PROGRAM | `ds_track.prog` | 0..127 | 旋律轨：`039 SYNTH BASS 1`（自建 128 条 GM 缩写名表）；**鼓轨（CH=10）：`025 ELECTRONIC KIT`**（program 在鼓通道选的是鼓组，不是音色） |
 | ROUTE | `ds_track.route` | USB / BLE / USB+BLE（**只管线缆**，GM 永远收） | `USB` `BLE` `USB+BLE` |
+| ~~SWING~~ | ~~`swing_amt`~~ | **已移到 GLOBAL 页**（2026-10-30）：global×trk 是同一个数，放在轨道页读成了轨道控制 | — |
 | VOICE | `ds_track.voice_mode` | POLY / MONO | `POLY` `MONO` |
 | SWING | `ds_track.swing_amt` | 0..100 步进 5 | `100%` |
 
@@ -263,9 +264,36 @@ AC79_SDK=/tmp/fw-AC79_AIoT_SDK JIELI_TOOLCHAIN=/home/john/.jieli/toolchain \
 - 没有 global swing 入口时 `swing_amt` 恒乘 0 —— 这是它此前全线失效的原因，现在 K4 直接写 `eng.global_swing`
 - 下半屏 = **CHANNEL MAP**：16 格，实心=本轨，亮数字空心=别的轨占着，暗=空闲
 - 底行只回答一个本页其它地方答不出的问题：**谁的 PROG 在这条通道上算数**（`2c21d00` 之后的 owner 规则，见下节）。本轨是 owner → `SHARED WITH T1 T2` / `NO OTHER TRACK SOUNDS`；本轨不是 owner → `T3 SETS THE SOUND`（或 `EMPTY, T3 SETS THE SOUND`）。空轨不算"共用"：11 条从没录过的默认轨和 bass 同占 ch0，但它们不出声也不该占通道的音色
-- 顶栏 `h.page = 3`（HDR_DOTS 仍 5；曾试 6 但越出右边界，回退）
+- 顶栏 `h.page = 3`；**HDR_DOTS 5 → 6**（GLOBAL 占第 6 点）：点距 6px→5px，六点落在 211..236；6px 会算到 241 被切掉
 - **MUTE/SOLO 改成单字母底标**（`hdr_t.badge` / `badge_c`，2026-10-30）：原先拼在 ctx 里成 `MELODIC MUTE`，同色同字号，状态读成了名字的一部分。现在是 **M / S 单字母药丸**，与 hero 列同一字形同一颜色（`HERO_MS = RGB565(224,160,64)`，两边共用一个宏）。药丸 = 一个字形 + 左右各 4px = 14px 宽，x194..208，页面点从 211 起。字母**画两遍**：`cv_text` 是覆盖率混合，5px 宽的 M 在亮橙上只叠到 60%，笔画变橄榄色糊在底里（vision 读成 "H"）；画两遍覆盖率平方，笔画核心落到 TB_BG、边缘留一个软像素
+- **行数 5 → 4**（SWING 移走）：channel map 上移到 128/142..162，共享行 170
 - **行字号 12px → 16px**（`TS_Y0 30` / `TS_PITCH 22`，标签 FONT_S、值 FONT_B），五行 y30..140，channel map 下移到 144/158..178，底行 186。量得每行墨迹 11px 高，值最右 x=216，不出边
+## GLOBAL 页（2026-10-30）
+
+入口 **GLO+HOME**（按下沿），出口裸 HOME（松手沿）。John 的定调："入口用 GLO+HOME，FX 和 LFO 都想留作他用。反正 GLOBAL 不是很频繁"。第 6 个页面点，`h.page = 4`。
+
+| 行 | 引擎字段 | 步进 | 备注 |
+|---|---|---|---|
+| TEMPO | `eng.bpm` 20..300 | 1 BPM，GLO 时 10 | `ds_set_bpm` 之前**全仓零调用**，tempo 在此之前不可改 |
+| SWING | `eng.global_swing` | 1，GLO 时 10 | 从 TRACK SET K4 迁来 |
+| TRK SWING | `pat.track[sel].swing_amt` | 1，GLO 时 10 | **与上者是同一个数**：`global × trk × 0.5`，页面上写明了 |
+| GM SYNTH | `set.gm_on` → `glo_gm_on` | 开关 | 见下 |
+| BLUETOOTH | `set.ble_off` | 开关 | 与 `plat_ble_enable` 同步 |
+
+- **K1 走行**（死停 0..4）、**K2 改值**、**K3 换轨**（TRK SWING 的主语）、K4 空
+- **TAP TEMPO = 最右白键（key 26 / G5）**：按下沿，取最近 4 个间隔均值，`60000/mean`；超过 2 s 视为新测量；纯手调 tempo 会清空 tap 平均（否则下一次 tap 会跳回旧值）。测试里 `tapkey` 自身占 90 ms，500 ms 间隔要写 410 的 wait
+- **本页按键只试听、不写 jam**（同 TRACK SET）
+- 5 行 y30 + 24*i，band `cv_rect(4, y-6, 232, 21, RGB565(26,26,34))`，与 TRACK SET 同一语法
+
+### GM 开关 = 监听开关，不是静音
+`app.c` 的 drain 里四个 `gm_*` 被 `if (glo_gm_on)` 包住：关掉只是**不再喂** EAS。但只停喂会挂音——关闭瞬间正在响的音，它的 note-off 排在 `eng.out` 后面，等送到时接收端已经不听了，EAS 没有看门狗，声部会一直渲染。所以关闭时**先发 CC123 再关闸**（`gm_panic()`，原本就叫 `gm_stop`，改名是因为 panic 才是它的语义）。恢复时不重发 PC：`sent_prog` 不清，因为 CC123 不是 reset，接收端的音色状态没变。实测：关掉后整轮播放对 EAS 零 note-on，重新打开后计数恢复。
+
+### 设定持久化（此前完全缺失）
+`plat_store_save()` 在 driftseq 里**零调用**——`set_dirty` 置了位没人用，所有设定断电即丢。现在 `set_commit()` 在**退出 GLOBAL 页**时写（`OBJ_SETTINGS`），不在每个 detent 写：4 KiB 扇区擦写，设定页的正常形状就是"改一堆然后走开"。`settings_t` 加 `gm_on`，开机在 `app_init` 里恢复。**蓝牙不在这里恢复**：平台按 `APP_BLE_AT_BOOT` 自己起，重复告知只会和启动竞争。
+
+### 顶栏 6 点的坑
+`dx = 211 + i*6` 在 i=5 时是 241，出 240 屏；改 5px 间距（211..236）。**TRACK SET 的药丸右界 208** 仍安全。
+
 - **本页弹琴不写 jam**（`ui.c` 里 `uint8_t jam = (ui_mode != M_TRKSET)`）：键照样 `ds_live_on/off`（试听 PROGRAM、试听 ROUTE），只是不进 jam ring；GRID 上同一次按键仍然入 jam，所以这是页面属性不是键盘坏了
 
 ### 引擎侧同时落地（`2c21d00`、`d3092d9`）

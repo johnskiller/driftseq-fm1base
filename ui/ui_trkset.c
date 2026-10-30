@@ -24,18 +24,20 @@
  */
 static uint8_t ts_row;          /* 0..TS_NROW-1, dead-stop */
 
-#define TS_NROW 5
-/* 16px rows need a 22px pitch; five of them (y30..140) leave the channel map at
- * 144, its cells at 158..178 and the bottom line at 186, clear of the footer. */
+#define TS_NROW 4
+/* 16px rows need a 22px pitch. Four of them (y30..118) leave the channel map at
+ * 128, its cells at 142..162, the shared line at 170 and the bottom line at 188.
+ * SWING left this page on 2026-10-30: it is the second half of one global number
+ * (global x track x 0.5), so half of it on a track page read as a track control.
+ * Both halves live on GLOBAL now, one above the other. */
 #define TS_Y0    30
 #define TS_PITCH 22
 #define TS_CH   0
 #define TS_PROG 1
 #define TS_ROUTE 2
 #define TS_VOICE 3
-#define TS_SWING 4
 
-static const char *const TS_LABEL[TS_NROW] = {"CHANNEL", "PROGRAM", "ROUTE", "VOICE", "SWING"};
+static const char *const TS_LABEL[TS_NROW] = {"CHANNEL", "PROGRAM", "ROUTE", "VOICE"};
 
 /* GM Level 1 program names, abbreviated to what fits (FONT_T is caps-only, and
  * the value column starts at x=96: 17 characters is the budget). Kept in the
@@ -119,13 +121,6 @@ static void trkset_encoder(uint8_t enc, int8_t det)
         ts_row = (uint8_t)v;
         return;
     }
-    if (enc == EN_K4) {                          /* GLOBAL swing, always live */
-        int v = (int)eng.global_swing + det * 5;
-        if (v < 0) v = 0;
-        if (v > 100) v = 100;
-        eng.global_swing = (uint8_t)v;
-        return;
-    }
     if (enc == EN_K3) {                          /* MUTE/SOLO, as everywhere */
         k3_state_slider(tr, sel_track, det);
         return;
@@ -170,13 +165,6 @@ static void trkset_encoder(uint8_t enc, int8_t det)
             tr->voice_mode = (uint8_t)v;
             eng.mono_note[sel_track] = 0xFF;     /* the other mode holds nothing */
         }
-        break;
-    }
-    case TS_SWING: {
-        int v = (int)tr->swing_amt + det * 5;
-        if (v < 0) v = 0;
-        if (v > 100) v = 100;
-        tr->swing_amt = (uint8_t)v;
         break;
     }
     default: break;
@@ -288,17 +276,9 @@ static void draw_trkset(void)
             val = v;
         }
         cv_text(100, y, &FONT_B, val, BRIGHTTX);
-        if (i == TS_SWING && !eng.global_swing) {
-            /* per-track swing is a WEIGHT (global x track x 0.5), so with the
-             * global at zero this percentage produces nothing. Say why here
-             * rather than let the row read as a live control; K4 turns it up and
-             * the hint disappears, which is the whole lesson. */
-            int w = cv_text_w(&FONT_B, val);
-            cv_text(100 + w + 8, y, &FONT_S, "GLOBAL 0", RGB565(150, 104, 48));
-        }
     }
     /* ---- the channel map: who else lives on each channel ---- */
-    cv_text(8, 144, &FONT_T, "CHANNELS IN USE", C_GRAY);
+    cv_text(8, 128, &FONT_T, "CHANNELS IN USE", C_GRAY);
     {
         int c;
         for (c = 0; c < 16; c++) {
@@ -313,28 +293,28 @@ static void draw_trkset(void)
                     other[no++] = (uint8_t)t;
             }
             if (c == (int)tr->channel) {         /* this track's own channel */
-                cv_rect(x, 158, 12, 20, TB_TX);
+                cv_rect(x, 142, 12, 20, TB_TX);
                 fmt_int(n, c + 1);
-                cv_text(x + ((c >= 9) ? 1 : 3), 164, &FONT_T, n, TB_BG);
+                cv_text(x + ((c >= 9) ? 1 : 3), 148, &FONT_T, n, TB_BG);
             } else if (users) {                  /* taken by someone else: bright digits,
                                                   * but a hollow cell. A filled cell would
                                                   * read as "mine" at a glance (both were
                                                   * RGB 58-ish and indistinguishable in a
                                                   * pixel scan), so the fill is reserved
                                                   * for the track being edited. */
-                cv_rect(x, 158, 12, 1, RGB565(88, 88, 100));
-                cv_rect(x, 177, 12, 1, RGB565(88, 88, 100));
-                cv_rect(x, 158, 1, 20, RGB565(88, 88, 100));
-                cv_rect(x + 11, 158, 1, 20, RGB565(88, 88, 100));
+                cv_rect(x, 142, 12, 1, RGB565(88, 88, 100));
+                cv_rect(x, 161, 12, 1, RGB565(88, 88, 100));
+                cv_rect(x, 142, 1, 20, RGB565(88, 88, 100));
+                cv_rect(x + 11, 142, 1, 20, RGB565(88, 88, 100));
                 fmt_int(n, c + 1);
-                cv_text(x + ((c >= 9) ? 1 : 3), 164, &FONT_T, n, RGB565(214, 214, 224));
+                cv_text(x + ((c >= 9) ? 1 : 3), 148, &FONT_T, n, RGB565(214, 214, 224));
             } else {                             /* free: outline only, dim digits */
-                cv_rect(x, 158, 12, 1, RGB565(40, 40, 50));
-                cv_rect(x, 177, 12, 1, RGB565(40, 40, 50));
-                cv_rect(x, 158, 1, 20, RGB565(40, 40, 50));
-                cv_rect(x + 11, 158, 1, 20, RGB565(40, 40, 50));
+                cv_rect(x, 142, 12, 1, RGB565(40, 40, 50));
+                cv_rect(x, 161, 12, 1, RGB565(40, 40, 50));
+                cv_rect(x, 142, 1, 20, RGB565(40, 40, 50));
+                cv_rect(x + 11, 142, 1, 20, RGB565(40, 40, 50));
                 fmt_int(n, c + 1);
-                cv_text(x + ((c >= 9) ? 1 : 3), 164, &FONT_T, n, RGB565(74, 74, 82));
+                cv_text(x + ((c >= 9) ? 1 : 3), 148, &FONT_T, n, RGB565(74, 74, 82));
             }
             if (c == (int)tr->channel) {         /* and the sharing line below */
                 /* A local buffer, not txt_pool: this line can name up to 15
@@ -394,7 +374,7 @@ static void draw_trkset(void)
                     }
                     }
                 }
-                cv_text(8, 186, &FONT_T, s, no ? YELLOW : C_GRAY);
+                cv_text(8, 170, &FONT_T, s, no ? YELLOW : C_GRAY);
             }
         }
     }

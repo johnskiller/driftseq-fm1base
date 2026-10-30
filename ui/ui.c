@@ -7,7 +7,7 @@
  * v1 scope (b42a5eb): step rec/play/edit + USB out. EAS GM = batch 2. */
 
 /* ---- UI state (emu globals parity) ---- */
-enum { M_HOME = 0, M_GRID, M_ARP, M_SCALE, M_TRKSET };
+enum { M_HOME = 0, M_GRID, M_ARP, M_SCALE, M_TRKSET, M_GLOBAL };
 static uint8_t ui_mode = M_HOME;
 static uint8_t focus_layer;                  /* 0 base 1 EDIT (GRID only) */
 static uint8_t cursor;                       /* 0..63, dead-stop */
@@ -111,6 +111,7 @@ static void ui_draw(void)
         if (is_drum_trk()) draw_grid_drum(); else draw_grid_melodic();
     } else if (ui_mode == M_SCALE) draw_scale();
     else if (ui_mode == M_TRKSET) draw_trkset();
+    else if (ui_mode == M_GLOBAL) draw_global();
     else draw_arp();
 }
 
@@ -187,6 +188,10 @@ static uint8_t midi_vel = 100;                   /* the note being dispatched no
  * EDIT layer: keys edit voices (batch 3) — no grid writes now. */
 static void panel_key_handler(uint8_t key, uint8_t down)
 {
+    if (ui_mode == M_GLOBAL) {                        /* GLOBAL: audition + tap tempo */
+        global_key(key, down);
+        return;
+    }
     if (scale_key_hook(key, down))
         return;                                       /* the scale/OFC layer consumed it */
     if (ui_mode != M_GRID) {                          /* non-grid: live audition only */

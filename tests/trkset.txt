@@ -24,14 +24,14 @@ tap ENV
 wait 20
 expect mode 4
 
-# --- K1 walks the five rows, dead stop at both ends ---
+# --- K1 walks the rows, dead stop at both ends (four since SWING left) ---
 expect ts_row 0
 turn K1 9
 wait 10
-expect ts_row 4
+expect ts_row 3
 turn K1 9
 wait 10
-expect ts_row 4
+expect ts_row 3
 turn K1 -9
 wait 10
 expect ts_row 0
@@ -142,38 +142,17 @@ turn K2 -1
 wait 10
 expect ts_voice 0
 
-# --- SWING: this track's weight, 0..100 in steps of 5 ---
-turn K1 1
+# --- SWING left this page on 2026-10-30 ---
+# It is the second half of ONE number (global x track x 0.5), so half of it on a
+# track page read as a track control. Both halves are on the GLOBAL page now
+# (tests/global.txt asserts them). What stays here is the proof that the page
+# cannot reach them any more: K1 stops at the last row and K4 does nothing.
+turn K1 9
 wait 10
-expect ts_row 4
-expect ts_swing 100
-turn K2 9
+expect ts_row 3
+turn K4 20
 wait 10
-expect ts_swing 100
-turn K2 -60
-wait 10
-expect ts_swing 0
-shot trk_swing0.png
-# the row says the truth about its own zero: weight with no global makes nothing
-turn K2 1
-wait 10
-expect ts_swing 5
-turn K2 19
-wait 10
-expect ts_swing 100
-
-# --- K4: the global swing, which is what makes the row above audible ---
 expect ts_gswing 0
-turn K4 2
-wait 10
-expect ts_gswing 10
-turn K4 18
-wait 10
-expect ts_gswing 100
-turn K4 9
-wait 10
-expect ts_gswing 100
-shot trk_gswing.png
 turn K4 -20
 wait 10
 expect ts_gswing 0

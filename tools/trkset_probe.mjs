@@ -81,14 +81,14 @@ check(page.some((v, i) => v !== home[i]), 'ENV opens a different screen');
 /* Labels are at x=12..~60, values at x=96... Measuring only the label column
  * keeps the two apart. */
 {
-    const lb = bandsOf(textRows(page, 24, 146, 12, 60));
-    check(lb.length === 5, 'five label rows, one per 22px band', JSON.stringify(lb));
+    const lb = bandsOf(textRows(page, 24, 130, 12, 60));
+    check(lb.length === 4, 'four label rows, one per 22px band', JSON.stringify(lb));
     /* cv_text draws at the baseline y; 16px type starts 2px below it and its ink
      * is 11px tall, so a row drawn at y=30 starts at 32. Check the pitch (22px,
      * exact) and the ink height, which is what a drifted or doubled row breaks. */
-    const want = [32, 54, 76, 98, 120];
-    check(lb.length === 5 && lb.every(([a, b], i) => a === want[i] && b === a + 10),
-          'the five rows are 22px apart, each 11px tall', JSON.stringify(lb));
+    const want = [32, 54, 76, 98];
+    check(lb.length === 4 && lb.every(([a, b], i) => a === want[i] && b === a + 10),
+          'the four rows are 22px apart, each 11px tall', JSON.stringify(lb));
     let worst = 0, missing = 0;
     for (const y of want) {
         let last = -1;
@@ -107,7 +107,7 @@ check(page.some((v, i) => v !== home[i]), 'ENV opens a different screen');
 function bandTop(fb) {
     /* from y24: the band starts there (row 0 = TS_Y0-6) and the header's own
      * background is the SAME 565 value, so scanning earlier finds the header. */
-    for (let y = 24; y < 146; y++) if (px(fb, 8, y) === ROWBAND) return y;
+    for (let y = 24; y < 130; y++) if (px(fb, 8, y) === ROWBAND) return y;
     return -1;
 }
 {
@@ -123,7 +123,7 @@ function bandTop(fb) {
     check(a0 > 0, 'the edited row is marked with a band', 'y=' + a0);
     check(a1 === a0 + 22, 'K1 moves the highlight one row (22px)', a0 + ' -> ' + a1);
     check(a2 === a0 + 44, 'and again', a1 + ' -> ' + a2);
-    check(a3 === a0 + 88, 'K1 stops at the fifth row, it does not wrap', 'band at ' + a3);
+    check(a3 === a0 + 66, 'K1 stops at the fourth row, it does not wrap', 'band at ' + a3);
     check(a4 === a0, 'and stops at the first', 'band at ' + a4);
 }
 
@@ -135,7 +135,7 @@ function bandTop(fb) {
     const fill = (fb, idx) => {
         const x = 8 + idx * 14;
         let lit = 0;
-        for (let y = 158; y < 178; y++)
+        for (let y = 142; y < 162; y++)
             for (let xx = x; xx < x + 12; xx++) {
                 const v = px(fb, xx, y);
                 if (v === stored(24, 24, 32) || v === 0) continue;   /* background/TB_TX? see below */
@@ -158,7 +158,9 @@ function bandTop(fb) {
         return n;
     };
     check(ink(8) > 20, 'footer K1 says a word (ROW)', ink(8) + ' px');
-    check(ink(189) > 20, 'footer K4 says a word (SWING)', ink(189) + ' px');
+    /* K4 is blank since SWING moved to the GLOBAL page: assert the ABSENCE, so a
+     * stale label cannot come back without this failing. */
+    check(ink(189) === 0, 'footer K4 is blank (SWING moved to GLOBAL)', ink(189) + ' px');
 }
 
 /* ---------- the bottom line: whose PROG counts on this channel ----------
@@ -170,7 +172,7 @@ function bandTop(fb) {
     const inkWidth = (fb) => {
         let last = -1;
         for (let x = 0; x < W; x++)
-            for (let y = 184; y < 202; y++)
+            for (let y = 168; y < 186; y++)
                 if (px(fb, x, y) !== 0 && px(fb, x, y) !== ROWBAND) { last = x; break; }
         return last;
     };
@@ -231,7 +233,7 @@ function bandTop(fb) {
 press(6);                                   /* B_HOME */
 {
     const back = grab();
-    const rowsLeft = bandsOf(textRows(back, 24, 146, 12, 60)).length;
+    const rowsLeft = bandsOf(textRows(back, 24, 130, 12, 60)).length;
     check(rowsLeft !== 5 || back.some((v, i) => v !== page[i]), 'HOME leaves the page',
           'rows on the screen after HOME: ' + rowsLeft);
 }

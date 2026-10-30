@@ -348,11 +348,16 @@ static void ui_draw_footer(void)
         static const char *const FOOT_SCALE[4] = {"KIND", "KEY", "OFC", ""};
         for (k = 0; k < 4; k++)
             cv_text(FX[k], 6, &FONT_T, FOOT_SCALE[k], FOOT_GRAY);
+    } else if (ui_mode == M_GLOBAL) {
+        /* K1 row, K2 edit, K3 track (the TRK SWING row's subject), K4 free */
+        static const char *const FOOT_GLOBAL[4] = {"ROW", "EDIT", "TRACK", ""};
+        for (k = 0; k < 4; k++)
+            cv_text(FX[k], 6, &FONT_T, FOOT_GLOBAL[k], FOOT_GRAY);
     } else if (ui_mode == M_TRKSET) {
-        /* K1 row, K2 value, K3 the MUTE/SOLO slider it is everywhere else,
-         * K4 the GLOBAL swing (the one number this page edits that is not
-         * per-track, so it names itself rather than hiding behind the row) */
-        static const char *const FOOT_TRKSET[4] = {"ROW", "VALUE", "MUTE", "SWING"};
+        /* K1 row, K2 value, K3 the MUTE/SOLO slider it is everywhere else. K4 is
+         * blank: it was GLOBAL swing, which moved to the GLOBAL page where its
+         * other half (per-track weight) now sits beside it. */
+        static const char *const FOOT_TRKSET[4] = {"ROW", "VALUE", "MUTE", ""};
         for (k = 0; k < 4; k++)
             cv_text(FX[k], 6, &FONT_T, FOOT_TRKSET[k], FOOT_GRAY);
     } else if (glo_held && ui_mode != M_ARP) {
@@ -503,7 +508,7 @@ static int next_event_run(uint8_t t, uint8_t s, uint8_t len, uint8_t start)
 /* The colour the hero column's M and S share: one vocabulary for "this track is
  * not sounding as itself", on every screen that shows it. */
 #define HERO_MS RGB565(224, 160, 64)
-#define HDR_DOTS 5
+#define HDR_DOTS 6
 
 /* The one header bar every page shares.
  *
@@ -574,7 +579,11 @@ static void ui_draw_header(const hdr_t *h)
 
     if (h->dots) {
         for (i = 0; i < HDR_DOTS; i++) {
-            int dx = 211 + i * 6;
+            /* 6px pitch fits five dots (211..238); the sixth page needs 5px
+             * (211..236) or the last dot lands at 241 and is clipped off the
+             * 240px screen - which is exactly what happened when the GLOBAL page
+             * took the sixth dot. */
+            int dx = 211 + i * (HDR_DOTS > 5 ? 5 : 6);
             if (i == (int)h->page)
                 cv_rect(dx, 10, 3, 3, TB_TX);
             else {
