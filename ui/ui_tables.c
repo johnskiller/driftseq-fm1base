@@ -33,3 +33,43 @@ static uint16_t blend(uint16_t fg, uint16_t bg, uint8_t a)
                       ((g1 * (255u - a) + g2 * a) / 255u) << 5 |
                       ((b1 * (255u - a) + b2 * a) / 255u));
 }
+
+/* GM Level 1 program names, abbreviated to what fits. FONT_T is caps-only and
+ * the value column of TRACK SET's PROGRAM row starts at x=96 (17 characters),
+ * while the PRESET popup has the whole 240 px at FONT_M (10). One table, two
+ * readers, so it lives here with the other shared tables rather than in the file
+ * that happened to need it first. */
+static const char *const GM_PROG[128] = {
+    /*   0-  7 piano */      "ACOUSTIC GRAND", "BRIGHT PIANO", "ELECTRIC GRAND", "HONKY-TONK",
+                             "ELECTRIC PIANO", "E.PIANO 2", "HARPSICHORD", "CLAVINET",
+    /*   8- 15 chromatic */  "CELESTA", "GLOCKENSPIEL", "MUSIC BOX", "VIBRAPHONE",
+                             "MARIMBA", "XYLOPHONE", "TUBULAR BELLS", "DULCIMER",
+    /*  16- 23 organ */      "DRAWBAR ORGAN", "PERCUSSIVE ORG", "ROCK ORGAN", "CHURCH ORGAN",
+                             "REED ORGAN", "ACCORDION", "HARMONICA", "TANGO ACCORDION",
+    /*  24- 31 guitar */     "NYLON GUITAR", "STEEL GUITAR", "JAZZ GUITAR", "CLEAN GUITAR",
+                             "MUTED GUITAR", "OVERDRIVE GT", "DISTORTION GT", "GT HARMONICS",
+    /*  32- 39 bass */       "ACOUSTIC BASS", "FINGERED BASS", "PICKED BASS", "FRETLESS BASS",
+                             "SLAP BASS 1", "SLAP BASS 2", "SYNTH BASS 1", "SYNTH BASS 2",
+    /*  40- 47 strings */    "VIOLIN", "VIOLA", "CELLO", "CONTRABASS",
+                             "TREMOLO STRINGS", "PIZZICATO", "ORCH HARP", "TIMPANI",
+    /*  48- 55 ensemble */   "STRING ENSEMBLE", "STRINGS 2", "SYNTH STRINGS", "SYNTH STR 2",
+                             "CHOIR AAHS", "VOICE OOHS", "SYNTH VOICE", "ORCHESTRA HIT",
+    /*  56- 63 brass */      "TRUMPET", "TROMBONE", "TUBA", "MUTED TRUMPET",
+                             "FRENCH HORN", "BRASS SECTION", "SYNTH BRASS 1", "SYNTH BRASS 2",
+    /*  64- 71 reed */       "SOPRANO SAX", "ALTO SAX", "TENOR SAX", "BARITONE SAX",
+                             "OBOE", "ENGLISH HORN", "BASSOON", "CLARINET",
+    /*  72- 79 pipe */       "PICCOLO", "FLUTE", "RECORDER", "PAN FLUTE",
+                             "BLOWN BOTTLE", "SHAKUHACHI", "WHISTLE", "OCARINA",
+    /*  80- 87 synth lead */ "SQUARE LEAD", "SAWTOOTH LEAD", "CALLIOPE LEAD", "CHIFF LEAD",
+                             "CHARANG LEAD", "VOICE LEAD", "FIFTHS LEAD", "BASS + LEAD",
+    /*  88- 95 synth pad */  "NEW AGE PAD", "WARM PAD", "POLYSYNTH PAD", "CHOIR PAD",
+                             "BOWED PAD", "METALLIC PAD", "HALO PAD", "SWEEP PAD",
+    /*  96-103 synth fx */   "RAIN FX", "SOUNDTRACK FX", "CRYSTAL FX", "ATMOSPHERE FX",
+                             "BRIGHTNESS FX", "GOBLINS FX", "ECHOES FX", "SCI-FI FX",
+    /* 104-111 ethnic */     "SITAR", "BANJO", "SHAMISEN", "KOTO",
+                             "KALIMBA", "BAG PIPE", "FIDDLE", "SHANAI",
+    /* 112-119 percussive */ "TINKLE BELL", "AGOGO", "STEEL DRUMS", "WOODBLOCK",
+                             "TAIKO DRUM", "MELODIC TOM", "SYNTH DRUM", "REV CYMBAL",
+    /* 120-127 sound fx */   "FRET NOISE", "BREATH NOISE", "SEASHORE", "BIRD TWEET",
+                             "TELEPHONE", "HELICOPTER", "APPLAUSE", "GUNSHOT"
+};

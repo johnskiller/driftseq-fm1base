@@ -582,7 +582,12 @@ static void ui_encoder(uint8_t enc, int8_t det)
         sel_track = (uint8_t)next;
         return;
     }
-    if (enc == EN_ALGO || enc == EN_PRESET)
+    if (enc == EN_PRESET) {                      /* the voice of the current track,
+                                                  * popup while it turns */
+        preset_encoder(enc, det);
+        return;
+    }
+    if (enc == EN_ALGO)
         return;                                  /* BPM=ALGO: batch 3 (BPM→GLO 页待拍板) */
     if (ui_mode == M_ARP)
         ui_arp_encoder(enc, det);

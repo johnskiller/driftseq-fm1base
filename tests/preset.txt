@@ -1,0 +1,71 @@
+# The PRESET knob (EN_PRESET, the seventh encoder) picks the CURRENT track's
+# voice. It did nothing until John 2026-10-30: "现在的PRESETS旋钮还没有用上，这个
+# 旋钮应该是立刻选择当前track的音色的，旋转的时候屏幕要有提示，可以采取类似popup的
+# 样式，字体大一点，停止旋转后等待几秒popup关闭。可以用GLO+PRESETS加速".
+#
+# Three things are being pinned here: the program actually changes (and reaches
+# the wire, which is what makes the keys audition the voice you chose), the popup
+# says which voice it is, and the popup goes away on its own.
+wait 600
+
+# ---- it picks the current track's voice, and states it on the wire ----
+turn SELECT 3
+wait 20
+expect track 3                        # the demo's bass, ch0 program 38
+expect pz_ttl 0                       # nothing has been turned yet
+out
+turn PRESET 1
+wait 10
+expect pz_prog 39                     # one detent, one program
+expect pz_hash 35754                  # "040 SYNTH BASS 2"
+expect_out USB C0 27 00              # ch0 (0xC0) and program 39 (0x27)
+out
+turn PRESET -1
+wait 10
+expect pz_prog 38
+expect pz_hash 9361                   # "039 SYNTH BASS 1"
+expect_out USB C0 26 00
+out
+
+# ---- the popup names the neighbours too, so it says where in the bank you are
+# ("038 SLAP BASS 2" above "039 SYNTH BASS 1" is the bank's own order)
+turn PRESET -1
+wait 10
+expect pz_prog 37
+# 37 is index 37, one below the demo's 38
+expect pz_hash 18091                  # "038 SLAP BASS 2"
+out
+
+# ---- GLO accelerates: eight programs a detent ----
+press GLO
+wait 10
+turn PRESET 1
+wait 10
+expect pz_prog 45
+release GLO
+wait 10
+turn PRESET -1
+wait 10
+expect pz_prog 44                     # back to one a detent when GLO is up
+out
+
+# ---- dead stops, and a track on the drum channel picks a KIT ----
+turn SELECT -3
+wait 10
+expect track 0
+turn PRESET 1
+wait 10
+expect pz_prog 1
+# "002 KIT", not "002 BRIGHT PIANO": a program change lands on a channel, and
+# ch10 is drums
+expect pz_hash 15839
+expect_out USB C9 01 00
+out
+
+# ---- the popup closes by itself a few seconds after the last detent ----
+expect pz_ttl >1
+wait 2800
+expect pz_ttl 0
+
+# ---- the widest name in the bank still fits the screen ----
+expect pz_wmax <224

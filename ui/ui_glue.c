@@ -67,6 +67,13 @@ static uint8_t key_black_id(uint8_t ord);
  * two transfers of the same band every frame, which the host cannot show (it
  * keeps the last frame) and a real LCD shows as a flicker (John 2026-10-30:
  * "最底部有些闪烁，似乎footer和scanning重叠了"). */
+/* The PRESET popup: turn PRESETS and the chosen voice fills the middle of the
+ * screen in FONT_M for a few seconds, then the page comes back. State lives here
+ * for the same reason gl_page does - ui_draw() (ui.c, compiled at app.c:642)
+ * has to test it before ui_preset.c defines it at :650. */
+static uint16_t pz_ttl;                  /* frames left: 0 = no popup */
+static uint8_t  pz_trk;                  /* the track it named (the popup is about one) */
+static uint8_t  pz_prog;                 /* and the program, so a probe can read it */
 static uint8_t gl_page;                  /* GLOBAL: 0 = settings, 1 = the radio */
 static uint8_t gl_row;                   /* the row K1 is on (both pages) */
 static uint8_t jam_menu;
@@ -81,6 +88,13 @@ static uint8_t global_key(uint8_t key, uint8_t down);
 static void global_frame(void);
 static uint8_t global_save(uint8_t btn);
 static void draw_global(void);
+
+/* the PRESET popup (ui_preset.c) */
+static void preset_encoder(uint8_t enc, int8_t det);
+static void preset_draw(void);
+static uint16_t preset_ticks(void);
+static void preset_popup_text(char *b);
+static void preset_text(char *b, uint8_t prog, uint8_t is_kit);
 
 static void jam_menu_act(uint8_t which);
 static void jam_menu_close(void);

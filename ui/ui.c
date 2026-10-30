@@ -105,6 +105,17 @@ static void ui_draw(void)
 {
     if (jam_menu && jam_menu_ttl && --jam_menu_ttl == 0)
         jam_menu_close();                        /* 3 s idle: the footer is a readout again */
+    if (pz_ttl) {                             /* the PRESET popup owns the screen
+                                               * while it is up: it IS the answer
+                                               * to "which voice am I on". It draws
+                                               * the frame its count reaches 0 and
+                                               * the page comes back on the next
+                                               * one, so the last painted frame is
+                                               * never a half-updated page. */
+        pz_ttl--;
+        preset_draw();
+        return;
+    }
     cv_begin(240, 224, C_BLACK);              /* painters blit their own bands */
     if (ui_mode == M_HOME) draw_home();
     else if (ui_mode == M_GRID) {

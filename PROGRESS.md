@@ -94,7 +94,7 @@ sizeof(ds_pattern) 17,616 B
 固件构建（`build.py`，最后一次 = Track Settings 之后）：
 
 ```
-image 523,456 B of 581,564   余 58,108
+image 524,528 B of 581,564   余 57,036
 RAM   .data+.bss 68,612 B of 98,304   余 29,692
 pool  254,776 B of 344,064            余 89,288
 fwsc  611,547 B, identity FM-1_9200  md5 9a07cb18（未刷机）
@@ -310,6 +310,24 @@ John 2026-10-30：**"BLE的开关可以移到第二页，这样第一页空间�
 
 **链接行为什么要单独一行**：连上之后 btdev 停止扫描（`btdev_page` 只在 `BLE_DEV_OFF` 时维持 scan），`btdev_count()` 立刻归零。没有这行，光标会被挤回开关行，`SAVE` 再也按不到设备——**连得上，断不了**。测试把这个抓出来了（`SAVE` 连上后 `ble_dev==4` 但 `gl2_n==0`）。
 
+### PRESETS 旋钮 = 当前轨的音色（John 2026-10-30）
+
+**"现在的PRESETS旋钮还没有用上，这个旋钮应该是立刻选择当前track的音色的，旋转的时候屏幕要有提示，可以采取类似popup的样式，字体大一点，停止旋转后等待几秒popup关闭。可以用GLO+PRESETS加速"**
+
+`EN_PRESET` 是面板第七个编码器（在 ALGO 和 K1 之间），此前 `ui_encoder` 对 `EN_ALGO || EN_PRESET` 直接 return。现在：
+
+- **1 program / detent，GLO 按住 8 / detent**，0..127 死停。
+- **即刻生效**：每个 detent 走 `ds_send_prog()`，所以停着也能听见（这是 TRACK SET 那条 bug 的同一机制）。
+- **popup 占满屏**（`ui_preset.c`）：上行 `TRACK n` + 通道，中间三行——上下邻居灰、当前 `FONT_M` 白居中，底部在库两端时说 `START/END OF BANK`。
+- **150 帧（≈2.5 s）无输入自动关**，每个 detent 重新计时。
+- **鼓轨说 KIT 不说 voice**：PC 落在通道上，ch10 是鼓，`002 KIT` 而不是 `002 BRIGHT PIANO`。
+
+**两处"重复信息"被砍掉了**（按"同一信息只出现一处"）：初版有独立的大号 PROGRAM 数字块，但名字里已经带 `040`；初版上行写 `4 VOICE`，会被读成"四复音"。现在是 `TRACK 4` + `CH 1`。
+
+**尺寸实测**：128 个名字里最宽的是 `024 TANGO ACCORDION` = **218 px**（FONT_M，240 px 屏，左右各余 11）。`pz_wmax` 断言 <224 把这条锁住。
+
+**GM_PROG 表搬到 `ui_tables.c`**：PRESET 和 TRACK SET 的 PROGRAM 行读同一张表，两份会漂。
+
 ### 页脚不能"画两遍"（John 2026-10-30）
 
 **"GLOBAL page 2 scanning, 最底部有些闪烁，似乎footer和scanning重叠了"** —— 不是重叠，是**同一带每帧传了两次**。`draw_global2()` 先调 `ui_draw_footer()`（画共享的 `ROW EDIT` 并 `cv_blit(0,216)`），然后自己重画成 `DEVICE`、再 `cv_blit(0,216)`。host 只保留最后一帧所以看不出来，真机 LCD 就会先闪一下 `ROW EDIT`。
@@ -355,6 +373,24 @@ host 测试脚本把 HOME 的释放写在 GLO 之前，正好把这个 bug 藏�
 
 - **`gl_bt_set(set_ble_off() ? 0 : 1)` 参数反了**：`set_ble_off()` 为 1 表示已存 OFF，问 `? 0 : 1` 等于"已经 ON 的时候再要 ON"——开关永远关不掉。正确是 `gl_bt_set(set_ble_off())`。
 - **`const char *label = name;` 悬垂指针**：`name` 声明在 else 块内、`cv_text` 在块外读，第一次画第 2 页就 segfault。缓冲区提到循环层。
+
+### PRESETS 旋钮 = 当前轨的音色（John 2026-10-30）
+
+**"现在的PRESETS旋钮还没有用上，这个旋钮应该是立刻选择当前track的音色的，旋转的时候屏幕要有提示，可以采取类似popup的样式，字体大一点，停止旋转后等待几秒popup关闭。可以用GLO+PRESETS加速"**
+
+`EN_PRESET` 是面板第七个编码器（在 ALGO 和 K1 之间），此前 `ui_encoder` 对 `EN_ALGO || EN_PRESET` 直接 return。现在：
+
+- **1 program / detent，GLO 按住 8 / detent**，0..127 死停。
+- **即刻生效**：每个 detent 走 `ds_send_prog()`，所以停着也能听见（这是 TRACK SET 那条 bug 的同一机制）。
+- **popup 占满屏**（`ui_preset.c`）：上行 `TRACK n` + 通道，中间三行——上下邻居灰、当前 `FONT_M` 白居中，底部在库两端时说 `START/END OF BANK`。
+- **150 帧（≈2.5 s）无输入自动关**，每个 detent 重新计时。
+- **鼓轨说 KIT 不说 voice**：PC 落在通道上，ch10 是鼓，`002 KIT` 而不是 `002 BRIGHT PIANO`。
+
+**两处"重复信息"被砍掉了**（按"同一信息只出现一处"）：初版有独立的大号 PROGRAM 数字块，但名字里已经带 `040`；初版上行写 `4 VOICE`，会被读成"四复音"。现在是 `TRACK 4` + `CH 1`。
+
+**尺寸实测**：128 个名字里最宽的是 `024 TANGO ACCORDION` = **218 px**（FONT_M，240 px 屏，左右各余 11）。`pz_wmax` 断言 <224 把这条锁住。
+
+**GM_PROG 表搬到 `ui_tables.c`**：PRESET 和 TRACK SET 的 PROGRAM 行读同一张表，两份会漂。
 
 ### 页脚不能"画两遍"（John 2026-10-30）
 

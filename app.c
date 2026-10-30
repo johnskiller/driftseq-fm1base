@@ -645,6 +645,7 @@ static void ble_device_button(void)
 #include "ui/ui_scale.c"
 #include "ui/ui_trkset.c"          /* TRACK SET: after ui_scale (k3_state_slider, txt_*)
                              * and before ui_edit (its routing calls in) */
+#include "ui/ui_preset.c"         /* PRESET popup: after ui.c (sel_track, glo_held) */
 #include "ui/ui_global.c"          /* GLOBAL: after ui.c (glo_held, key_shift, midi_vel)
                              * and ui_trkset (nothing shared, but the order of the pages
                              * reads better in the header's dot order) */
@@ -772,6 +773,38 @@ int app_expect(const char *what, int *got)
         *got = (int)(gl_pattern_bytes() == 0xFFFFFFFFu ? 0x7FFFFFFF : (int32_t)gl_pattern_bytes());
     else if (!strcmp(what, "cpu"))               /* the CPU row */
         *got = (int)plat_cpu_pct();
+    else if (!strcmp(what, "pz_ttl"))           /* the PRESET popup's remaining frames */
+        *got = (int)pz_ttl;
+    else if (!strcmp(what, "pz_prog"))          /* the program it is naming */
+        *got = (int)pz_prog;
+    else if (!strcmp(what, "pz_w"))             /* its text's width in FONT_M */
+    {
+        char b[24];
+        preset_popup_text(b);
+        *got = (int)cv_text_w(&FONT_M, b);
+    }
+    else if (!strcmp(what, "pz_wmax"))          /* the widest name in the bank */
+    {
+        char b[24];
+        int i, mx = 0;
+        for (i = 0; i < 128; i++) {
+            preset_text(b, (uint8_t)i, 0);
+            {
+                int w = (int)cv_text_w(&FONT_M, b);
+                if (w > mx) mx = w;
+            }
+        }
+        *got = mx;
+    }
+    else if (!strcmp(what, "pz_hash"))          /* and a checksum of the text */
+    {
+        char b[24];
+        uint16_t h = 5381;
+        uint8_t i;
+        preset_popup_text(b);
+        for (i = 0; b[i]; i++) h = (uint16_t)(h * 33u + (uint8_t)b[i]);
+        *got = (int)h;
+    }
     else if (!strcmp(what, "xruns"))
         *got = (int)plat_xruns();
     else if (!strcmp(what, "gm_noteons"))       /* EAS's own view: notes fed to it */
