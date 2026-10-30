@@ -81,20 +81,40 @@ Verified by: `tools/midi_probe.mjs` (wire format), `tools/midi_ui_probe.mjs`
 
 ## 6. 走带控制：MMC 与 MPC 的 SysEx（**记录，待决策**，2026-10-30）
 
-John 2026-10-30 给出 MPC 一侧的事实：
+### 6.0 证据分级（重要）
 
-> mpc的播放控制支持mmc，也有自己的sysex
->
+John 2026-10-30 的补充：「mpc也支持标准mmc，不过这些都是没检验过的信息」。
+
+所以本节把两类事实分开，**不要混用**：
+
+| 级别 | 内容 | 来源 |
+|---|---|---|
+| **A 已核** | MMC 的报文格式与命令码 | MIDI 规范（Universal Real Time SysEx），已对照 Teragon Audio 的规范摘录逐字节核对 |
+| **B 未核** | **MPC 是否响应这四条、响应到什么程度** | John 的记忆/推测，**尚未在 MPC 上试过** |
+
+⚠️ **任何实现都必须先在 MPC 上实测这些报文的效果**，不能把 B 当 A 用。本文档后续出现「已验证」字样时，仅指 A 级。
+
+### 6.1 报文格式（A 级，已核）
+
+John 给出的四条（标注为 B 级，即 MPC 响应未验证）：
+
 > - PLAY（播放）: `F0 7F 7F 06 02 F7`（标准 MMC）
 > - STOP（停止）: `F0 7F 7F 06 01 F7`（标准 MMC）
 > - RECORD（录音）: `F0 7F 7F 06 06 F7`
 > - DEFERRED PLAY: `F0 7F 7F 06 03 F7`
 
-### 6.1 这几条消息是什么
+通用形式：`F0 7F <deviceID> 06 <command> F7`
 
-`F0 7F <device> 06 <cmd> F7` 是 MIDI Machine Control 的 **Real Time System Exclusive**：`F0` 起、`7F` = 通用非实时/实时 ID、第三字节是设备 ID（`7F` = 全体广播）、`06` = Machine Control Command 子 ID、第五字节是具体命令。命令码：`01` Stop、`02` Play、`03` Deferred Play、`06` Record Strobe。
+- `F0` 起、`F7` 止 —— Real Time Universal SysEx
+- `7F` = 通用实时 ID
+- 第 3 字节 `<deviceID>`：`7F` = **All-Call**，所有设备都应响应，不管自己的 ID
+- 第 4 字节 `06` = Machine Control Command 子 ID
+- 第 5 字节 `<command>`，规范值：`01` Stop、`02` Play、`03` Deferred Play、`04` Fast Forward、`05` Rewind、`06` Record Strobe (Punch In)、`07` Record Exit (Punch out)、`09` Pause
 
-要点：**全部 6 字节，且都在 SysEx 里**。它既不是 `FA/FB/FC` 那几个单字节实时消息，也不是通道消息。
+**对照结论**：你给的四条与规范完全一致（`02`/`01`/`06`/`03`）。也就是说**报文本身没问题**，唯一未定的是 MPC 收到后做什么。
+
+规范里还有几条本工程可能用得上的，一并记在这里（A 级）：`09` Pause、`05` Rewind、`04` Fast Forward，以及 `Goto` = `F0 7F <id> 06 44 06 01 <hr><mn><sc><fr><ff> F7`（SMPTE 定位，注意它是 `06 44` 后面再跟**长度字节 `06`**，与上面那些「无载荷」命令结构不同）。
+
 
 ### 6.2 FM-1 现状（实测，非推断）
 
@@ -137,7 +157,39 @@ else { m[k++] = pkts[i] >> 16; m[k++] = pkts[i] >> 24; }
 **④ 仿真器页面层会把 SysEx 整个吃掉**（`web/emu/worklet.js` 的 out 循环，实测读代码确认）：它把每个 packet 都当成「从一个 status 字节开始」的消息，`st < 0xF0` 才按通道消息取数据字节，`F2` 特例取两个，**其余一律「its one byte and no more」**。所以 `F0 7F 7F` 只会送出 `F0`，`06 02 F7` 连状态位都没有、`st < 0xF0` 判为假且不是 `F2`，也只送 1 字节。这个循环是给通道消息写的，SysEx 需要单独按 CIN 解包，否则 emu 里永远看不到也发不出 MMC —— 而 emu 是我验证这类功能的唯一手段。
 
 
-### 6.4 待 John 拍板的问题（未决定，不自行扩功能）
+### 6.4 如何把 B 级变成 A 级（**动手前先做这一步**）
+
+这些报文在 MPC 上到底有没有用，只能上机试。三个办法，从省事到麻烦：
+
+**办法一：macOS 的 `sendmidi`（推荐，最省事）**
+
+```bash
+brew install sendmidi
+sendmidi list                                  # 找到 MPC 的端口名
+sendmidi dev "MPC ... " hex  F0 7F 7F 06 02 F7  # PLAY
+sendmidi dev "MPC ... " hex  F0 7F 7F 06 01 F7  # STOP
+```
+
+注意：MPC 若通过 MD-BT01 无线连，macOS 上会作为 BLE MIDI 端口出现，`sendmidi` 认它；USB 直连更稳。
+
+**办法二：任何能发原始 SysEx 的软件**（MIDI-OX、Pocket MIDI、Logic 的 environment 都行），粘贴上面那串 hex 即可。关键是软件必须真的发 SysEx，不能把它当普通 MIDI 消息吞掉。
+
+**办法三：本工程自己的 emu**——**现在不行**。见 6.3④，`web/emu/worklet.js` 的 out 循环会把 SysEx 吃掉，得先修。
+
+**四条各自要观察什么**：
+
+| 报文 | 期望 | 若无效说明什么 |
+|---|---|---|
+| `06 02` PLAY | MPC 开始播放 | MPC 不认 All-Call ID，或压根不支持这条 |
+| `06 01` STOP | MPC 停止 | 同上 |
+| `06 03` DEFERRED PLAY | 同 PLAY（可能延后一拍） | MPC 区分了这两条 |
+| `06 06` RECORD STROBE | MPC 进入录音待命/开始录 | **危险**：可能直接覆盖已有内容，先存盘 |
+
+**如果 All-Call（`7F`）没反应，试具体 ID**：把第 3 字节换成 MPC 的 MMC 设备号（MPC 设置里通常有，默认多为 `00` 或 `7F`）。这一步能把「不支持」和「ID 不匹配」区分开——两者现象一样，原因完全不同。
+
+**还要确认沿触发还是电平**：连发两次 PLAY，MPC 是重头播还是忽略第二条；STOP 后发 DEFERRED PLAY 与 PLAY 是否有行为差异。这些结果直接决定 FM-1 侧要不要做边沿去重（`FA/FB/FC` 那边已经这么做了）。
+
+### 6.5 待 John 拍板的问题（未决定，不自行扩功能）
 
 1. **要不要发？** FM-1 作主机，按面板 PLAY/STOP 给下游发 MMC；还是回头做 `FA/FC` 那套单字节（更简单、更多设备认）；还是两者都发。
 2. **谁指挥谁？** 是 FM-1 按键去控 MPC（FM-1 = 主机），还是 MPC 的走带去同步 FM-1（MPC = 主机，FM-1 收 MMC）。方向不同，代码量差很多：后者只需要在 `midi_in()` 里加 SysEx 收集 + 命令分派。
