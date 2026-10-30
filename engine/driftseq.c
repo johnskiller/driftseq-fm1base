@@ -90,7 +90,7 @@ void ds_play(ds_state *s) {
      * two together, then SAVE" is the main line. The player's take survives;
      * only its phase re-anchors so ring step 0 = the next bar line. */
     for (i = 0; i < DS_TRACKS; i++) {
-        s->pc_sent[i] = 0;
+        s->sent_prog[i] = 0xFF;
         s->mono_note[i] = 0xFF;                  /* MONO holds nothing after a rewind */
         s->pos16[i] = s->pat.track[i].loop_start;  /* each track launches on its own start */
         s->frac16[i] = 0.0;
@@ -363,6 +363,44 @@ static void emit_note(ds_state *s, const ds_track *t, const ds_note *n) {
     s->out[s->out_len++] = n->note & 0x7F;
     s->out[s->out_len++] = n->vel & 0x7F;
 }
+/* Does this track have anything to play? Only steps inside its own window
+ * count: notes parked outside loop_len never sound, so a track that is all
+ * faded-out edits is as silent as an empty one and must not hold a channel's
+ * program hostage. */
+int ds_track_has_notes(const ds_state *s, int trk)
+{
+    const ds_track *t = &s->pat.track[trk];
+    uint32_t i, len = t->loop_len > DS_STEPS ? DS_STEPS : t->loop_len;
+    for (i = 0; i < len; i++)
+        if (t->steps[i].nvoices)
+            return 1;
+    return 0;
+}
+
+/* Which track decides each channel's program, 0xFF = nobody. The receiver has
+ * ONE program per channel, so a shared channel needs a single owner: the
+ * lowest-numbered track that is audible and has notes. Lowest-numbered (not
+ * last-writer-wins) so adding a track never silently steals the sound of a
+ * busy one, and so the answer is stable across ticks and predictable on the
+ * TRACK SET page. Derived from the pattern, never cached, which is what makes
+ * a pattern switch free: the owner is a property of the pattern, so the next
+ * tick after a switch answers for the new one. Built once per tick with an
+ * early exit per channel (a channel stops looking the moment it has an owner),
+ * so the scan costs at most one pass over the pattern's steps. */
+static void build_owners(const ds_state *s, uint8_t *owner, int any_solo)
+{
+    int i;
+    for (i = 0; i < 16; i++) owner[i] = 0xFF;
+    for (i = 0; i < DS_TRACKS; i++) {
+        const ds_track *t = &s->pat.track[i];
+        uint8_t ch = (uint8_t)(t->channel & 0x0F);
+        if (t->mute) continue;
+        if (any_solo && !t->solo) continue;
+        if (owner[ch] != 0xFF) continue;
+        if (ds_track_has_notes(s, i)) owner[ch] = (uint8_t)i;
+    }
+}
+
 static void emit_pc(ds_state *s, const ds_track *t) {
     if (s->out_len + 2 > sizeof s->out) return;
     s->out[s->out_len++] = 0xC0 | (t->channel & 0x0F);
@@ -435,8 +473,23 @@ static void land(ds_state *s, ds_track *t, int trk, uint32_t pos) {
     if (st->cond == DS_C_FILL) s->fill_flag = 0;    /* one-shot consumed */
 }
 
+/* Which track speaks for `ch`'s program right now, 0xFF = none. Same rule the
+ * engine uses when it emits, exposed so the page can say so instead of letting
+ * the player turn a knob that changes nothing. */
+int ds_channel_owner(const ds_state *s, int ch)
+{
+    uint8_t owner[16];
+    int i, any_solo = 0;
+    for (i = 0; i < DS_TRACKS; i++)
+        if (s->pat.track[i].solo) { any_solo = 1; break; }
+    build_owners(s, owner, any_solo);
+    if (ch < 0 || ch > 15) return 0xFF;
+    return owner[ch] == 0xFF ? 0xFF : (int)owner[ch];
+}
+
 void ds_tick(ds_state *s, double dt_seconds) {
     int trk;
+    uint8_t owner[16];
     ds_route_sync(s);                        /* ROUTE is editable live: 16 iterations, once a block */
     {   /* solo is a live-only mask: recompute the union each tick (16 bytes) */
         int t2;
@@ -460,6 +513,7 @@ void ds_tick(ds_state *s, double dt_seconds) {
      * the same byte stream as the note-on, or the note hangs. */
     gate_advance(s, dt_seconds);
 
+    build_owners(s, owner, (int)s->any_solo);
     for (trk = 0; trk < DS_TRACKS; trk++) {
         ds_track *t = &s->pat.track[trk];
         double adv;
@@ -467,7 +521,23 @@ void ds_tick(ds_state *s, double dt_seconds) {
             continue;
         if (s->any_solo && !t->solo)
             continue;                                 /* a solo elsewhere masks this track */
-        if (!s->pc_sent[trk]) { emit_pc(s, t); s->pc_sent[trk] = 1; }
+        /* PROGRAM CHANGE: per channel, not per track. The receiver keeps one
+         * program per channel, so the channel's owner is the lowest-numbered
+         * unmuted track that actually has notes on it - a track that is empty
+         * has no sound to protect and must not steal the channel's program
+         * (eleven never-configured tracks used to overwrite the demo's bass
+         * with prog 0 in the same tick). Re-derived every tick from the
+         * pattern, so a pattern switch, an edited CH/CHANNEL or a freshly
+         * unmuted track all converge without extra bookkeeping.
+         * Sent only when the receiver's copy differs: re-stating a program
+         * mid-note is legal but pointless, and on some modules audible. */
+        {
+            uint8_t ch = (uint8_t)(t->channel & 0x0F);
+            if (owner[ch] == (uint8_t)trk && s->sent_prog[ch] != t->prog) {
+                emit_pc(s, t);
+                s->sent_prog[ch] = t->prog;
+            }
+        }
 
         if (s->pending[trk]) {                       /* launch: loop_start sounds now */
             land(s, t, trk, s->pos16[trk]);

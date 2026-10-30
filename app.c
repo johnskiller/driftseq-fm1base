@@ -693,6 +693,15 @@ int app_expect(const char *what, int *got)
         *got = TRK()->swing_amt;
     else if (!strcmp(what, "ts_gswing"))         /* K4: the global it multiplies by */
         *got = eng.global_swing;
+    else if (!strcmp(what, "ts_owner"))          /* who decides this channel's program */
+        *got = ds_channel_owner(&eng, (int)TRK()->channel);
+    else if (!strcmp(what, "ts_shared"))         /* how many tracks sit on this channel */
+    {
+        int t2, n2 = 0;
+        for (t2 = 0; t2 < DS_TRACKS; t2++)
+            if (eng.pat.track[t2].channel == TRK()->channel) n2++;
+        *got = n2;
+    }
     else if (!strcmp(what, "ts_prog_hash"))      /* the PROGRAM row as drawn (name+number) */
     {
         char b[40];

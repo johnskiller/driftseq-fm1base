@@ -182,7 +182,7 @@ demo            146 B
 
 | 目标 | 构建 | 结果 |
 |---|---|---|
-| golden | `tests_engine/test_golden.c engine/driftseq.c engine/demo_pattern.c` | `420C4824C85B79CB` / 242 note-ons |
+| golden | `tests_engine/test_golden.c engine/driftseq.c engine/demo_pattern.c` | `52CF520E290E322D` / 242 note-ons |
 | tie | `tools/tie_test.c engine/driftseq.c` | 19/19 PASSED |
 | pack | `tools/pack_test.c engine/pack.c engine/driftseq.c engine/demo_pattern.c` | PACK OK，上限 1,036 B |
 | pack_engine | 同上换 `tools/pack_engine_test.c` | ENGINE ROUND TRIP OK |
@@ -275,7 +275,7 @@ AC79_SDK=/tmp/fw-AC79_AIoT_SDK JIELI_TOOLCHAIN=/home/john/.jieli/toolchain \
 - `tests/trkset.txt`：**76 断言**全通过（门、五个字段两端死停、1-based 显示、逐轨独立、PROGRAM 行 djb2、HOME/SEL 出口）
 - `tests/trkset_route.txt`：**ROUTE 到线缆边界** —— 16 轨全 GM → `midi_out == 0`；全 USB → `midi_out == 45`
 - `tests_engine/test_trkset.c`：ROUTE 掩码 / MONO 掐音 / SWING / 通道改动后 off 走原通道
-- golden 哈希 `420C4824C85B79CB`、242 note-ons **不变**
+- golden 哈希 `420C4824C85B79CB`→`52CF520E290E322D`（note-ons 242 不变；只有 PC 字节变了，这正是修复的证据）
 - ASAN 全跑 trkset+scale 无报错
 
 ### 两个已修的 bug（都是真 bug，不是测试错）

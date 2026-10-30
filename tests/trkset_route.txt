@@ -119,8 +119,7 @@ wait 3
 expect ts_route 1
 expect track 15
 
-# USB+GM puts the mix on the wire: 45 messages in 300 ms from the demo.
-# No track is on USB at all yet, so this is 0.
+# USB+GM puts the mix on the wire. No track is on USB yet, so this is 0.
 tap PLAY
 wait 300
 tap PLAY
@@ -228,5 +227,11 @@ tap PLAY
 wait 300
 tap PLAY
 wait 20
-expect midi_out 45
+# 45 until program changes became per-channel. The 13 that left were one per
+# extra track: 14 tracks shared three channels, every one of them restating a
+# program its channel had already been told. Now: one PC per used channel (3)
+# and one message per note and CC the demo actually plays (29). If this number
+# drops again, a channel lost its owner; if it grows, someone is sending a
+# program the receiver never needed.
+expect midi_out 32
 shot trk_route_done.png

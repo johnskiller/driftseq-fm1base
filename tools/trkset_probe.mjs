@@ -159,6 +159,33 @@ function bandTop(fb) {
     check(ink(189) > 20, 'footer K4 says a word (SWING)', ink(189) + ' px');
 }
 
+/* ---------- the bottom line: whose PROG counts on this channel ----------
+ * Pixels, because this is a line of English the player reads, not a field: the
+ * C suite can say "owner is track 3" but only a render can say the page tells
+ * the player so. Row y=180, 12px type; count lit runs to compare line lengths
+ * between a track that owns its channel and one that does not. */
+{
+    const inkWidth = (fb) => {
+        let last = -1;
+        for (let x = 0; x < W; x++)
+            for (let y = 178; y < 196; y++)
+                if (px(fb, x, y) !== 0 && px(fb, x, y) !== ROWBAND) { last = x; break; }
+        return last;
+    };
+    const before = inkWidth(page);           /* track 0: owns ch9, roll call */
+    enc(0, 5);                               /* SELECT -> track 5, an empty track on ch0 */
+    const after = grab();
+    const w5 = inkWidth(after);
+    check(w5 > 0, 'the bottom line renders on an empty track too (last ink x=' + w5 + ')');
+    check(w5 !== before, 'the line changes when the edit track stops owning its channel',
+          'track0 line ends at ' + before + ', track5 at ' + w5);
+    /* and the same text is there for the owner of a shared channel: back to 0 */
+    enc(0, -5);
+    const back0 = grab();
+    check(inkWidth(back0) === before, 'returning to the owner restores its line',
+          'x=' + inkWidth(back0) + ' vs ' + before);
+}
+
 /* ---------- leaving ---------- */
 press(6);                                   /* B_HOME */
 {

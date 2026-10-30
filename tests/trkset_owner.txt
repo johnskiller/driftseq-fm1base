@@ -1,0 +1,62 @@
+# Who owns a channel's SOUND. A program change is per channel, not per track:
+# the receiver keeps one program per channel, so a channel shared by several
+# tracks needs exactly one track to speak for it - the lowest-numbered one WITH
+# NOTES. A fresh demo, because this is a property of the pattern and the other
+# page tests deliberately leave the pattern edited.
+wait 600
+tap ENV
+wait 20
+expect mode 4
+
+# the drum channel: tracks 0,1,2 share ch9 and all three have notes -> track 0
+turn SELECT -30
+wait 10
+expect track 0
+expect ts_ch 9
+expect ts_owner 0
+expect ts_shared 3
+
+# the bass: alone on ch0 in sound (eleven empty tracks also sit there) - the eleven empty tracks 5..15 also sit on ch0 by
+# default, and none of them may speak for it (that was the demo's broken sound)
+turn SELECT 3
+wait 10
+expect track 3
+expect ts_owner 3
+expect ts_shared 12
+expect ts_prog 38
+
+# the lead: alone on its channel
+turn SELECT 1
+wait 10
+expect track 4
+expect ts_owner 4
+expect ts_shared 1
+
+# an empty track on the bass's channel is explicitly NOT the owner, and turning
+# its PROG must not disturb the owner's (the page has nothing to do about it
+# yet, but the engine must ignore it - asserted on the wire in trkset_route)
+turn SELECT 1
+wait 10
+expect track 5
+expect ts_owner 3
+turn K1 1
+wait 5
+turn K2 3
+wait 5
+expect ts_prog 3
+expect ts_owner 3
+
+# ...while the SAME edit on the owner does move the channel
+turn SELECT -30
+wait 10
+turn SELECT 3
+wait 10
+expect track 3
+expect ts_owner 3
+expect ts_row 0
+turn K1 1
+wait 5
+expect ts_row 1
+turn K2 1
+wait 5
+expect ts_prog 39

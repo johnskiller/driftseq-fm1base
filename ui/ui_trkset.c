@@ -84,15 +84,12 @@ static const struct { uint8_t prog; const char *name; } GM_KIT[] = {
 };
 #define GM_KIT_N ((int)(sizeof GM_KIT / sizeof GM_KIT[0]))
 
-/* A CH or PROG change must re-send the program change while the transport runs,
- * or the new sound waits for the next PLAY: emit_pc runs once per track per run
- * (pc_sent) and lives in the playing branch. Clearing the flag makes the next
- * tick send it. Stopped, nothing is sent - there is no run to send into, and
- * the PC that PLAY emits will carry the new number anyway. */
-static void ts_resend_pc(void)
-{
-    eng.pc_sent[sel_track] = 0;
-}
+/* No resend call here any more. The engine compares each channel's program
+ * against what it last told the receiver (sent_prog[]) on every tick while the
+ * transport runs, so editing CH or PROG re-states the program by itself - and a
+ * track that is NOT its channel's owner changes nothing, which is the whole
+ * point of the owner rule. Stopped, nothing is sent: there is no run to send
+ * into, and the PC that PLAY emits carries the new number anyway. */
 
 static void trkset_encoder(uint8_t enc, int8_t det)
 {
@@ -138,7 +135,6 @@ static void trkset_encoder(uint8_t enc, int8_t det)
              * so this only affects what is played next — no note hangs */
             tr->channel = (uint8_t)v;
             ds_route_sync(&eng);
-            ts_resend_pc();
         }
         break;
     }
@@ -148,7 +144,6 @@ static void trkset_encoder(uint8_t enc, int8_t det)
         if (v > 127) v = 127;
         if (v != (int)tr->prog) {
             tr->prog = (uint8_t)v;
-            ts_resend_pc();
         }
         break;
     }
@@ -334,19 +329,54 @@ static void draw_trkset(void)
                  * names anyway: the panel fits 46 characters, and "who else is
                  * here" is answered by the cell being lit. */
                 char s[48];
-                char *p = s;
-                if (!no) {
-                    strcpy_(p, "ALONE ON THIS CHANNEL");
+                /* Who decides this channel's program matters more than the roll
+                 * call: on a shared channel only the owner's PROG reaches the
+                 * receiver, and without this line the other tracks' knobs turn
+                 * in silence and read as broken. The owner is the lowest track
+                 * with notes, so "T7 SETS THE SOUND" is also the answer to
+                 * "why does my PROG do nothing". */
+                int own = ds_channel_owner(&eng, (int)tr->channel);
+                /* The bottom line answers one question only: whose PROG counts
+                 * here. When this track's does, the line stays what it always
+                 * was (the roll call) - saying "you set the sound" would just
+                 * repeat the filled channel cell. When it does not, that fact is
+                 * the only thing on the page the player cannot discover by
+                 * turning a knob, so it takes the line. */
+                if (own != 0xFF && own != (int)sel_track) {
+                    if (!ds_track_has_notes(&eng, (int)sel_track))
+                        strcpy_(s, "EMPTY, T");
+                    else
+                        strcpy_(s, "T");
+                    fmt_int(txt_end(s), (int32_t)own + 1);
+                    strcpy_(txt_end(s), " SETS THE SOUND");
+                } else if (!no) {
+                    strcpy_(s, "ALONE ON THIS CHANNEL");
                 } else {
-                    uint8_t shown = no > 3 ? 3 : no;
-                    strcpy_(p, "SHARED WITH");    /* the names carry their own T */
-                    for (t = 0; t < shown; t++) {
+                    /* Sharing a channel with placeholders is not sharing it: the
+                     * eleven never-recorded tracks on ch0 hold no program and no
+                     * notes, so the roll call would be noise. Only tracks that
+                     * can actually sound are worth naming. */
+                    uint8_t live = 0;
+                    for (t = 0; t < no; t++)
+                        if (ds_track_has_notes(&eng, (int)other[t])) live++;
+                    int shown = live > 3 ? 3 : live;
+                    if (!live) {
+                        /* Empty tracks share the channel on paper only. The
+                         * question this line answers is "who else sounds here",
+                         * and the answer is nobody - not "11 empty slots". */
+                        strcpy_(s, "NO OTHER TRACK SOUNDS");
+                    } else {
+                    strcpy_(s, "SHARED WITH");     /* the names carry their own T */
+                    for (t = 0; t < no && shown; t++) {
+                        if (!ds_track_has_notes(&eng, (int)other[t])) continue;
                         strcpy_(txt_end(s), " T");
                         fmt_int(txt_end(s), (int32_t)other[t] + 1);
+                        shown--;
                     }
-                    if (no > shown) {
+                    if (live > 3) {
                         strcpy_(txt_end(s), " +");
-                        fmt_int(txt_end(s), (int32_t)(no - shown));
+                        fmt_int(txt_end(s), (int32_t)(live - 3));
+                    }
                     }
                 }
                 cv_text(8, 180, &FONT_T, s, no ? YELLOW : C_GRAY);

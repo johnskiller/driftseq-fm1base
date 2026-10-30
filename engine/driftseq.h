@@ -100,7 +100,15 @@ typedef struct {
     uint32_t    pos16[DS_TRACKS];       /* current cell index (the playhead) */
     double      frac16[DS_TRACKS];      /* sub-cell accumulator, [0,1) */
     uint8_t     pending[DS_TRACKS];     /* fire loop_start on next tick after play */
-    uint8_t     pc_sent[DS_TRACKS];     /* program-change sent once per run */
+    /* What each channel was last TOLD its program is, 0xFF = never told. A
+     * program change is per-channel state on the receiver and outlives any
+     * pattern, so the question is never "did I send it this run" but "does the
+     * receiver already agree". A run flag cannot answer that: switch patterns
+     * and the flag still reads 1 while the channel holds the old program.
+     * Initialised to 0xFF so the first PLAY sends every channel's program,
+     * including the ones whose program happens to be 0.
+     * 0xFF rather than 0, which is a legal program (Acoustic Grand). */
+    uint8_t     sent_prog[16];
     /* MONO's memory: the one note this track is holding, 0xFF = silent. The
      * sequencer collapses a step's voices to the highest pitch and offs the
      * previous note first; without the byte the "previous" is unknowable and
@@ -173,7 +181,9 @@ void     ds_clear_track(ds_track *t);
 void     ds_play(ds_state *s);
 void     ds_stop(ds_state *s);
 void     ds_set_bpm(ds_state *s, double bpm);
-void     ds_route_sync(ds_state *s);            /* rebuild wire_mask/gm_mask from track[].route */
+void     ds_route_sync(ds_state *s);
+int      ds_channel_owner(const ds_state *s, int ch);
+int      ds_track_has_notes(const ds_state *s, int trk);            /* rebuild wire_mask/gm_mask from track[].route */
 
 /* the engine tick: call once per audio block (64 frames @ 44100).
  * advances time, fills s->out with MIDI bytes for this tick, resets out_len.
