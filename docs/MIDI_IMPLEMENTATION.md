@@ -157,20 +157,119 @@ else { m[k++] = pkts[i] >> 16; m[k++] = pkts[i] >> 24; }
 **④ 仿真器页面层会把 SysEx 整个吃掉**（`web/emu/worklet.js` 的 out 循环，实测读代码确认）：它把每个 packet 都当成「从一个 status 字节开始」的消息，`st < 0xF0` 才按通道消息取数据字节，`F2` 特例取两个，**其余一律「its one byte and no more」**。所以 `F0 7F 7F` 只会送出 `F0`，`06 02 F7` 连状态位都没有、`st < 0xF0` 判为假且不是 `F2`，也只送 1 字节。这个循环是给通道消息写的，SysEx 需要单独按 CIN 解包，否则 emu 里永远看不到也发不出 MMC —— 而 emu 是我验证这类功能的唯一手段。
 
 
-### 6.4 如何把 B 级变成 A 级（**动手前先做这一步**）
+### 6.4 三个来源，不是一类东西（2026-10-30 追加）
 
-这些报文在 MPC 上到底有没有用，只能上机试。三个办法，从省事到麻烦：
+John：「我还有个qy100也能发出播放控制，还有daw，这些都需要测试」。
 
-**办法一：macOS 的 `sendmidi`（推荐，最省事）**
+这句话里的三个来源（MPC / QY100 / DAW）**千万不要当成同一类测试**——它们的走带协议很可能完全不同：
+
+| 来源 | 已知 | 证据强度 | 要测什么 |
+|---|---|---|---|
+| **MPC** | 你说支持标准 MMC | B（未测） | `06 01/02/03/06` 四条在 MPC 上的实际反应 |
+| **QY100** | 你说能发播放控制 | **C（存疑，见下）** | **先确认它到底发哪种** —— 极可能是 `FA/FC` 而非 MMC |
+| **DAW** | 各软件设置不同 | C | 先在 DAW 里把 MMC/Clock 发送分别打开，再逐条测 |
+
+#### QY100 的疑点（必读）
+
+查到的证据指向 **QY100 发的是 `FA/FC` + `F8` clock，而不是 MMC**。
+
+Yamaha QY 系列 Data List 里的「(1) TRANSMIT FLOW」是个**家族模板**，我在三个同系列型号的原文里都看到同一串：
+
+- **QY20** Data List：`CONTROL CHANGE BnH` / `PROGRAM CHANGE CnH` / `PITCH BEND CHANGE EnH` / `TIMING CLOCK F8H` / `START FAH` / `CONTINUE FBH` / `STOP FCH` / `SONG POSITION POINTER F2H`，后面接 `F0H 43H 0nH 0AH ...` 的厂商 SysEx
+- **QY300** Data List：同样的 `F8H / FAH / FBH / FCH / F2H`，加 `SONG SELECT F3H`、`ALL SOUND OFF`、`RESET ALL CONTROLLERS`
+
+**两份原文里都没有 `F0 7F ... 06 xx` 这一族 MMC。** 发的是单字节实时消息 + Yamaha 自己的 SysEx。（QY70 我只查到「同族」的说法，没读到它的 Data List 原文，不计入证据。）
+
+需要说清楚的边界：**我没直接读到 QY100 自己的 Data List**（manualslib 反爬，Yamaha 只公开了 QY300 的 PDF 直链）。所以这是「同系列两份原文 + 强家族一致性」的推断，不是 QY100 的原文证据。仍然是 C 级，只是支撑比之前那个论坛帖硬得多。
+
+另外：有第三方帖是让 **QY100 当 MMC 的从机**（电脑发 MMC 给它），说明「接收 MMC」和「发送 MMC」是两件事，**不能由前者推出后者**。
+
+所以：**「QY100 能发播放控制」大概率指的是 `FA/FC`，而 FM-1 的 `ui_midi_dispatch` 已经能收这两个**。如果成立，QY100 这条的**走带**部分已经能工作，只是没人验证过。
+
+但**不要因此认为 QY100 这条就通了**，还有两个前提没验证：
+
+1. **FM-1 根本无法验证，除非接上 Mac**。FM-1 的显示只认 `midi_last`/`midi_count`（`app.c`），**屏幕上不显示收到的报文**（PROGRESS 已记：设备 log 不在屏幕，走 `fm1_remote.py log`）。所以「FM-1 收到 FA 了吗」这个问题，在设备上**看不出来**，要么接 UART log，要么在 Mac 上分接一路监听。
+2. **clock 不跟**（见下节）。QY100 发 `F8` 但 FM-1 全丢，所以两者只能同时开始、速度各跑各的。如果 QY100 的曲子是 120 BPM 而 FM-1 设 100，**按下去就立刻分开**，表现像是「收不到」但其实是「收得到、不跟拍」。
+
+这两点合起来意味着：**QY100 的测试必须同时抓报文和看时钟漂移**，只按一次 PLAY 看有没有动，会得出错误结论。
+
+证据边界再说一次：**这是 C 级推断，不是 QY100 原文**。**测的第一步是确认它输出哪种报文**，而不是假设。
+
+#### FM-1 对 clock 的现状（实测，A 级）
+
+`app.c` `midi_in()` 里：`int keep = st != 0xF8u && st != 0xFEu;`，F8 与 FE 都被判为「不保留、不显示、不分派」，直接丢。所以：
+
+- **F8 clock：完全丢弃**，不影响引擎相位
+- **FA/FB/FC：收，且已实现**（边沿触发，重复触发不重置相位）
+- **F2 Song Position：丢弃**（两处：`app.c` 未保留、`ui_midi_dispatch` 无分支）
+
+这意味着 FM-1 现在是**只跟走带、不跟拍**：按下外部 PLAY，FM-1 从自己的 loop_start 起，然后按自己的 BPM 跑，与主机的速度**没有任何绑定**。QY100/DAW 当主机时这会明显不同步——如果它们发的是 120 BPM 而 FM-1 是 100 BPM，两者会立刻分开。
+
+**这大概是这条线里最该先决定的事**：只要不接 F8，任何「播放控制」都只能让两者同时开始，不能保持在一起。
+
+#### DAW 的额外坑
+
+DAW 侧发送 MMC 和发送 Clock 是**两个独立开关**，位置各软件不同，且**Ableton Live 根本不发 MMC**（它的 Sync 设置只做 MIDI Clock，没有 MMC 发送项）。
+
+| DAW | Clock 发送 | MMC 发送 |
+|---|---|---|
+| Logic Pro | `Project Settings > Synchronization > MIDI` | 同页有 `Transmit MMC` 勾选框 |
+| Ableton Live | `Preferences > Link/Tempo/MIDI` 的 MIDI Ports 表，Output 的 `Sync` 勾选框 | **无**（Live 不做 MMC） |
+| Reaper | `Preferences > MIDI Devices` 右键端口 → `Send clock to output` | 需装 MMC 脚本/虚拟端口 |
+
+所以**如果你的 DAW 是 Ableton，MMC 这条路对它直接不成立**，只能是 `F8 + FA/FC`（Logic 两个都支持）。这也反过来提示：**`FA/FC` 才是三家共通的公共集**，MMC 是 MPC 那类设备的额外能力。这一点会影响 6.6 第 1 问的答案——先做 `FA/FC` 就已经覆盖 QY100 和多数 DAW。
+
+测的时候要分开勾，否则分不清是哪条在起作用。
+
+而且 DAW 常同时发 `FA` 和 MMC Play。FM-1 一旦两者都实现，**同一次播放会收到两个 PLAY**，必须做去重（对 `FA` 已经做了边沿判断，MMC 侧要同样处理，否则 `ds_play` 会把相位重置两次）。
+
+### 6.5 上机测试方法（**动手前先做这一步**）
+
+这些报文在 MPC / QY100 / DAW 上到底有没有用，只能上机试。三个办法，从省事到麻烦：
+
+**办法一：先当接收方测，用 `sendmidi` 发（推荐，最省事）**
+
+（测试方向：Mac → 对方。用来确认对方**作为接收方**具备 MMC 从机能力。）
 
 ```bash
 brew install sendmidi
-sendmidi list                                  # 找到 MPC 的端口名
-sendmidi dev "MPC ... " hex  F0 7F 7F 06 02 F7  # PLAY
-sendmidi dev "MPC ... " hex  F0 7F 7F 06 01 F7  # STOP
+sendmidi list                                   # 找到 MPC / QY100 / DAW 的端口名
+sendmidi dev "MPC ..." hex  F0 7F 7F 06 02 F7   # PLAY
+sendmidi dev "MPC ..." hex  F0 7F 7F 06 01 F7   # STOP
 ```
 
 注意：MPC 若通过 MD-BT01 无线连，macOS 上会作为 BLE MIDI 端口出现，`sendmidi` 认它；USB 直连更稳。
+
+**办法一之二：当发送方测（这才是「QY100/DAW 发出的是什么」的答案来源）**
+
+（测试方向：对方 → Mac。用来确认对方**实际发出**哪种报文。）
+
+反过来接：**QY100 / DAW 的 MIDI OUT → Mac**，然后在 Mac 上把收到的原始字节日志下来。
+
+```bash
+# 任何能打印原始 MIDI 输入的工具都行
+sendmidi list
+# 用 macOS 自带很好用的办法：
+#   1) 打开「音频MIDI设置」→ 窗口 → 显示 MIDI 监视器（MIDI Monitor 窗口）
+#   2) 选中来源端口，按 QY100/DAW 的 PLAY
+#   3) 看它打出的是 F0 7F ... 06 02 F7 还是 FA
+```
+
+这一步是**整件事的分水岭**：三种来源各跑一遍，就知道各自发的是什么。**在此之前不要写任何实现代码**——尤其别假设 QY100 发 MMC。
+
+**三种来源各自跑一遍，结果记在这张表里**（测完再填，别猜）：
+
+| 来源 | 测什么 | 结果 | 日期 |
+|---|---|---|---|
+| MPC | 收 `06 02` 是否播放 | *(待测)* | |
+| MPC | 收 `06 01` 是否停止 | *(待测)* | |
+| MPC | `7F` vs 具体 ID 差异 | *(待测)* | |
+| MPC | 连发两次 PLAY 是否重头 | *(待测)* | |
+| QY100 | **发的是 `FA/FC` 还是 `F0 7F ... 06 xx`** | *(待测——这一步决定后面还需不需要 MMC)* | |
+| QY100 | 是否发 `F8` clock、是否发 `F2` | *(待测)* | |
+| DAW | 只勾 MMC 时的报文 | *(待测)* | |
+| DAW | 只勾 Clock 时的报文 | *(待测)* | |
+| DAW | 两者都勾时 FM-1 是否双触发 | *(待测)* | |
 
 **办法二：任何能发原始 SysEx 的软件**（MIDI-OX、Pocket MIDI、Logic 的 environment 都行），粘贴上面那串 hex 即可。关键是软件必须真的发 SysEx，不能把它当普通 MIDI 消息吞掉。
 
@@ -189,14 +288,29 @@ sendmidi dev "MPC ... " hex  F0 7F 7F 06 01 F7  # STOP
 
 **还要确认沿触发还是电平**：连发两次 PLAY，MPC 是重头播还是忽略第二条；STOP 后发 DEFERRED PLAY 与 PLAY 是否有行为差异。这些结果直接决定 FM-1 侧要不要做边沿去重（`FA/FB/FC` 那边已经这么做了）。
 
-### 6.5 待 John 拍板的问题（未决定，不自行扩功能）
+### 6.6 待 John 拍板的问题（未决定，不自行扩功能）
 
-1. **要不要发？** FM-1 作主机，按面板 PLAY/STOP 给下游发 MMC；还是回头做 `FA/FC` 那套单字节（更简单、更多设备认）；还是两者都发。
-2. **谁指挥谁？** 是 FM-1 按键去控 MPC（FM-1 = 主机），还是 MPC 的走带去同步 FM-1（MPC = 主机，FM-1 收 MMC）。方向不同，代码量差很多：后者只需要在 `midi_in()` 里加 SysEx 收集 + 命令分派。
-3. **RECORD 发不发。** `06 06` 是 Record Strobe，误触会把 MPC 推进录音。要不要绑在 REC 上，还是要二次确认。
-4. **DEFERRED PLAY**（`06 03`）与 PLAY 的区别只在「是否等设备就绪」，FM-1 侧要不要区分。
-5. **设备 ID** 用 `7F` 广播还是可配（多台设备时）。
-6. **MPC 自己的 SysEx** 你还提到有——那部分消息格式未给，等你的清单再排。
+**先答第 1、2 问，其余都依赖它们。**
+
+1. **谁指挥谁？（最关键的岔路）**
+   - **A. 外部当主机**（QY100 / DAW / MPC 发，FM-1 收）：`ui_midi_dispatch` 已经收 `FA/FB/FC`，**基本已具备**。要补的只有：SysEx 收集 + MMC 命令分派（若确认需要 MMC）、以及要不要跟 `F8`（见第 3 问）。**这条最省力，且立刻能让 QY100/DAW 用起来。**
+   - **B. FM-1 当主机**（面板 PLAY/STOP 发出去控别人）：要发 `FA/FC`（简单）或 MMC（要先修 CIN、BLE SysEx 终止字节、emu 分帧，见 6.3）。**工程量是 A 的数倍。**
+   - **C. 双向都做**：A + B，且必须处理「自己发给自己」的回灌（BLE 回声那事已定案不修，但走带会重新触发它）。
+
+2. **MMC 到底要不要做？** 依据 6.4 的证据，**`FA/FC` 已覆盖 QY100 和多数 DAW，MMC 只对 MPC 有用**。所以合理的顺序是：**先只做 A 的 `FA/FC`，把 QY100/DAW 跑通；MMC 等确认 MPC 真的认了再加。** 若同意，6.3 那四件事（CIN / BLE 终止字节 / emu 分帧 / SysEx 组包）全部可以推迟。
+
+3. **要不要跟 `F8` clock？（决定「同步」还是「同时开始」）**
+   - 不跟（现状）：只听走带，速度各跑各的。**够用于「一起开始并按各自的表走」**，但会漂。
+   - 跟（需要 `ds_tick` 相位锁定）：PLL 或简单计数，改动在引擎核心，风险高。**这是独立的一大块，建议单独一轮。**
+   - 折中：跟 `F8` 只用于**测速**（临时算 BPM 显示/对齐），不锁相位。风险小、能看出漂移量。
+
+4. **RECORD 发不发。** `06 06` 是 Record Strobe，误触会把 MPC 推进录音。要不要绑在 REC 上，还是要二次确认。
+
+5. **DEFERRED PLAY**（`06 03`）与 PLAY 的区别只在「是否等设备就绪」，FM-1 侧要不要区分。
+
+6. **设备 ID** 用 `7F` 广播还是可配（多台设备时）。
+
+7. **MPC 自己的 SysEx** 你还提到有——那部分消息格式未给，等你的清单再排。
 
 ## 7. 计划（planned，未排期）
 
