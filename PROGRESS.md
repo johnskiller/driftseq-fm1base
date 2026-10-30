@@ -627,7 +627,7 @@ John 报「SCALE页面的键盘灯有问题，随着弹奏逐渐越亮越多，�
 
 **探针**：新增 `tools/scale_led_probe.mjs`（**11 项**），在**实际下发的 wasm** 里断言同一组行为（含「OFC 开时 keys 7/14 保持黑 = 无标尺」——OFC 关时整床都 dim，标尺藏不住，只能在这个态测）。三个既有探针 52 / 23 / 38 全绿。
 
-**尺寸**：image 524,656 / 581,564；RAM 68,692；fwsc `5bff5e15a2c3ab1383f2ff89eb097a6f`，611,547 B，已 `cp` 进 `build/emu/`（两端口 md5 一致）；wasm `4bb05ecb25adcfcb080b94cb3d990`，412,897 B。
+**尺寸**：image 524,656 / 581,564；RAM 68,692；fwsc `5bff5e15a2c3ab1383f2ff89eb097a6f`，611,547 B，已 `cp` 进 `build/emu/`（两端口 md5 一致）；wasm `4bb05ecb25adcfcb080b94cb73c3d990`，412,897 B。
 
 **实测中三个「假 bug」教训**：① 我一开始用 `turn K4` 开 OFC，K4 早已不是 OFC（注释写明 "K4 is freed"），OFC 在 **K3**；② 在 track 0 上测——demo 的 0/1/2 轨都是鼓（ch9），SCALE 的和弦键盘对鼓轨不存在，`is_drum` 直接跳过整段；③ 探针常数写错三处（keys 7..18 是 `0x7ff80` 不是 `0x7f80`；"标尺不存在"不能在整床 dim 的态下判断）。三次都是断言错，不是代码错 —— 先按 `leds` 实际输出反推，再改断言。
 
