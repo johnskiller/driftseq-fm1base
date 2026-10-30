@@ -94,11 +94,11 @@ sizeof(ds_pattern) 17,616 B
 固件构建（`build.py`，最后一次 = Track Settings 之后）：
 
 ```
-image 518,012 B of 581,564   余 63,552
+image 518,700 B of 581,564   余 62,864
 RAM   .data+.bss 68,612 B of 98,304   余 29,692
 pool  254,776 B of 344,064            余 89,288
-fwsc  611,547 B, identity FM-1_9200  md5 9b5f510c（未刷机）
-wasm  396,378 B  md5 25fa9f67（8930 HTTPS / 8933 HTTP 均在发）
+fwsc  611,547 B, identity FM-1_9200  md5 e8a17ba3（未刷机）
+wasm  397,704 B  md5 b821f8df（8930 HTTPS / 8933 HTTP 均在发）
 ```
 
 Track Settings 一页的代价（实测，9807888 → 现 HEAD 两次真建）：**image 513,500 → 518,124 = +4,624 B flash**，**pool 254,760 → 254,776 = +16 B RAM**（`mono_note[16]` + gate/live 各 +1 字节的 `ch` 字段）。构成：128 条 GM 名表 + 9 条鼓组名 ≈1.5 KB、页面绘制 ≈1.2 KB、`ds_route_sync`+MONO+capture-channel ≈0.5 KB、探针与 hint 其余。
@@ -261,7 +261,8 @@ AC79_SDK=/tmp/fw-AC79_AIoT_SDK JIELI_TOOLCHAIN=/home/john/.jieli/toolchain \
 
 - **K1 移行**（死停 0..4）、**K2 改值**、**K3 仍是 MUTE/SOLO**（肌肉记忆）、**K4 = global swing**（0..100 步进 5）
 - 没有 global swing 入口时 `swing_amt` 恒乘 0 —— 这是它此前全线失效的原因，现在 K4 直接写 `eng.global_swing`
-- 下半屏 = **CHANNEL MAP**：16 格，实心=本轨，亮数字空心=别的轨占着，暗=空闲；下方 `SHARED WITH T1 T2`（最多 3 个 + `+N`）
+- 下半屏 = **CHANNEL MAP**：16 格，实心=本轨，亮数字空心=别的轨占着，暗=空闲
+- 底行只回答一个本页其它地方答不出的问题：**谁的 PROG 在这条通道上算数**（`2c21d00` 之后的 owner 规则，见下节）。本轨是 owner → `SHARED WITH T1 T2` / `NO OTHER TRACK SOUNDS`；本轨不是 owner → `T3 SETS THE SOUND`（或 `EMPTY, T3 SETS THE SOUND`）。空轨不算"共用"：11 条从没录过的默认轨和 bass 同占 ch0，但它们不出声也不该占通道的音色
 - 顶栏 `h.page = 3`（HDR_DOTS 仍 5；曾试 6 但越出右边界，回退）
 
 ### 引擎侧同时落地（`2c21d00`、`d3092d9`）
@@ -269,14 +270,31 @@ AC79_SDK=/tmp/fw-AC79_AIoT_SDK JIELI_TOOLCHAIN=/home/john/.jieli/toolchain \
 - `route` → `ds_route_sync()` 维护 `wire_mask`/`gm_mask`（按 channel 位），`app.c` drain 按 `wire_mask` 决定是否 `plat_midi_send`，GM 侧按 `gm_mask` 喂 EAS。每 block 重算（16 次迭代），页面改完立即生效
 - `voice_mode` → MONO 每步只发**最高音**（和弦按进单音轨时语义正确），`mono_note[t]` 记住本轨挂着的那一个，下一步先掐它
 - **channel 改动的挂音 bug**：`ds_gate_ev` / live pool 原本在 off 时回读 `track.channel`，页面改通道会让 off 发到错误通道 → 改为一律**捕获 note-on 时的通道**
-- 探针：`ts_row` `ts_ch` `ts_prog` `ts_route` `ts_voice` `ts_swing` `ts_gswing` `ts_prog_hash`(djb2)
+- 探针：`ts_row` `ts_ch` `ts_prog` `ts_route` `ts_voice` `ts_swing` `ts_gswing` `ts_owner` `ts_shared` `ts_prog_hash`(djb2)
 
 ### 测试
 - `tests/trkset.txt`：**76 断言**全通过（门、五个字段两端死停、1-based 显示、逐轨独立、PROGRAM 行 djb2、HOME/SEL 出口）
-- `tests/trkset_route.txt`：**ROUTE 到线缆边界** —— 16 轨全 GM → `midi_out == 0`；全 USB → `midi_out == 45`
+- `tests/trkset_route.txt`：**ROUTE 到线缆边界** —— 16 轨全 GM → `midi_out == 0`；全 USB → `midi_out == 32`（45 是旧值：多出的 13 条是每条共享轨各发一次 PC）
+- `tests/trkset_owner.txt`：**21 断言** —— 鼓通道 owner=0(4 条里最低)、bass owner=3（11 条空轨不能抢）、lead owner=4、改空轨 PROG 不动 owner、改 owner PROG 才动
 - `tests_engine/test_trkset.c`：ROUTE 掩码 / MONO 掐音 / SWING / 通道改动后 off 走原通道
 - golden 哈希 `420C4824C85B79CB`→`52CF520E290E322D`（note-ons 242 不变；只有 PC 字节变了，这正是修复的证据）
 - ASAN 全跑 trkset+scale 无报错
+
+## Program Change 归属（`e207583`，2026-10-29）
+
+**PC 是通道状态，不是轨状态。** 接收端每条通道只存一个 program，所以"每轨一个音色"只在一条轨独占通道时成立。
+
+规则（John 2026-10-29 拍板方案 1）：
+- **owner = 该通道上编号最低、有音符、未被 mute/solo 掩掉的轨**（`build_owners()`，每 tick 从 pattern 重算）
+- 只有 owner 发 PC，且只在 `sent_prog[ch] != t->prog` 时发
+- "有音符"只看**自己窗口内**（`loop_len` 之内）的 `nvoices`：窗口外的音符永远不响，和空轨等价
+- 空轨不占通道：11 条默认轨和 bass 同占 ch0，但都没音符，所以 owner 是 trk3
+
+**为什么不用 per-run 标志**：旧的 `pc_sent[16]` 回答的是"这次 run 发过没有"，而接收端记住的是"这条通道是什么音色"，两者跨 pattern 切换就脱节——切到 B，标志还是 1，B 的新 program 永远发不出去。改成 `sent_prog[16]`（每通道记住上次真正送出的值，初值 0xFF=未知）后，判据变成"接收端的副本是否已一致"。
+
+**为什么 owner 每 tick 重算而不是切换时算一次**：owner 是 pattern 的属性。pattern 换了、CH 改了、某轨取消 mute 了，下一个 tick 自然收敛，不需要任何显式的失效通知——这也是 chain 将来能直接复用的原因。
+
+**chain 待办**（今天**完全没有实现**，不能当已存在）：`chain[64]` / `chain_len` 声明了但全仓零读写，`flash[16]` 只有 `ds_init` 的清空循环，`chain_len` 没进 `pack.c`，UI 零命中，`DS_C_LAST4` 是 `return 1 /* TODO */`。真做 chain 时 PC 侧只需保证边界顺序 **off → PC → on**（`ds_stop` 的 CC123 路径不能直接用于 pattern 切换，切换不是 stop）。
 
 ### 两个已修的 bug（都是真 bug，不是测试错）
 1. **`txt_pool` 越界写坏 `jam_menu`**：`SHARED WITH T1 T2 …` 最多 58 字符，塞进 36 字节槽 → 溢出到 `jam_menu`(=50) → 悄悄打开 SAVE 菜单 → 菜单吞掉 K1/K2，"K2 没反应"其实是缓冲区溢出。改用局部 `char[48]` + 列表上限 3 名 + `+N`
