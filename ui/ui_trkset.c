@@ -55,14 +55,9 @@ static const char *const TS_ROUTE_NAME[3] = {"USB", "BLE", "USB+BLE"};
 
 /* On the drum channel a program change picks a KIT, not an instrument, so the
  * PROGRAM row must not say "ACOUSTIC GRAND" on a track whose notes are 36..51.
- * These are the GM2 kit numbers EAS honours; anything else is a kit we have no
- * name for, and the row then says just the number. */
-static const struct { uint8_t prog; const char *name; } GM_KIT[] = {
-    {0,  "STANDARD KIT"}, {8,  "ROOM KIT"},   {16, "POWER KIT"},
-    {24, "ELECTRONIC KIT"}, {25, "TR-808 KIT"}, {32, "JAZZ KIT"},
-    {40, "BRUSH KIT"},    {48, "ORCHESTRA KIT"}, {56, "SFX KIT"}
-};
-#define GM_KIT_N ((int)(sizeof GM_KIT / sizeof GM_KIT[0]))
+ * GM_KIT (the nine GM2 kits) lives in ui_tables.c with GM_PROG: PRESETS walks
+ * the same nine, and neither file should depend on the other's include order.
+ * A kit we have no name for shows just the number. */
 
 /* No resend call here any more. The engine compares each channel's program
  * against what it last told the receiver (sent_prog[]) on every tick while the

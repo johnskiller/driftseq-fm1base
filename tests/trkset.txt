@@ -284,11 +284,14 @@ expect ts_row 1                       # PROGRAM
 out
 turn K2 1
 wait 10
+expect_out USB B9 00 78              # CC0 = 120 on the drum channel: a kits
+expect_out USB B9 20 00              #   change needs bank select
 expect_out USB C9 01 00              # the demo's bass is ch10 (0xC9), and one
                                      # detent up from program 38 is 39 -> 0x01
 out
 turn K2 -1
 wait 10
+expect_out USB B9 00 78
 expect_out USB C9 00 00              # and back: 38 -> 0x00
 out
 # the same for the channel: a program belongs to the channel it moved to
@@ -301,7 +304,8 @@ expect_out USB CA 00 00              # ch10 -> ch11, and program 38 stated there
 out
 turn K2 -1
 wait 10
-expect_out USB C9 00 00              # back on ch10
+expect_out USB B9 00 78              # back on ch10: bank select again
+expect_out USB C9 00 00
 out
 tap ENV
 wait 20

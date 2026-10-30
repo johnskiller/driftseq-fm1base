@@ -112,6 +112,15 @@ const BTN = { SEL: 1, ENV: 2, GLO: 5, HOME: 6, ARP: 8 };
 M.web_boot();
 step(600);                                  /* the demo pattern loads */
 takePc();
+/* Boot leaves the panel on track 0, and the demo's tracks 0..2 are all on the
+ * drum channel (ch9). A kit is a nine-slot set now, not 128 programs, so the
+ * page-by-page section below (one detent -> one program, three detents ->
+ * three) has to run on a MELODIC track or it would be testing the kit walk
+ * instead. Track 3 is the bass on ch0. SELECT is relative and dead-stops, so
+ * +3 from 0 lands exactly there. */
+for (let i = 0; i < 3; i++) enc(EN.SELECT, 1);
+step(200);
+takePc();
 const home = grab();
 
 /* ---- the pages, each entered by the button that documents it ---- */
@@ -173,6 +182,48 @@ page('GLOBAL',    () => { M.web_buttons(1 << BTN.GLO); step(40); press(BTN.HOME)
         const chans = new Set(seen.map(s => s.split(' ')[0]));
         check(chans.size >= 2, 'SELECT: and more than one channel was stated', [...chans].join(' '));
     }
+    step(2600);
+}
+
+/* ---- a drum track: nine kits, and bank select on the wire ---- */
+/* A program change on the drum channel selects a KIT. GM Level 1 defines
+ * exactly one, GM2 names nine, so the knob walks the nine and nothing else;
+ * and the wire needs CC0 120 before the PC or no module changes kit at all.
+ * John 2026-10-30: "我建议drum的preset就用有值的那9个" + "它们需要发bank select才行". */
+{
+    /* back to track 0 (drum, ch9). SELECT is relative and dead-stops, so walk
+     * well past the first track and let it land on 0, then read it back. */
+    enc(EN.SELECT, -16);
+    step(200);
+    takePc();                                /* entering may state a program */
+
+    const kits = [];
+    let bank0 = 0, bank32 = 0;
+    for (let i = 0; i < 8; i++) {            /* eight detents = all nine kits */
+        enc(EN.PRESET, 1);
+        const n = M.web_out_n();
+        const p = new Uint32Array(M.memory.buffer, M.web_out_pkts(), n);
+        for (let k = 0; k < n; k++) {
+            const st = (p[k] >> 8) & 0xFF, d1 = (p[k] >> 16) & 0xFF, d2 = (p[k] >> 24) & 0xFF;
+            if ((st & 0xF0) === 0xB0 && (st & 0x0F) === 9) {
+                if (d1 === 0 && d2 === 120) bank0++;
+                if (d1 === 32 && d2 === 0) bank32++;
+            }
+            /* a program change is TWO bytes: its value is d1, and d2 is not part
+             * of the message at all. Reading d2 here reported every kit as 0. */
+            if ((st & 0xF0) === 0xC0 && (st & 0x0F) === 9) kits.push(d1);
+        }
+        M.web_out_clear();
+    }
+    check(kits.length === 8, 'KIT: eight detents are eight program changes', kits.join(' | '));
+    check(bank0 === 8, 'KIT: every one is preceded by CC0 = 120 (the drum bank)', bank0 + '/8');
+    check(bank32 === 8, 'KIT: and CC32 = 0, so no variation bank is left over', bank32 + '/8');
+    /* the nine GM2 kits, 0-based on the wire */
+    const want = [8, 16, 24, 25, 32, 40, 48, 56];
+    check(JSON.stringify(kits) === JSON.stringify(want),
+          'KIT: the detents walk the nine GM2 kits in order', kits.join(' | '));
+    check(!kits.includes(1) && !kits.includes(2),
+          'KIT: and never stop on an unnamed slot', kits.join(' | '));
     step(2600);
 }
 

@@ -13,7 +13,7 @@ GPL-3.0-only trees (Polly, CTL-1) cannot do.
 |---|---|
 | template builds unchanged | **yes** — 218,928 B app, identity FM-1_1100 |
 | builds with this app | **yes** — 218,928 B, identity **FM-1_9200**, BLE in parts |
-| engine golden hash | **52CF520E290E322D** — unchanged, run inside this project |
+| engine golden hash | **1DFFB74BC111252F** (was 52CF520E290E322D until kit changes began sending bank select) |
 | engine tests | `test_engine` ALL PASSED, `test_euclid` PASSED, `test_golden` hash matches |
 | EAS compiles here | wtsynth / midi / sndlibmgt / voicemgt: **0 errors** |
 | UI ported | **no** — this is the large piece (1,973 lines, see below) |

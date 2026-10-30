@@ -804,6 +804,13 @@ int app_expect(const char *what, int *got)
                 if (w > mx) mx = w;
             }
         }
+        for (i = 0; i < GM_KIT_N; i++) {        /* and the kits PRESETS can stop on */
+            preset_text(b, GM_KIT[i].prog, 1);
+            {
+                int w = (int)cv_text_w(&FONT_M, b);
+                if (w > mx) mx = w;
+            }
+        }
         *got = mx;
     }
     else if (!strcmp(what, "pz_hash"))          /* and a checksum of the text */

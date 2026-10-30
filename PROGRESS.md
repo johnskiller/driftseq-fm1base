@@ -182,7 +182,7 @@ demo            146 B
 
 | 目标 | 构建 | 结果 |
 |---|---|---|
-| golden | `tests_engine/test_golden.c engine/driftseq.c engine/demo_pattern.c` | `52CF520E290E322D` / 242 note-ons |
+| golden | `tests_engine/test_golden.c engine/driftseq.c engine/demo_pattern.c` | `1DFFB74BC111252F` / 242 note-ons |
 | tie | `tools/tie_test.c engine/driftseq.c` | 19/19 PASSED |
 | pack | `tools/pack_test.c engine/pack.c engine/driftseq.c engine/demo_pattern.c` | PACK OK，上限 1,036 B |
 | pack_engine | 同上换 `tools/pack_engine_test.c` | ENGINE ROUND TRIP OK |
@@ -646,3 +646,25 @@ John 问「PRESETS 切换 drum set 的时候一共有多少个 drumset？GM 标�
 **内置 EAS 的实际行为（实测，不是推断）**：鼓通道上**根本不区分 kit**。`eas/wt_200k_G.c` 文件自带统计注释 `Number of banks: 1 / Number of programs: 1`，`eas_banks[]` 只有一个 locale `0x7900`（旋律 bank MSB），鼓 bank `0x7800` 不存在 → `VMFindProgram()`（eas_voicemgt.c:2736）在 `pBanks` 里找不到就回落到 `pPrograms`，而那只有一条 `{ 7864320, 0 }`。实测：鼓轨上 prog 1/8/16/25/56/127 打 kick+snare+tom+hat 五击，WAV 哈希**逐个相同**；prog 0（不发 PC）另有一组哈希。对照实验证明方法有效：旋律轨换 0/24/40/56 音色明显不同（56 与 73 相同，是同一组采样，合理）。
 
 **定案**：GM2 那 9 套鼓要听，得接外部音源（John 有 GS/XG 硬件）。固件侧**不做** kit 支持——要做得把 GM2 的 bank/kit 数据打进固件并让 EAS 查 bank，工作量与收益不成比例。现状保留：鼓轨 PRESETS 照常发 `C9 xx`（外部音源会响应），popup 对 9 个已知号显示名字、其余显示数字。这条不是 bug，是「内置 GM 仅试听」定位下的已知边界。
+
+**鼓轨的 PRESET：九套 kit + bank select（2026-10-30，John 两条指令）**
+
+John：「我建议drum的preset就用有值的那9个」，随后指出更根本的问题：「否则发那么多pc没意义和gm音源对不上、实际上和gs/xg也对不上，它们需要发bank select才行」。
+
+**第二条是本轮真正的修复**。鼓通道的 program 选的是 **kit**，而 GM Level 1 只有一套（Standard），所以裸 PC 在 ch10 上对任何按规范实现的音源都等于没换。GM2 把鼓组放在 **bank 120**，GS 的鼓组同样走 bank select，XG 的 kit 也在自己的 bank MSB 下——三者共同点是**必须先发 Bank Select**。此前 `emit_pc()` 只发 `C9 xx`，这正是「换 kit 不生效」的原因：不是名字表错，是消息缺一半。
+
+**修**：
+- `engine/driftseq.c` `emit_pc()`：鼓通道（ch9）改为三消息 `CC0 120 → CC32 0 → PC`，共 8 字节；旋律通道仍是单个 2 字节 PC。CC32 显式归零，否则音源若停在 GS 的 variation bank 上会忽略 CC0。
+- `ui/ui_preset.c`：鼓轨上 PRESET 只在 `GM_KIT` 那 9 个 program 之间走，不经过 119 个无名槽；两端死停；若轨道停在无名槽（外部编辑器可造成），按旋转方向吸附回集合内。popup 的上下邻居行也走同一个 `kit_land()`，否则会显示 "023 KIT" 这种既不是 kit 也不是来路的数字。
+- `GM_KIT[]` 从 `ui_trkset.c` 移到 `ui/ui_tables.c`（与 `GM_PROG` 同处）：TRACK SET 的 PROGRAM 行和 PRESET 都要用，不再依赖 unity build 的包含顺序。
+- TRACK SET 的 PROGRAM 行**仍保留 0..127**：它是诚实编辑器，外部模块可能把 kit 放在无名槽；PRESETS 是表演控件，只停在有东西的地方。
+
+**标准答案**（John 要求按 GM 而非 EAS）：GM1 = **1 套**；GM2 = **9 套**（1 Standard / 9 Room / 17 Power / 25 Electronic / 26 TR-808 / 33 Jazz / 41 Brush / 49 Orchestra / 57 Sound FX，1 起算；线上是 0/8/16/24/25/32/40/48/56）；GS 另有 128 CM-64/CM-32L，GM2 规范本身不含。
+
+**golden 随之改变，并做了双向断言**：`52CF520E290E322D` → **`1DFFB74BC111252F`**（242 note-ons 不变）。`test_golden.c` 现在同时校验「剔除鼓通道的 bank select CC 后必须精确回到 `52CF520E290E322D`」——实测剔除 2 条 bank 消息后哈希逐字节回到旧值，证明**唯一**的变化就是 bank select，没有别的字节被顺手改动。这条断言取代了「改常数了事」，将来任何隐藏回归都会让它失败。
+
+**测试**：host **347** 断言全过（preset 45→63，其余不变）；引擎 7 套全过；探针 preset **38→43**（新增 KIT 段：八次 detent 依次 8/16/24/25/32/40/48/56、每次前置 CC0=120、CC32=0、不停在无名槽），scale 11 / global 52 / trkset 23 全绿。
+
+**踩到的坑（都是探针错，不是产品错）**：① 探针原来在 track 0 上测「每页 PRESET 都生效」，而 0..2 都是鼓轨，改成先 SELECT 到 track 3（旋律）再测页面；② `pz_prog` 只在转旋钮后更新，读「当前轨 program」要用 `ts_prog`；③ **PC 是两字节消息，值在 d1**，探针读 d2 导致八套 kit 全报 0——这条曾让我误判成 drain 分帧 bug，读原始包 `c9 8 0` 才定位。
+
+**尺寸**：image **524,976**（+320 B）/ 581,564；RAM 68,692；fwsc `c8302226ddf74e2a65460ea10cf1a575`，611,547 B，已拷进 `build/emu/`；wasm `424b161f9c485cca0f4ec5dc9ca39a5a`，413,261 B；8933/8930 双端口同件。真机仍是最早的 `8412daad`，本版未刷。

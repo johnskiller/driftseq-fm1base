@@ -73,3 +73,25 @@ static const char *const GM_PROG[128] = {
     /* 120-127 sound fx */   "FRET NOISE", "BREATH NOISE", "SEASHORE", "BIRD TWEET",
                              "TELEPHONE", "HELICOPTER", "APPLAUSE", "GUNSHOT"
 };
+
+/* The GM2 drum kits, as the WIRE carries them (0-based). On the drum channel a
+ * program change picks a KIT, not an instrument, so both TRACK SET's PROGRAM row
+ * and the PRESETS popup have to be able to say "025 ELECTRONIC KIT" rather than
+ * "026 BRIGHT PIANO".
+ *
+ * These nine are all of GM Level 2: 1 Standard / 9 Room / 17 Power / 25
+ * Electronic / 26 TR-808 / 33 Jazz / 41 Brush / 49 Orchestra / 57 Sound FX
+ * (1-based, the way GM numbers everything else). GM Level 1 defines only the
+ * Standard kit - it has no kit switching at all. GS adds 128 CM-64/CM-32L,
+ * which GM2 itself does not include.
+ *
+ * Lives in the shared tables for the same reason GM_PROG does: TRACK SET names
+ * a kit on its PROGRAM row, PRESETS walks the nine (John 2026-10-30: "我建议drum
+ * 的preset就用有值的那9个"), and nothing here should depend on whether
+ * ui_trkset.c happened to be included before ui_preset.c. */
+static const struct { uint8_t prog; const char *name; } GM_KIT[] = {
+    {0,  "STANDARD KIT"}, {8,  "ROOM KIT"},   {16, "POWER KIT"},
+    {24, "ELECTRONIC KIT"}, {25, "TR-808 KIT"}, {32, "JAZZ KIT"},
+    {40, "BRUSH KIT"},    {48, "ORCHESTRA KIT"}, {56, "SFX KIT"}
+};
+#define GM_KIT_N ((int)(sizeof GM_KIT / sizeof GM_KIT[0]))

@@ -268,11 +268,13 @@ tap PLAY
 wait 300
 tap PLAY
 wait 20
-# 34 = the demo's own notes and CCs (29) plus 5 program changes this walk added.
-# Those 5 are the SELECT fix, not noise: walking the tracks down to USB states
-# each channel's program as the selection lands on it (C0 00 / C0 26 / C9 00 on
-# the way back), and the PLAY that follows re-states ch0 and ch1 once because
+# 36 = the demo's own notes and CCs (29) plus 7 program-change BYTES this walk
+# added. Those are the SELECT fix, not noise: walking the tracks down to USB
+# states each channel's program as the selection lands on it (C0 00 / C0 26 / C9
+# on the way back), and the PLAY that follows re-states ch0 and ch1 once because
 # the owner rule picked a different track than the walk last left on that
 # channel (C0 26 / C1 51) - the same convergence, one message later.
+# A kit change on the drum channel is THREE messages (CC0 120, CC32 0, PC), so
+# it counts 4 bytes where a melodic channel counts 2: 34 was five bare PCs.
 # Before SELECT stated programs this run measured 29.
-expect midi_out 34
+expect midi_out 36

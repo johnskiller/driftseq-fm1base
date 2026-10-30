@@ -46,17 +46,86 @@ static void preset_text(char *b, uint8_t prog, uint8_t is_kit)
     strcpy_(txt_end(b), GM_PROG[prog & 127]);
 }
 
+/* ---- drum tracks: the nine kits, not 128 numbers ----
+ *
+ * John 2026-10-30: "我建议drum的preset就用有值的那9个". A program change on the
+ * drum channel selects a KIT, and GM2 names exactly nine of them; the other 119
+ * numbers are unnamed slots that every receiver maps back to its standard kit
+ * (measured on the built-in EAS: prog 1/8/16/25/56/127 all render identical
+ * audio). Stepping through them is 119 detents of nothing.
+ *
+ * So on a drum track the knob walks GM_KIT and nothing else. TRACK SET's PROGRAM
+ * row keeps the full 0..127: it is the honest editor, and an external module may
+ * well have kits sitting in the unnamed slots. PRESETS is the performance
+ * control, and a performance control should only stop where something is.
+ */
+static int kit_slot(uint8_t prog)         /* -1 if this program is not a named kit */
+{
+    int k;
+    for (k = 0; k < GM_KIT_N; k++)
+        if (GM_KIT[k].prog == prog)
+            return k;
+    return -1;
+}
+
+/* The kit `n` detents away in direction d, dead stop at both ends. A program
+ * parked on an unnamed slot (an external editor can put one there) snaps into
+ * the set in the direction of the turn instead of dead-stopping on nothing. */
+static int kit_land(uint8_t prog, int d, int n)
+{
+    int k = kit_slot(prog), i;
+
+    if (k >= 0) {
+        k += d * n;
+        if (k < 0) k = 0;
+        if (k >= GM_KIT_N) k = GM_KIT_N - 1;
+        return (int)GM_KIT[k].prog;
+    }
+    /* off the set: first kit past it, then n-1 more slots */
+    k = (d > 0) ? GM_KIT_N : -1;
+    for (i = 0; i < GM_KIT_N; i++)
+        if ((d > 0) ? (GM_KIT[i].prog > prog) : (GM_KIT[i].prog < prog)) {
+            k = i;
+            break;
+        }
+    if (d > 0) {
+        if (k >= GM_KIT_N) k = GM_KIT_N - 1;
+        k += n - 1;
+        if (k >= GM_KIT_N) k = GM_KIT_N - 1;
+    } else {
+        if (k < 0) k = 0;
+        k -= n - 1;
+        if (k < 0) k = 0;
+    }
+    return (int)GM_KIT[k].prog;
+}
+
 /* One detent = one program (PZ_FAST with GLO down), dead stop at 0 and 127, and
  * every detent re-arms the popup so it closes only after the turning stops. */
 static void preset_encoder(uint8_t enc, int8_t det)
 {
     ds_track *tr = &eng.pat.track[sel_track & 15u];
-    int step = (det > 0 ? 1 : -1) * (glo_held ? PZ_FAST : PZ_STEP);
-    int v = (int)tr->prog + step;
+    int step, v;
+
     if (enc != EN_PRESET)
         return;
-    if (v < 0) v = 0;
-    if (v > 127) v = 127;
+    step = (det > 0 ? 1 : -1) * (glo_held ? PZ_FAST : PZ_STEP);
+    v = (int)tr->prog;
+    if (tr->channel == 9) {
+        /* GM2 names nine kits; the other 119 program numbers are unnamed slots
+         * that every receiver maps back to its standard kit (measured on the
+         * built-in EAS: prog 1/8/16/25/56/127 all render identical audio).
+         * Stepping through them is 119 detents of nothing, so the knob walks the
+         * nine and nothing else. TRACK SET's PROGRAM row keeps all 128 - it is
+         * the honest editor, and a module may well have kits in the unnamed
+         * slots. */
+        int n = (step < 0 ? -step : step);
+        v = kit_land(tr->prog, step > 0 ? 1 : -1, n > 0 ? n : 1);
+    } else {
+        v += step;
+        if (v < 0) v = 0;
+        if (v > 127) v = 127;
+    }
     if (v != (int)tr->prog) {
         tr->prog = (uint8_t)v;
         ds_send_prog(&eng, sel_track);       /* the keys audition it now */
@@ -91,11 +160,26 @@ static void preset_draw(void)
     char *h = txt_next();
     int is_kit = (tr->channel == 9);
     int32_t w;
-    int x, lo = (int)tr->prog > 0, hi = (int)tr->prog < 127;
+    int x, lo, hi;
 
+    /* The neighbours are the same nine kits on a drum track, so they come from
+     * the same walk the knob uses - prog-1 there would print "023 KIT" above
+     * "024 ELECTRONIC KIT", a number that is not a kit and is not where you
+     * came from either. */
+    if (is_kit) {
+        lo = kit_land(tr->prog, -1, 1) != (int)tr->prog;
+        hi = kit_land(tr->prog, +1, 1) != (int)tr->prog;
+    } else {
+        lo = (int)tr->prog > 0;
+        hi = (int)tr->prog < 127;
+    }
     preset_name(b, tr->prog, is_kit);
-    if (lo) preset_name(pv, (uint8_t)(tr->prog - 1), is_kit);
-    if (hi) preset_name(nx, (uint8_t)(tr->prog + 1), is_kit);
+    if (lo)
+        preset_name(pv, (uint8_t)(is_kit ? kit_land(tr->prog, -1, 1)
+                                         : (int)tr->prog - 1), is_kit);
+    if (hi)
+        preset_name(nx, (uint8_t)(is_kit ? kit_land(tr->prog, +1, 1)
+                                         : (int)tr->prog + 1), is_kit);
 
     /* The canvas is 240x224 and the footer owns the last 24 rows: the popup
      * paints 0..215 and then paints its own footer, because the panel still works

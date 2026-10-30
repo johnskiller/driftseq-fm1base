@@ -402,6 +402,34 @@ static void build_owners(const ds_state *s, uint8_t *owner, int any_solo)
 }
 
 static void emit_pc(ds_state *s, const ds_track *t) {
+    uint8_t ch = (uint8_t)(t->channel & 0x0F);
+
+    /* A drum channel's program selects a KIT, and GM Level 1 has exactly one -
+     * so a bare PC on ch10 does nothing on a card that follows the spec. GM2
+     * puts the kits in bank 120 (CC0 = 120) and expects
+     * Bank Select -> Program Change, which is also what GS does for its drum
+     * sets; XG answers the same way for the kits this app can reach. Without
+     * the bank, "025 ELECTRONIC KIT" is just another PC into the standard kit -
+     * John 2026-10-30: "否则发那么多pc没意义和gm音源对不上、实际上和gs/xg也对不上，
+     * 它们需要发bank select才行".
+     *
+     * So a kit change is three messages: CC0 120, CC32 0, PC n. CC32 is
+     * spelled out because a module that was left on a variation bank (GS's
+     * CC32 selects the variation) would otherwise ignore the CC0 alone. Four
+     * bytes more than a PC, and it is the difference between selecting a kit
+     * and selecting nothing. */
+    if (ch == 9) {
+        if (s->out_len + 8 > sizeof s->out) return;
+        s->out[s->out_len++] = (uint8_t)(0xB0u | ch);
+        s->out[s->out_len++] = 0;                /* bank select MSB: 120 = drums */
+        s->out[s->out_len++] = 120;
+        s->out[s->out_len++] = (uint8_t)(0xB0u | ch);
+        s->out[s->out_len++] = 32;               /* bank select LSB: 0, no variation */
+        s->out[s->out_len++] = 0;
+        s->out[s->out_len++] = (uint8_t)(0xC0u | ch);
+        s->out[s->out_len++] = t->prog & 0x7F;
+        return;
+    }
     if (s->out_len + 2 > sizeof s->out) return;
     s->out[s->out_len++] = 0xC0 | (t->channel & 0x0F);
     s->out[s->out_len++] = t->prog & 0x7F;

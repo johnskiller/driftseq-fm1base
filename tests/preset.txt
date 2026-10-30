@@ -88,16 +88,78 @@ wait 10
 expect pz_prog 44                     # back to one a detent when GLO is up
 out
 
-# ---- a track on the drum channel picks a KIT, not a voice ----
+# ---- a drum track on PRESETS walks the nine GM2 kits, not 128 numbers ----
+#
+# A program change on the drum channel picks a KIT. GM Level 1 defines exactly
+# one, so stepping 128 program numbers would be 119 detents into the standard kit
+# again; GM2 names nine. The knob walks the nine and dies at both ends. John
+# 2026-10-30: "我建议drum的preset就用有值的那9个".
 turn SELECT -3
 wait 20
 expect track 0
 turn PRESET 1
 wait 10
-expect pz_prog 1
-# "002 KIT", not "002 BRIGHT PIANO": a program change lands on a channel
-expect pz_hash 15839
-expect_out USB C9 01 00
+expect pz_prog 8                      # 001 STANDARD -> 009 ROOM
+expect pz_hash 24675                  # "009 ROOM KIT"
+# and the wire carries the BANK, not a bare PC: a kit lives in bank 120, so
+# CC0 120 -> CC32 0 -> PC is what a GM2/GS/XG module needs to see. John
+# 2026-10-30: "它们需要发bank select才行".
+expect_out USB B9 00 78               # CC0 = 120 (0x78) on ch10
+expect_out USB B9 20 00               # CC32 = 0: no variation bank left over
+expect_out USB C9 08 00               # PC 8 = ROOM KIT
+out
+turn PRESET 1
+wait 10
+expect pz_prog 16                     # POWER
+turn PRESET 1
+wait 10
+expect pz_prog 24                     # ELECTRONIC
+turn PRESET 1
+wait 10
+expect pz_prog 25                     # TR-808: adjacent in name, not 8 apart
+turn PRESET 1
+wait 10
+expect pz_prog 32                     # JAZZ
+turn PRESET 1
+wait 10
+expect pz_prog 40                     # BRUSH
+turn PRESET 1
+wait 10
+expect pz_prog 48                     # ORCHESTRA
+turn PRESET 1
+wait 10
+expect pz_prog 56                     # SFX
+out
+turn PRESET 1
+wait 10
+expect pz_prog 56                     # dead stop: SFX is the last kit
+turn PRESET -1
+wait 10
+expect pz_prog 48
+# and a melodic track is untouched by all this: its program really is 0..127
+# (ts_prog reads the TRACK, pz_prog only says what the last popup named)
+turn SELECT 3
+wait 20
+expect track 3
+expect ts_prog 44
+turn PRESET 1
+wait 10
+expect ts_prog 45
+turn PRESET -1
+wait 10
+expect ts_prog 44
+out
+# back to a melodic track for the page-by-page section: that section is about
+# the knob answering on every page, and a drum track would make each detent a
+# three-message kit change instead of one PC. Track 3 is ch0, program 44.
+# (SELECT is relative and dead-stops: from track 3, -3 lands on 0 and +3 on 3.)
+turn SELECT -3
+wait 20
+expect track 0
+turn SELECT 3
+wait 20
+expect track 3
+expect ts_prog 44
 out
 
 # ---- the popup closes by itself a few seconds after the last detent ----
@@ -106,6 +168,7 @@ wait 2800
 expect pz_ttl 0
 
 # ---- the widest name in the bank still fits the screen ----
+# (the nine kit names are in this scan too: "024 ELECTRONIC KIT" is 218 px)
 expect pz_wmax <224
 
 # ---- PRESET works on EVERY page, including the ones that own the four knobs ----
@@ -113,7 +176,9 @@ expect pz_wmax <224
 # TRACK SET and GLOBAL take every encoder id, so a page dispatch that runs before
 # this one leaves the knob dead exactly where a player is most likely to want it.
 # Found on the web emu at TRACK SET. Each page is entered, one detent turned, and
-# the program read back.
+# the program read back. Track 3 (ch0) sits on program 44 here, so a detent is
+# 45 -> 46 -> 47 -> 48; the channel is not the drum channel, which keeps this
+# section about PAGES rather than about kits.
 tap HOME                              # (the page above is TRACK SET: ENV toggles)
 wait 20
 expect mode 0
@@ -122,8 +187,8 @@ wait 20
 expect mode 4
 turn PRESET 1
 wait 10
-expect pz_prog 2
-expect_out USB C9 02 00
+expect pz_prog 45
+expect_out USB C0 2D 00
 out
 
 press GLO                             # GLOBAL, page 1
@@ -135,8 +200,8 @@ wait 20
 expect mode 5
 turn PRESET 1
 wait 10
-expect pz_prog 3
-expect_out USB C9 03 00
+expect pz_prog 46
+expect_out USB C0 2E 00
 out
 tap HOME
 wait 20
@@ -147,8 +212,8 @@ wait 20
 expect mode 3
 turn PRESET 1
 wait 10
-expect pz_prog 4
-expect_out USB C9 04 00
+expect pz_prog 47
+expect_out USB C0 2F 00
 out
 tap SEL                               # SEL closes SCALE (a HOME would land on GRID)
 wait 20
@@ -160,8 +225,8 @@ wait 20
 expect mode 2
 turn PRESET 1
 wait 10
-expect pz_prog 5
-expect_out USB C9 05 00
+expect pz_prog 48
+expect_out USB C0 30 00
 out
 tap HOME
 wait 20
