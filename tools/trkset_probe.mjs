@@ -194,21 +194,31 @@ function bandTop(fb) {
  * on MUTE, and sits clear of the page dots on x211..241. */
 {
     const pill = (fb) => {
-        /* count columns in the header's right half whose mid row is neither the
-         * bar background nor black: a filled pill is a solid run */
-        let run = 0, best = 0;
+        /* width of the filled chip: columns in the header's right half whose mid
+         * row is neither the bar background nor black. One letter wide (glyph+8),
+         * so a word-sized pill fails this and a 14px chip passes. */
+        /* a column counts if ANY row of the chip is filled: the knocked-out
+         * letter punches holes in the mid row, so a single-row scan measures the
+         * gaps between strokes, not the chip. */
+        let first = -1, last = -1;
         for (let x = 150; x < 211; x++) {
-            const v = px(fb, x, 12);
-            if (v !== stored(24, 24, 32) && v !== 0) { run++; if (run > best) best = run; }
-            else run = 0;
+            let on = false;
+            for (let y = 5; y < 19; y++) {
+                const v = px(fb, x, y);
+                if (v !== stored(24, 24, 32) && v !== 0) { on = true; break; }
+            }
+            if (on) { if (first < 0) first = x; last = x; }
         }
-        return best;
+        return first < 0 ? 0 : last - first + 1;
     };
     const plain = pill(page);
     enc(5, 9);                                  /* EN_K3 (enum: 0,1,2,3,4,5) to the MUTE end */
     const muted = grab();
     const p2 = pill(muted);
-    check(p2 > plain, 'MUTE draws a filled pill in the header', 'before=' + plain + ' after=' + p2);
+    check(p2 > plain, 'MUTE draws a filled chip in the header', 'before=' + plain + ' after=' + p2);
+    /* one letter, not a word: M is 5px of glyph, so the chip is 13..14px wide.
+     * A word ("MUTE" = 22px + 8) would be 30. */
+    check(p2 > 8 && p2 < 20, 'the chip is one letter wide, not a word', p2 + 'px');
     /* the pill must end before the dots start, or the dots sit inside the fill */
     let last = -1;
     for (let x = 150; x < 240; x++) if (px(muted, x, 12) !== stored(24, 24, 32) && px(muted, x, 12) !== 0) last = x;

@@ -243,16 +243,18 @@ static void draw_trkset(void)
         /* The context says what the channel MEANS (CH=10 is the drum channel).
          * MUTE/SOLO used to be appended to it ("MELODIC MUTE"), which failed at
          * exactly the job it had: same white text, so the silence read as part
-         * of the channel's name (John 2026-10-30). It is a pill now - a shape
-         * says "state" before the word is read - in the same vocabulary as the
-         * hero column's M/S badges. */
+         * of the channel's name (John 2026-10-30). It is a one-letter pill now:
+         * the shape separates a state from a name, and the letter is the hero
+         * column's own bare M / S, so the two screens agree without a legend.
+         * One letter also makes the chip small, which was John's second note -
+         * a word-sized pill took a third of the bar for two bits of state. */
         h.ctx = (char *)(is_drum_trk() ? "DRUM" : "MELODIC");
         h.right = (char *)0;
         h.right_c = TB_TX;
         h.dots = 1;
         h.page = 3;
-        h.badge = tr->mute ? "MUTE" : (tr->solo ? "SOLO" : (char *)0);
-        h.badge_c = tr->mute ? C_AMB : TRACK_HUE(sel_track);
+        h.badge = tr->mute ? "M" : (tr->solo ? "S" : (char *)0);
+        h.badge_c = HERO_MS;                     /* the hero column's M/S colour */
         ui_draw_header(&h);
     }
     for (i = 0; i < TS_NROW; i++) {

@@ -94,11 +94,11 @@ sizeof(ds_pattern) 17,616 B
 固件构建（`build.py`，最后一次 = Track Settings 之后）：
 
 ```
-image 518,892 B of 581,564   余 62,672
+image 518,876 B of 581,564   余 62,688
 RAM   .data+.bss 68,612 B of 98,304   余 29,692
 pool  254,776 B of 344,064            余 89,288
-fwsc  611,547 B, identity FM-1_9200  md5 73dca919（未刷机）
-wasm  398,338 B  md5 0358207a（8930 HTTPS / 8933 HTTP 均在发）
+fwsc  611,547 B, identity FM-1_9200  md5 d0380536（未刷机）
+wasm  398,289 B  md5 934e0b2a（8930 HTTPS / 8933 HTTP 均在发）
 ```
 
 Track Settings 一页的代价（实测，9807888 → 现 HEAD 两次真建）：**image 513,500 → 518,124 = +4,624 B flash**，**pool 254,760 → 254,776 = +16 B RAM**（`mono_note[16]` + gate/live 各 +1 字节的 `ch` 字段）。构成：128 条 GM 名表 + 9 条鼓组名 ≈1.5 KB、页面绘制 ≈1.2 KB、`ds_route_sync`+MONO+capture-channel ≈0.5 KB、探针与 hint 其余。
@@ -264,7 +264,7 @@ AC79_SDK=/tmp/fw-AC79_AIoT_SDK JIELI_TOOLCHAIN=/home/john/.jieli/toolchain \
 - 下半屏 = **CHANNEL MAP**：16 格，实心=本轨，亮数字空心=别的轨占着，暗=空闲
 - 底行只回答一个本页其它地方答不出的问题：**谁的 PROG 在这条通道上算数**（`2c21d00` 之后的 owner 规则，见下节）。本轨是 owner → `SHARED WITH T1 T2` / `NO OTHER TRACK SOUNDS`；本轨不是 owner → `T3 SETS THE SOUND`（或 `EMPTY, T3 SETS THE SOUND`）。空轨不算"共用"：11 条从没录过的默认轨和 bass 同占 ch0，但它们不出声也不该占通道的音色
 - 顶栏 `h.page = 3`（HDR_DOTS 仍 5；曾试 6 但越出右边界，回退）
-- **MUTE/SOLO 改成药丸底标**（`hdr_t.badge` / `badge_c`，2026-10-30）：原先拼在 ctx 里成 `MELODIC MUTE`，同色同字号，状态读成了名字的一部分。药丸 MUTE=橙 `C_AMB`、SOLO=轨色，右对齐在页面点左侧 x205（点占 211..241；药丸压到点上会盖掉点）
+- **MUTE/SOLO 改成单字母底标**（`hdr_t.badge` / `badge_c`，2026-10-30）：原先拼在 ctx 里成 `MELODIC MUTE`，同色同字号，状态读成了名字的一部分。现在是 **M / S 单字母药丸**，与 hero 列同一字形同一颜色（`HERO_MS = RGB565(224,160,64)`，两边共用一个宏）。药丸 = 一个字形 + 左右各 4px = 14px 宽，x194..208，页面点从 211 起。字母**画两遍**：`cv_text` 是覆盖率混合，5px 宽的 M 在亮橙上只叠到 60%，笔画变橄榄色糊在底里（vision 读成 "H"）；画两遍覆盖率平方，笔画核心落到 TB_BG、边缘留一个软像素
 - **行字号 12px → 16px**（`TS_Y0 30` / `TS_PITCH 22`，标签 FONT_S、值 FONT_B），五行 y30..140，channel map 下移到 144/158..178，底行 186。量得每行墨迹 11px 高，值最右 x=216，不出边
 - **本页弹琴不写 jam**（`ui.c` 里 `uint8_t jam = (ui_mode != M_TRKSET)`）：键照样 `ds_live_on/off`（试听 PROGRAM、试听 ROUTE），只是不进 jam ring；GRID 上同一次按键仍然入 jam，所以这是页面属性不是键盘坏了
 

@@ -500,6 +500,9 @@ static int next_event_run(uint8_t t, uint8_t s, uint8_t len, uint8_t start)
     return (int)len - rel;
 }
 /* Number of pages the 5-dot indicator shows. */
+/* The colour the hero column's M and S share: one vocabulary for "this track is
+ * not sounding as itself", on every screen that shows it. */
+#define HERO_MS RGB565(224, 160, 64)
 #define HDR_DOTS 5
 
 /* The one header bar every page shares.
@@ -584,16 +587,23 @@ static void ui_draw_header(const hdr_t *h)
         cv_text(rx, HDR_TY, &FONT_S, h->right, h->right_c);
     }
     if (h->badge) {
-        /* right-aligned in the same slot as `right`, knocked out of the fill:
-         * the badge is a STATE, and a state read as text in the same white as
-         * the page's name is not a state, it is a word. */
-        int bw = (int)cv_text_w(&FONT_T, h->badge) + 8;
-        /* left of the page dots, which own x211..241: a badge that reached under
-         * them read as a smudge on the pill (the dots are 3px and dark, so they
-         * vanished into the fill) */
-        int bx = (h->dots ? 205 : 234) - bw;
+        /* Right-aligned in the same slot as `right`, knocked out of the fill: the
+         * badge is a STATE, and a state read as text in the same white as the
+         * page's name is not a state, it is a word. One glyph plus 4px on each
+         * side, centred: the word-sized pill took a third of the bar to say two
+         * bits (John 2026-10-30), and a single letter needs to read as a chip,
+         * not as a letter lost in a box. Left of the page dots (x211..241). */
+        int gw = (int)cv_text_w(&FONT_T, h->badge);
+        int bw = gw + 8;
+        int bx = (h->dots ? 208 : 234) - bw;
         cv_round_rect(bx, 5, bw, 14, 4, h->badge_c);
-        cv_text(bx + 4, 7, &FONT_T, h->badge, TB_BG);
+        /* Twice: cv_text blends the glyph's antialiased coverage, and a 5px wide
+         * M at 60% over bright orange came out muddy olive - the letter read as
+         * noise inside the chip (a vision pass saw "H"). Drawing it on itself
+         * squares the coverage, so the core of each stroke lands on TB_BG while
+         * the edges keep one soft pixel. */
+        cv_text(bx + ((bw - gw) >> 1), 7, &FONT_T, h->badge, TB_BG);
+        cv_text(bx + ((bw - gw) >> 1), 7, &FONT_T, h->badge, TB_BG);
     }
 }
 
@@ -675,9 +685,9 @@ static void draw_home(void)
         cv_text(15, y, &FONT_T, txt_num(0, tr->loop_len), muted ? RGB565(74, 74, 82) : RGB565(106, 106, 120));
         cv_text(28, y, &FONT_T, "U", muted ? RGB565(74, 74, 82) : RGB565(122, 122, 136));
         if (muted)
-            cv_text(36, y, &FONT_T, "M", RGB565(224, 160, 64));
+            cv_text(36, y, &FONT_T, "M", HERO_MS);
         else if (tr->solo)
-            cv_text(36, y, &FONT_T, "S", RGB565(224, 160, 64));
+            cv_text(36, y, &FONT_T, "S", HERO_MS);
         cv_rect(HX0, y, HX1 - HX0, 11, muted ? RGB565(20, 20, 24) : RGB565(29, 29, 38));
         if (muted) {
             if (t == sel_track)
