@@ -94,7 +94,7 @@ sizeof(ds_pattern) 17,616 B
 固件构建（`build.py`，最后一次 = Track Settings 之后）：
 
 ```
-image 523,040 B of 581,564   余 58,524
+image 523,392 B of 581,564   余 58,172
 RAM   .data+.bss 68,612 B of 98,304   余 29,692
 pool  254,776 B of 344,064            余 89,288
 fwsc  611,547 B, identity FM-1_9200  md5 9a07cb18（未刷机）
@@ -272,37 +272,56 @@ AC79_SDK=/tmp/fw-AC79_AIoT_SDK JIELI_TOOLCHAIN=/home/john/.jieli/toolchain \
 
 入口 **GLO+HOME**（按下沿），出口裸 HOME（松手沿），**两页之间也是 GLO+HOME**（同一个和弦，按一次翻一页，死循环两页）。第 6 个页面点，`h.page = 4`。**header 不再有药丸**：GLOBAL 不是某条轨的页面，没有编号可挂；页号写进 header 文字本身（`GLOBAL 1/2`、`GLOBAL 2/2`），用 `/` 而不是 `-` 是因为 2/2 读起来是"两页里的第二页"，不是"2 减 2"。John 2026-10-30 定：「header 前面的药丸 1 就不需要了」。
 
-### 第 1 页 —— 全机四个数
+### 第 1 页 —— 全机三个数
 
 | 行 | 引擎字段 | 步进 | 备注 |
 |---|---|---|---|
 | TEMPO | `eng.bpm` 20..300 | 1 BPM，GLO 时 10 | `ds_set_bpm` 之前**全仓零调用**，tempo 在此之前不可改 |
 | SWING | `eng.global_swing` | 1，GLO 时 10 | 与 TRACK SET 第 5 行是**两个数**：`global × trk × 0.5` |
 | GM SYNTH | `set.gm_on` → `glo_gm_on` | 开关 | 见下 |
-| BLUETOOTH | `set.ble_off` | 开关 | 与 `plat_ble_enable` 同步 |
 
-- **K1 走行**（死停 0..3）、**K2 改值**、K3/K4 空
-- 4 行 y30 + 26*i，band `cv_rect(4, y-6, 232, 21, RGB565(26,26,34))`
-- 行下三条**只读**读数（y136 / 152 / 168，`FONT_T` 灰标签 + `FONT_S` 值）：
+- **K1 走行**（死停 0..2）、**K2 改值**、K3/K4 空
+- 3 行 `GL_Y0 30 / GL_PITCH 34` → y30 / 64 / 98；标签与值都是 `FONT_M`（24px 字号，John: "字号还有空间就加大"）；band `cv_rect(4, y-6, 232, 25, RGB565(26,26,34))`
+- 行下三条**只读**读数（y146 / 163 / 180，`FONT_T` 灰标签 + `FONT_S` 值）：
   - `CPU` —— `plat_cpu_pct()`，进 5% 才刷新（这个数是平台每 500 ms 量的，不是每帧）
   - `XRUNS` —— `plat_xruns()`，非零时值转琥珀色（`C_AMB`），这是本页唯一会变色的读数
-  - `PATTERN` —— 实际字节数 + 折算扇区，如 `1836/4096 1S`。**不是**"剩余 pattern 空间"：flash 里目前只存 settings（`OBJ_SETTINGS`），pattern bank 还没设计（`chain[64]` 全仓零读写），所以能报的只有"这个 pattern 要是存下来要占多少"。报一个并不存在的银行余量会是在说谎。测量走 `ds_pack_track()` **逐轨累加**（pattern 就是 16 条 track 记录的拼接），每次一秒一次；用整对象缓冲会是 3,840 B 的池，实际只要 1,040 B
-- 最后一行注释 `TAP: RIGHTMOST KEY`（y194）
+  - `PATTERN` —— 实际字节数 + 折算扇区，如 `146/3840 1S`。**不是**"剩余 pattern 空间"：flash 里目前只存 settings（`OBJ_SETTINGS`），pattern bank 还没设计（`chain[64]` 全仓零读写），所以能报的只有"这个 pattern 要是存下来要占多少"。报一个并不存在的银行余量会是在说谎。测量走 `ds_pack_track()` **逐轨累加**（pattern 就是 16 条 track 记录的拼接），一秒一次；用整对象缓冲会是 3,840 B 的池，实际只要 1,040 B
+- 最后一行注释 `TAP: RIGHTMOST KEY`（y200）
 
-**为什么读数用"进 % 才刷新"而不是每帧算**：`ds_pack_pattern()` 要序列化整条 pattern，每帧调等于每帧做一次存档。三条读数各自记住上一次显示的值，变化不足一档就不重算。
+**为什么读数用"进 % 才刷新"而不是每帧算**：`ds_pack_pattern()` 要序列化整条 pattern，每帧调等于每帧做一次存档。
 
-### 第 2 页 —— BLE 设备（central 那一半）
+### 第 2 页 —— 蓝牙：开关 + 设备列表
 
-- 顶行是**链接状态**（不是行标签）：`BT OFF` / `SCANNING` / `CONNECTING` / `SEARCHING` / `CONNECTED`，琥珀色，来自 `plat_ble_device()`
-- 列表 5 行 y44 + 22*i，名字走 `btdev_name()`；选中行右侧三格信号条
-- **K1 走列表，K2/K3/K4 空，SAVE = 连接 / 断开**
-- 页脚被 `draw_global2` 自己覆盖 K1 的单词为 `DEVICE`：这一页 K1 的主语是列表，不是"行"。K2 没有主语（SAVE 才是连接），页脚不写
-- 空列表时写 `NO DEVICES`；扫描中点 `SCANNING`
-- 提示行 `SAVE: CONNECT` / `SAVE: DISCONNECT`
+John 2026-10-30：**"BLE的开关可以移到第二页，这样第一页空间大一点，第二页也不至于这么空旷"**。移过来之后，这一页和第一页是**同一套语法**：K1 走行，K2 改当前行的值，SAVE 提交。
 
-**进页面自动开始扫描**：`global_frame()` 在 `ui_mode == M_GLOBAL && gl_page && !ui.looking` 时置 `ui.looking = 1`；离开页面（`global_leave()`）和总开关关闭（`BLE_OFF`）时清掉并 `plat_ble_scan(0)`。`ui.looking` 是平台的扫描开关，`btdev_page()` 靠它决定要不要驱动列表。
+| 行 | 内容 | K2 |
+|---|---|---|
+| 0 | `BLUETOOTH  ON/OFF` | 开关（`plat_ble_enable` + `set.ble_off`） |
+| 1.. | 扫描到的设备名 + 右侧信号条 | 无（连接是 SAVE，不是一个数） |
+| 1（占位） | 链接行：`btdev_name()` + `LINKED`/`LINKING` | 无 |
 
-**两页都要扫吗**：不。第 1 页不碰 radio；第 2 页一打开就扫，因为这一页唯一的内容就是"附近有什么"。
+- 行几何：y34 + 18*i，band `cv_rect(4, y-5, 232, 17, …)`
+- **底行一个 `FONT_T` 行两件事**：左边是 radio 状态（`SCANNING` / `CONNECTING name` / `FINDING MIDI` / `CONNECTED name` / `RADIO OFF`），右边是 `SAVE: CONNECT` / `SAVE: LET GO`。原来状态行在列表**上方**，读起来像一行设备（"SCANNING" 像设备名），所以挪到下面
+- 空列表时写 `NO DEVICES`（radio 开）/ `LOOKING...`（正在扫）
+- 页脚：K1 = `DEVICE`，K2 = `ON/OFF` **仅当光标在开关行**；设备行 K2 留空
+- 进页面自动扫描，离开即停（`ui.looking`）
+
+**为什么开关必须是行，不能是页面顶部一条**：页面只有一套旋钮语法，K1 的主语在整页必须是同一个东西（这里是"列表"）。开关若独占一行但不在列表里，K1 就得在两种语义间切换，玩家要先想"现在 K1 走的是哪种"。
+
+**链接行为什么要单独一行**：连上之后 btdev 停止扫描（`btdev_page` 只在 `BLE_DEV_OFF` 时维持 scan），`btdev_count()` 立刻归零。没有这行，光标会被挤回开关行，`SAVE` 再也按不到设备——**连得上，断不了**。测试把这个抓出来了（`SAVE` 连上后 `ble_dev==4` 但 `gl2_n==0`）。
+
+### 一个 UI 陷阱：同帧释放两个键 = 误判离开
+
+`ui_input` 按 `EN_K1..EN_K4、GLO、HOME` 的顺序**逐个**释放。GLO+HOME 这种和弦，如果同一帧里两个键都放开，先处理 GLO 会把 `glo_held` 清零，紧接着 HOME 的释放就被读成"裸 HOME 离开页面"——**翻页变成了关页**。
+
+host 测试脚本把 HOME 的释放写在 GLO 之前，正好把这个 bug 藏住了；wasm 里按帧推进，暴露出来。
+
+修法：`glo_held` 之外再加一个 `gl_chord` 锁存，在**按下**时置位（"这次 HOME 是被和弦按下的"），在 HOME 的**释放**消费它一次。
+
+### 另外两个踩到的坑
+
+- **`gl_bt_set(set_ble_off() ? 0 : 1)` 参数反了**：`set_ble_off()` 为 1 表示已存 OFF，问 `? 0 : 1` 等于"已经 ON 的时候再要 ON"——开关永远关不掉。正确是 `gl_bt_set(set_ble_off())`。
+- **`const char *label = name;` 悬垂指针**：`name` 声明在 else 块内、`cv_text` 在块外读，第一次画第 2 页就 segfault。缓冲区提到循环层。
 
 ### 一个 UI 陷阱：同帧释放两个键 = 误判离开
 
@@ -326,7 +345,9 @@ host 测试脚本把 HOME 的释放写在 GLO 之前，正好把这个 bug 藏�
 **为什么读数在行下面而不是第五行**：它们不是设置，K1/K2 碰不到。用 `FONT_T` 灰标签 + `FONT_S` 值、行距 16px，视觉上和上面四条 band 行分开——band 是"能改的"，无 band 是"只读的"。
 
 ### 探针
-`tools/global_probe.mjs` **35 项**：第 1 页四条行带 + 药丸已消失 + 注释两行 + `TAP` 行 + 页脚无溢出；第 2 页状态行 / 列表 / 信号条 / SAVE 提示翻转 / 连接后状态行变化；和弦翻页回第 1 页、裸 HOME 离开页且本页墨迹归零；**以及 TRACK SET 的轨号药丸仍在**（`hdr_t = {0}` 的回归保护）。
+`tools/global_probe.mjs` **46 项**：第 1 页三条行带（34px pitch）+ 药丸已消失 + 三条读数 + `TAP` 行 + 页脚无溢出；第 2 页开关行在 row 0、设备行 y52、信号条、底行状态 + SAVE 提示翻转、连接后链接行仍在、页脚 `ON/OFF` 只出现在开关行；和弦翻页、裸 HOME 离开；**以及 TRACK SET 的轨号药丸仍在**（`hdr_t = {0}` 的回归保护）。
+
+探针坑：band 判定要"连续 10 行"，单行判定会把 header 底边当成 band（报过 "band at 20"）；band 高 25px、pitch 34px，相邻 band 重叠 9px，实测步进是 **32** 不是 34。
 
 ### 顶栏 6 点的坑
 `dx = 211 + i*6` 在 i=5 时是 241，出 240 屏；改 5px 间距（211..236）。
@@ -351,7 +372,9 @@ host 测试脚本把 HOME 的释放写在 GLO 之前，正好把这个 bug 藏�
 **为什么读数在行下面而不是第五行**：它们不是设置，K1/K2 碰不到。用 `FONT_T` 灰标签 + `FONT_S` 值、行距 16px，视觉上和上面四条 band 行分开——band 是"能改的"，无 band 是"只读的"。
 
 ### 探针
-`tools/global_probe.mjs` **35 项**：第 1 页四条行带 + 药丸已消失 + 注释两行 + `TAP` 行 + 页脚无溢出；第 2 页状态行 / 列表 / 信号条 / SAVE 提示翻转 / 连接后状态行变化；和弦翻页回第 1 页、裸 HOME 离开页且本页墨迹归零；**以及 TRACK SET 的轨号药丸仍在**（`hdr_t = {0}` 的回归保护）。
+`tools/global_probe.mjs` **46 项**：第 1 页三条行带（34px pitch）+ 药丸已消失 + 三条读数 + `TAP` 行 + 页脚无溢出；第 2 页开关行在 row 0、设备行 y52、信号条、底行状态 + SAVE 提示翻转、连接后链接行仍在、页脚 `ON/OFF` 只出现在开关行；和弦翻页、裸 HOME 离开；**以及 TRACK SET 的轨号药丸仍在**（`hdr_t = {0}` 的回归保护）。
+
+探针坑：band 判定要"连续 10 行"，单行判定会把 header 底边当成 band（报过 "band at 20"）；band 高 25px、pitch 34px，相邻 band 重叠 9px，实测步进是 **32** 不是 34。
 
 ### 顶栏 6 点的坑
 `dx = 211 + i*6` 在 i=5 时是 241，出 240 屏；改 5px 间距（211..236）。**TRACK SET 的药丸右界 208** 仍安全。
@@ -366,7 +389,7 @@ host 测试脚本把 HOME 的释放写在 GLO 之前，正好把这个 bug 藏�
 - 探针：`ts_row` `ts_ch` `ts_prog` `ts_route` `ts_voice` `ts_swing` `ts_gswing` `ts_owner` `ts_shared` `ts_prog_hash`(djb2)
 
 ### 测试
-- `tests/global.txt`：**71 断言**全通过（第 1 页四行两端死停、tap tempo 120/160 两档、GM 双向 + panic、退出写盘、第 2 页扫描/选中/连接/断开、反向契约"K2 在第 2 页动不了任何东西"）
+- `tests/global.txt`：**85 断言**全通过（第 1 页四行两端死停、tap tempo 120/160 两档、GM 双向 + panic、退出写盘、第 2 页扫描/选中/连接/断开、反向契约"K2 在第 2 页动不了任何东西"）
 - `tests/trkset.txt`：**85 断言**全通过（门、五个字段两端死停、1-based 显示、逐轨独立、PROGRAM 行 djb2、HOME/SEL 出口）
 - `tests/trkset_route.txt`：**ROUTE 到线缆边界** —— 16 轨全 GM → `midi_out == 0`；全 USB → `midi_out == 32`（45 是旧值：多出的 13 条是每条共享轨各发一次 PC）
 - `tests/trkset_owner.txt`：**21 断言** —— 鼓通道 owner=0(4 条里最低)、bass owner=3（11 条空轨不能抢）、lead owner=4、改空轨 PROG 不动 owner、改 owner PROG 才动

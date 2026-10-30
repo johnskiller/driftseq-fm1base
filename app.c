@@ -753,10 +753,16 @@ int app_expect(const char *what, int *got)
         *got = glo_gm_on ? 1 : 0;
     else if (!strcmp(what, "gl_page"))           /* GLOBAL: 0 the settings, 1 the radio's devices */
         *got = (int)gl_page;
-    else if (!strcmp(what, "gl2_sel"))           /* the device row K2 walks */
-        *got = (int)gl2_sel;
+    else if (!strcmp(what, "gl2_sel"))           /* the device behind the cursor:
+                                                  * row 0 is the switch, so -1 */
+        *got = (int)gl2_dev();
     else if (!strcmp(what, "gl_pat_bytes"))
         *got = (int)gl_pattern_bytes();
+    else if (!strcmp(what, "gl2_rows"))          /* the switch + the devices */
+        *got = (int)gl2_rows();
+    else if (!strcmp(what, "gl_ble"))            /* the radio switch, now row 0
+                                                  * of page 2 (1 = OFF) */
+        *got = set_ble_off() ? 0 : 1;
     else if (!strcmp(what, "gl2_n"))             /* devices found */
         *got = (int)btdev_count();
     /* ble_dev and ble are the platform's own expect names (plat_host.c), so they

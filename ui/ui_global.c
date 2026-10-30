@@ -2,10 +2,17 @@
  * DriftSeq: the GLOBAL pages (GLO+HOME).
  *
  * Page 1 is one number for the whole instrument (tempo, the global half of
- * swing, the two switches that are not about the pattern at all), plus the
- * machine's own readings. Page 2 is the radio's other role: the FM-1 as a BLE
- * central, looking for a MIDI device (a Yamaha MD-BT01 on an MPC's DIN port, a
- * BLE keyboard) and connecting to it.
+ * swing, and whether the built-in synth listens), plus the machine's own
+ * readings. Page 2 is the radio: its switch, and the other role the stack can
+ * play - the FM-1 as a BLE central, looking for a MIDI device (a Yamaha MD-BT01
+ * on an MPC's DIN port, a BLE keyboard) and connecting to it.
+ *
+ * The switch went to page 2 on John's reading of the first draft (2026-10-30):
+ * "BLE的开关可以移到第二页，这样第一页空间大一点，第二页也不至于这么空旷". A
+ * radio switch and the list of what the radio found are one subject, and page 1
+ * is the other subject. Space was the visible reason; the real one is that page
+ * 1's rows are numbers a player reads at a glance, and a row that is not a
+ * number diluted them.
  *
  * Why pages rather than knobs on the panel: these change a few times a session,
  * and the four knobs are the performance surface. John 2026-10-30: "入口用
@@ -14,13 +21,14 @@
  * and not one of the two free buttons. The same chord flips between the two
  * pages ("可以把BLE扫描链接做在第二个GLOBAL页，GLO+HOME在这两页间切换").
  */
-#define GL_NROW  4
+#define GL_NROW  3
 #define GL_Y0    30
-#define GL_PITCH 26
+#define GL_PITCH 34                      /* three rows over the span four used to
+                                          * take: same grammar, more air (John:
+                                          * "这样第一页空间大一点") */
 #define GL_TEMPO 0
 #define GL_SWING 1
 #define GL_GM    2
-#define GL_BT    3
 
 /* G5, the rightmost white key: out of the way of the four knobs, at the right
  * edge where a tempo tap belongs, and idle on a settings page. */
@@ -30,13 +38,10 @@
  * that says what the scan is doing. Row 0 is the first device, so K2 walking the
  * rows IS btdev_choose - no second selector to keep in step. */
 #define GL2_DEVS 8
+#define GL2_BT   0                       /* row 0: the radio itself, not a device */
 
 static uint8_t gl_page;                  /* 0 = settings, 1 = Bluetooth devices */
 static uint8_t gl_row;
-/* the device the player picked, mirrored out of btdev so the page can draw
- * before btdev's own pick has a chance to move (and so the empty page has a
- * defined cursor). */
-static uint8_t gl2_sel;
 static uint8_t gl2_was_n;                /* devices found at the last frame: a change redraws */
 /* 1 = the page was opened by the chord whose HOME has not been released yet. The
  * release of THAT press must not count as "a bare HOME leaves": ui_input walks
@@ -51,7 +56,7 @@ static uint8_t gl_opening;
  * track set改当前track的"). TRK SWING lived here for an hour and asked K3 to go
  * pick a track on a page that is otherwise about the whole instrument; it is
  * back on TRACK SET, where the edited track is the page's subject. */
-static const char *const GL_LABEL[GL_NROW] = {"TEMPO", "SWING", "GM SYNTH", "BLUETOOTH"};
+static const char *const GL_LABEL[GL_NROW] = {"TEMPO", "SWING", "GM SYNTH"};
 
 /* ---- tempo ---------------------------------------------------------------
  * 1 BPM per detent, 10 with GLO held (John 2026-10-30). GLO is already the
@@ -145,8 +150,12 @@ static void gl_gm_set(int on)
 }
 
 /* Bluetooth on/off, kept with the settings: it decides whether the radio comes
- * up at the next power-on. Off also ends a link to a device: the scan page has
- * nothing to look for with the radio quiet. */
+ * up at the next power-on. Off also ends a link to a device: the list under it
+ * has nothing to look for with the radio quiet.
+ *
+ * It lives on page 2 (John 2026-10-30), as row 0 of the same list grammar the
+ * devices use - so the page's one knob still means "walk the list", and the
+ * switch is the first thing the hand meets on the page whose subject it is. */
 static void gl_bt_set(int on)
 {
     plat_ble_enable(on);
@@ -154,11 +163,45 @@ static void gl_bt_set(int on)
     app_say("BLUETOOTH", on ? "ON" : "OFF");
 }
 
-/* ---- page 2: the radio as a central ------------------------------------- */
+/* ---- page 2: the radio --------------------------------------------------
+ * The same grammar as page 1, which is the whole point of putting the switch
+ * here: K1 walks the rows, K2 edits the value on the row you are on. Row 0 is
+ * the switch (K2 toggles the radio), rows 1.. are the devices the scan found,
+ * and SAVE is the verb on a device - connect, or let go (btdev's own verb).
+ *
+ * The switch used to be row 3 of page 1 and the list walked with K2, so the two
+ * pages had two different hands for the same gesture. One list, one grammar:
+ * K1 walks, K2 edits, SAVE commits. Row 0 is a row, so the knob that walks the
+ * list cannot be the knob that edits it.
+ */
 
-static uint8_t gl2_count(void)
+/* Rows on page 2 = the switch, then either the LINK (while a device is being
+ * connected to or is connected) or the devices the scan has found.
+ *
+ * The link gets its own row because it is NOT in the scan list: btdev stops
+ * scanning once a device is connected, so btdev_count() drops to 0 at exactly the
+ * moment the player most wants a row to point at. Without this the cursor fell
+ * back to the switch and the page could no longer let the device go - the test
+ * caught it (SAVE connected fine, then there was nothing left to disconnect). */
+static uint8_t gl2_link(void)
 {
-    return (uint8_t)(set_ble_off() ? 0 : btdev_count());
+    return (uint8_t)(!set_ble_off() && btdev_busy());
+}
+
+static uint8_t gl2_rows(void)
+{
+    int n = set_ble_off() ? 0 : (int)btdev_count();
+    if (gl2_link())
+        return 2;                        /* the switch + the link */
+    return (uint8_t)(1 + (n > GL2_DEVS ? GL2_DEVS : n));
+}
+
+/* The device on the selected row, as btdev's index: row 0 is the switch and has
+ * no device behind it. While the link row is up it stands for device 0: that is
+ * the one btdev_save would act on, and it is the one it will let go. */
+static int gl2_dev(void)
+{
+    return gl2_link() ? 0 : (int)gl_row - 1;
 }
 
 /* SAVE on this page connects to the picked device, or lets a connected one go -
@@ -168,11 +211,18 @@ static uint8_t gl2_count(void)
 static void gl2_save(void)
 {
     int ev;
-    if (set_ble_off()) {
-        app_say("BLUETOOTH", "OFF");
+    if (gl_row == GL2_BT || set_ble_off()) {
+        /* nothing to connect: the switch is not a device */
+        app_say("BLUETOOTH", set_ble_off() ? "OFF" : "PICK A DEVICE");
         return;
     }
-    btdev_choose(gl2_sel);
+    if (gl2_link()) {                    /* the link row: SAVE lets it go */
+        ev = btdev_save();
+        app_say("BLE DEVICE", btdev_word(ev));
+        ui.redraw = 1;
+        return;
+    }
+    btdev_choose((uint8_t)gl2_dev());
     ev = btdev_save();
     if (ev == BTDEV_CONNECTING)
         app_say("BLE DEVICE", btdev_name());
@@ -183,13 +233,13 @@ static void gl2_save(void)
     ui.redraw = 1;
 }
 
-/* What the page says when it has no device row to point at. btdev's own words
- * are about the LINK; these are about the LIST, which is the page's subject. */
+/* What the page says above the list. btdev's own words are about the LINK; these
+ * are about the LIST, which is the page's subject. */
 static const char *gl2_state(char *b)
 {
     int d = plat_ble_device();
     if (set_ble_off())
-        return "BLUETOOTH OFF";
+        return "RADIO OFF";
     if (plat_ble_state() != BLE_READY)
         return "RADIO STARTING";
     switch (d) {
@@ -201,39 +251,41 @@ static const char *gl2_state(char *b)
     }
 }
 
-static void global2_encoder(uint8_t enc, int8_t det)
-{
-    int n = (int)gl2_count();
-    if (enc != EN_K2 || !n)
-        return;
-    gl2_sel = (uint8_t)((int)gl2_sel + (det > 0 ? 1 : -1));
-    if ((int)gl2_sel < 0)
-        gl2_sel = 0;
-    if ((int)gl2_sel > n - 1)
-        gl2_sel = (uint8_t)(n - 1);      /* dead stop: an 8-row list must not wrap */
-    btdev_choose(gl2_sel);
-    ui.redraw = 1;
-}
-
 /* ---- the page ----------------------------------------------------------- */
 
 static void global_encoder(uint8_t enc, int8_t det)
 {
-    int v;
+    int v, last;
 
-    if (gl_page) {
-        global2_encoder(enc, det);
-        return;
-    }
-    if (enc == EN_K1) {                  /* row: dead stop, no wrap */
+    if (enc == EN_K1) {                  /* row: dead stop, no wrap. The SAME
+                                          * gesture on both pages - one hand, one
+                                          * grammar, which is why the switch
+                                          * could move to page 2 at all. */
+        last = gl_page ? (int)gl2_rows() - 1 : GL_NROW - 1;
         v = (int)gl_row + (det > 0 ? 1 : -1);
         if (v < 0) v = 0;
-        if (v > GL_NROW - 1) v = GL_NROW - 1;
+        if (v > last) v = last;
+        if (v == (int)gl_row)
+            return;
         gl_row = (uint8_t)v;
+        if (gl_page && gl_row != GL2_BT)
+            btdev_choose((uint8_t)gl2_dev());
+        ui.redraw = 1;
         return;
     }
     if (enc != EN_K2)
-        return;                          /* K4 is free on this page */
+        return;                          /* K4 is free on both pages */
+    if (gl_page) {
+        /* Row 0 is the switch, and K2 turns it. A device row has no value to
+         * turn: its verb is SAVE, because connecting is not a number. */
+        /* K2 TOGGLES. set_ble_off() is 1 when the radio is stored OFF, so the
+         * "on" to ask for is set_ble_off()'s own value; the inverted form
+         * (`? 0 : 1`) asks for ON every time the radio is already ON, which is a
+         * switch that can never be turned off (the test caught it). */
+        if (gl_row == GL2_BT && det)
+            gl_bt_set(set_ble_off());
+        return;
+    }
     switch (gl_row) {
     case GL_TEMPO:
         gl_tempo_step(det);
@@ -247,10 +299,6 @@ static void global_encoder(uint8_t enc, int8_t det)
     case GL_GM:
         if (det)
             gl_gm_set(!glo_gm_on);
-        break;
-    case GL_BT:
-        if (det)
-            gl_bt_set(set_ble_off() ? 0 : 1);
         break;
     default:
         break;
@@ -327,8 +375,7 @@ static uint8_t global_button(uint8_t btn, uint8_t released)
             /* The scan runs while page 2 is up (btdev_page owns that): nothing
              * to start here, but the list's cursor must not point past a list
              * that restarts empty. */
-            gl2_sel = 0;
-            btdev_choose(0);
+            gl_row = 0;
             ui.redraw = 1;
         }
         return 1;                        /* the page owns HOME while it is up */
@@ -338,7 +385,6 @@ static uint8_t global_button(uint8_t btn, uint8_t released)
         gl_opening = 1;
         gl_page = 0;
         gl_row = 0;
-        gl2_sel = 0;
         focus_layer = 0;
         return 1;
     }
@@ -460,11 +506,8 @@ static void draw_global1(void)
             strcpy_(txt_end(v), "%");
             val = v;
             break;
-        case GL_GM:
-            val = glo_gm_on ? "ON" : "OFF";
-            break;
         default:
-            val = set_ble_off() ? "OFF" : "ON";
+            val = glo_gm_on ? "ON" : "OFF";
             break;
         }
         /* The edited row gets the same band TRACK SET draws, in the same place:
@@ -472,21 +515,21 @@ static void draw_global1(void)
          * edits), so a player who has learned one must not have to relearn where
          * "you are here" is drawn on the other. */
         if (i == (int)gl_row)
-            cv_rect(4, y - 6, 232, 21, RGB565(26, 26, 34));
-        cv_text(12, y, &FONT_S, GL_LABEL[i], (i == (int)gl_row) ? C_AMB : C_GRAY);
-        cv_text(100, y, &FONT_B, val, BRIGHTTX);
+            cv_rect(4, y - 6, 232, 25, RGB565(26, 26, 34));
+        cv_text(12, y, &FONT_M, GL_LABEL[i], (i == (int)gl_row) ? C_AMB : C_GRAY);
+        cv_text(100, y, &FONT_M, val, BRIGHTTX);
     }
 
-    /* The readings: no band, no knob - they are not settings, they are the
-     * machine's own numbers, and drawing them like the four above would invite a
-     * hand to turn something. Dim label + bright value, one line each. */
+    /* Three rows of three numbers left room that the four-row draft did not, and
+     * the readings are what earns it: they are the machine's own numbers, drawn
+     * dim and without a band so no hand tries to turn them. */
     {
         static const char *const GLY[3] = {"CPU", "XRUNS", "PATTERN"};
         char *rb = txt_next();               /* ONE buffer for all three: the pool
-                                              * is 8 slots and the four settings
-                                              * above already hold four of them */
+                                              * is 8 slots and the three settings
+                                              * above already hold three of them */
         for (i = 0; i < 3; i++) {
-            y = 136 + i * 16;
+            y = 146 + i * 17;
             cv_text(12, y, &FONT_T, GLY[i], RGB565(96, 96, 110));
             v = rb;
             *v = 0;
@@ -495,52 +538,88 @@ static void draw_global1(void)
                     (i == 1 && plat_xruns()) ? C_AMB : RGB565(150, 150, 164));
         }
     }
-    cv_text(12, 194, &FONT_T, "TAP: RIGHTMOST KEY", RGB565(96, 96, 110));
+    cv_text(12, 200, &FONT_T, "TAP: RIGHTMOST KEY", RGB565(96, 96, 110));
     cv_blit_band(0, 0, 216);
     ui_draw_footer();
 }
 
 static void draw_global2(void)
 {
-    int i, n = (int)gl2_count(), y;
+    int i, n = (int)gl2_rows(), y;
     char *b = txt_next();
 
-    /* The link's state, in the line the four settings use for their labels: this
-     * page's subject is the list under it, and the list's meaning changes with
-     * the state (scanning / connecting / connected). */
-    cv_text(12, GL_Y0 - 8, &FONT_T, gl2_state(b), (plat_ble_device() == BLE_DEV_READY) ? C_HI : C_GRAY);
-
-    if (!n) {
-        /* No device yet. Say what the page is doing instead of drawing eight
-         * empty rows: an empty list with a cursor on row 0 reads as "one device,
-         * unnamed", which is the wrong fact. */
-        cv_text(12, GL_Y0 + 26, &FONT_S, set_ble_off() ? "TURN BLUETOOTH ON" : "LOOKING...",
-                set_ble_off() ? C_AMB : RGB565(120, 120, 134));
-    }
-    for (i = 0; i < n && i < GL2_DEVS; i++) {
-        char name[21] = {0};
+    /* The list owns the body from the top: row 0 is the switch, rows 1.. are the
+     * devices. The link's state used to sit ABOVE row 0, where it read as a list
+     * row of its own ("SCANNING" looked like a device named SCANNING) - it now
+     * shares the bottom line with the SAVE hint, which is the other thing that is
+     * about the list rather than in it. */
+    for (i = 0; i < n; i++) {
+        char name[21] = {0};             /* ONE buffer outside the branches: it is
+                                          * read after the branch that fills it,
+                                          * and a buffer declared inside the else
+                                          * is dead - it segfaulted the first time
+                                          * this page was drawn */
         int rssi = 0;
-        btdev_found(i, name, &rssi);
-        y = GL_Y0 + 20 + i * 18;
-        if (i == (int)gl2_sel)
+
+        y = GL_Y0 + 4 + i * 18;
+        if (i == (int)gl_row)
             cv_rect(4, y - 5, 232, 17, RGB565(26, 26, 34));
-        cv_text(12, y, &FONT_S, name, (i == (int)gl2_sel) ? C_AMB : TB_TX);
+
+        if (i == GL2_BT) {
+            /* row 0: the radio, drawn in the shape of a settings row - label
+             * left, value right, K2 changes it. */
+            cv_text(12, y, &FONT_S, "BLUETOOTH", (i == (int)gl_row) ? C_AMB : TB_TX);
+            cv_text(150, y, &FONT_B, set_ble_off() ? "OFF" : "ON", BRIGHTTX);
+            continue;
+        }
+        if (gl2_link()) {
+            /* row 1 while a link is up: the device, and its state where a found
+             * device shows its signal. It is not in the scan list (the scan has
+             * stopped), so it must be drawn from btdev_name, not btdev_found. */
+            cv_text(12, y, &FONT_S, btdev_name(), (i == (int)gl_row) ? C_AMB : TB_TX);
+            cv_text(150, y, &FONT_T,
+                    (plat_ble_device() == BLE_DEV_READY) ? "LINKED" : "LINKING",
+                    (plat_ble_device() == BLE_DEV_READY) ? C_HI : RGB565(120, 120, 134));
+            continue;
+        }
+        btdev_found(i - 1, name, &rssi);
+        cv_text(12, y, &FONT_S, name, (i == (int)gl_row) ? C_AMB : TB_TX);
         /* the signal, as bars rather than -50: a number is not a comparison */
         {
             int bars = rssi > -60 ? 4 : rssi > -70 ? 3 : rssi > -80 ? 2 : 1, k;
             for (k = 0; k < 4; k++)
                 cv_rect(224 - (4 - k) * 5, y + 8 - (k + 1) * 2, 3, (k + 1) * 2,
-                        (k < bars) ? ((i == (int)gl2_sel) ? C_AMB : TB_TX) : RGB565(58, 58, 70));
+                        (k < bars) ? ((i == (int)gl_row) ? C_AMB : TB_TX) : RGB565(58, 58, 70));
         }
     }
-    cv_text(12, 194, &FONT_T, btdev_busy() ? "SAVE: DISCONNECT" : "SAVE: CONNECT", RGB565(96, 96, 110));
+    if (n == 1) {
+        /* No device and no link. An empty list under a switch reads as "the scan
+         * is broken", and with the radio off it would read the same way, so the
+         * page says which of the two it is. */
+        cv_text(12, GL_Y0 + 4 + 18, &FONT_S,
+                set_ble_off() ? "NO DEVICES" : "LOOKING...",
+                RGB565(120, 120, 134));
+    }
+    /* One line, two facts about the list: what the radio is doing (left) and what
+     * SAVE does on the selected row (right). SAVE is not the switch's verb, so on
+     * row 0 the right half stays empty rather than naming an action it does not
+     * do. */
+    cv_text(12, 200, &FONT_T, gl2_state(b),
+            (plat_ble_device() == BLE_DEV_READY) ? C_HI : RGB565(96, 96, 110));
+    if (gl_row != GL2_BT)
+        cv_text(148, 200, &FONT_T, btdev_busy() ? "SAVE: LET GO" : "SAVE: CONNECT",
+                RGB565(96, 96, 110));
     cv_blit_band(0, 0, 216);
     ui_draw_footer();
-    /* K1 is the knob that walks the list on this page, so its word is the list,
-     * not a row of settings (the footer is painted for both pages by ui_screens;
-     * this paints over it on page 2 only). */
+    /* K1 walks the list, which on this page is the devices: K2 has nothing to
+     * turn on a device row (connecting is SAVE, not a number), so the footer must
+     * not offer it. Painted over the shared footer, this page only. */
     cv_begin(240, 24, TB_BG);
     cv_text(8, 6, &FONT_T, "DEVICE", FOOT_GRAY);
+    if (gl_row == GL2_BT)
+        cv_text(120, 6, &FONT_T, "ON/OFF", FOOT_GRAY);
+    cv_blit(0, 216);                     /* the footer is its own buffer: without
+                                          * this the shared footer stays on screen */
 }
 
 static void draw_global(void)
@@ -568,7 +647,7 @@ static void draw_global(void)
  * scan finds or loses devices behind the player's back. */
 static void global_frame(void)
 {
-    uint8_t n;
+    uint8_t r;
 
     /* app_frame owns btdev_page/ui.looking (one poll per frame, in that order:
      * this runs before it). Page 2 IS the device page, so it is the page that
@@ -579,15 +658,21 @@ static void global_frame(void)
         gl2_was_n = 0;
         return;
     }
-    n = gl2_count();
-    if (n != gl2_was_n) {
-        if ((int)gl2_sel > (int)n - 1)
-            gl2_sel = n ? (uint8_t)(n - 1) : 0;
-        btdev_choose(gl2_sel);
-        gl2_was_n = n;
+    /* The list grows and shrinks behind the player's back. The cursor counts
+     * rows and row 0 is the switch, so the bound is gl2_rows()-1, not the device
+     * count - an off-by-one here would park the cursor on a row that is not
+     * there and SAVE would connect to the wrong device. */
+    r = gl2_rows();
+    if (r != gl2_was_n) {
+        if ((int)gl_row > (int)r - 1)
+            gl_row = (uint8_t)((int)r - 1);
+        if (gl_row != GL2_BT)
+            btdev_choose((uint8_t)gl2_dev());
+        gl2_was_n = r;
         ui.redraw = 1;
     }
     /* The readings on page 1 are live numbers; page 2's list changes on its own
      * while it scans. Both pages need the screen to keep up. */
     ui.redraw = 1;
 }
+

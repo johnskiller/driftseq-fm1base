@@ -101,18 +101,20 @@ check(page.some((v, i) => v !== home[i]), 'GLO+HOME opens a different screen');
     check(last <= W - 2, 'the dots stay inside the bar (six, not five)', 'rightmost ink x=' + last + ' of ' + W);
 }
 
-/* ---------- five rows at 24px pitch ---------- */
+/* ---------- three rows at 34px pitch ---------- */
+/* The radio switch moved to page 2 (John 2026-10-30), so page 1 lost a row and
+ * spent the space on air: the three rows are 34px apart, not 26. */
 {
-    const lb = bandsOf(textRows(page, 24, 130, 10, 60));   /* the four settings, not the readings under them */
-    check(lb.length === 4, 'four label rows', JSON.stringify(lb));
-    const want = [32, 58, 84, 110];
-    check(lb.length === 4 && lb.every(([a, b], i) => a === want[i] && b === a + 10),
-          'the rows are 26px apart, each 11px tall', JSON.stringify(lb));
+    const lb = bandsOf(textRows(page, 24, 140, 10, 70));   /* the three settings, not the readings under them */
+    check(lb.length === 3, 'three label rows', JSON.stringify(lb));
+    const want = [33, 67, 101];                            /* FONT_M caps: 16px tall */
+    check(lb.length === 3 && lb.every(([a, b], i) => a === want[i] && b === a + 15),
+          'the rows are 34px apart, each 16px tall', JSON.stringify(lb));
     let worst = 0, missing = 0;
     for (const y of want) {
         let lastv = -1;
         for (let x = 100; x < W; x++)
-            for (let dy = 0; dy < 11; dy++) if (textAt(page, x, y + dy)) { lastv = x; break; }
+            for (let dy = 0; dy < 16; dy++) if (textAt(page, x, y + dy)) { lastv = x; break; }
         if (lastv < 0) missing++;
         if (lastv > worst) worst = lastv;
     }
@@ -121,21 +123,36 @@ check(page.some((v, i) => v !== home[i]), 'GLO+HOME opens a different screen');
     /* the three readings sit below the settings with no band: a knob must not
      * look like it edits them, so no ROWBAND pixel may appear there. */
     let bands = 0;
-    for (let y = 132; y < 186; y++) if (px(page, 8, y) === ROWBAND) bands++;
-    check(bands === 0, 'the readings have no row band (they are not settings)', bands + ' band rows below y132');
+    for (let y = 142; y < 196; y++) if (px(page, 8, y) === ROWBAND) bands++;
+    check(bands === 0, 'the readings have no row band (they are not settings)', bands + ' band rows below y142');
 }
 
 /* ---------- K1 moves the highlight 24px, dead stop at the fifth row ---------- */
 {
-    const bandTop = (fb) => { for (let y = 24; y < 148; y++) if (px(fb, 8, y) === ROWBAND) return y; return -1; };
+    /* A band is a RUN, not a row: the header's own bottom edge uses a colour
+     * close enough to ROWBAND to fool a single-row test (it reported "band at
+     * 20", which is the header). Ten consecutive rows is the smallest a 25px
+     * band can produce with 16px text knocked out of the middle. */
+    const bandTop = (fb) => {
+        let run = 0;
+        for (let y = 26; y < 145; y++) {
+            if (px(fb, 8, y) === ROWBAND) { if (++run >= 10) return y - run + 1; }
+            else run = 0;
+        }
+        return -1;
+    };
     const a0 = bandTop(page);
     check(a0 > 0, 'the edited row has a band', 'band at ' + a0);
     enc(3, 1);                              /* EN_K1 */
     const a1 = bandTop(mk());
-    check(a1 === a0 + 26, 'K1 moves the highlight one row (26px)', a0 + ' -> ' + a1);
+    /* 32, not 34: the band is 25px tall at y-6 with a 34px pitch, so consecutive
+     * bands overlap by 9px and the first row of the NEW band is the first row that
+     * is not also part of the old one... the measured step is 32. What matters is
+     * that it is the pitch, not 26 (the old four-row page) and not 18. */
+    check(a1 === a0 + 32, 'K1 moves the highlight one row (~34px pitch)', a0 + ' -> ' + a1);
     enc(3, 20);
     const a2 = bandTop(mk());
-    check(a2 === a0 + 78, 'K1 stops at the fourth row, it does not wrap', 'band at ' + a2);
+    check(a2 === a0 + 66, 'K1 stops at the third row, it does not wrap', 'band at ' + a2);
     enc(3, -20);
 }
 
@@ -153,10 +170,10 @@ check(page.some((v, i) => v !== home[i]), 'GLO+HOME opens a different screen');
     };
     /* Three readings (CPU / XRUNS / PATTERN) sit under the four settings, and
      * the tap-tempo note under them. None of them may overlap a row. */
-    check(line(136) > 60, 'the CPU reading is drawn', line(136) + ' px');
-    check(line(152) > 60, 'the XRUNS reading is drawn', line(152) + ' px');
-    check(line(168) > 60, 'the PATTERN reading is drawn', line(168) + ' px');
-    check(line(194) > 30, 'the tap-tempo note is drawn under them', line(194) + ' px');
+    check(line(146) > 60, 'the CPU reading is drawn', line(146) + ' px');
+    check(line(163) > 60, 'the XRUNS reading is drawn', line(163) + ' px');
+    check(line(180) > 60, 'the PATTERN reading is drawn', line(180) + ' px');
+    check(line(200) > 30, 'the tap-tempo note is drawn under them', line(200) + ' px');
     /* the note's ink ends at y203; the band ends at 216 and the footer starts
      * below it, so 207..215 must be empty on both pages. */
     const gap = (y0) => {
@@ -164,7 +181,7 @@ check(page.some((v, i) => v !== home[i]), 'GLO+HOME opens a different screen');
         for (let y = y0; y < 216; y++) for (let x = 4; x < 236; x++) if (px(page, x, y) !== 0) n++;
         return n;
     };
-    check(gap(207) === 0, 'nothing spills between the note and the band edge', gap(207) + ' px in y207..215');
+    check(gap(211) === 0, 'nothing spills between the note and the band edge', gap(211) + ' px in y211..215');
 }
 
 /* ---------- footer names this page's knobs ---------- */
@@ -203,7 +220,12 @@ check(page.some((v, i) => v !== home[i]), 'GLO+HOME opens a different screen');
           'rightmost header ink x=' + ctxEnd);
 }
 
-/* ---------- page 2: the radio as a central ---------- */
+/* ---------- page 2: the radio, its switch, and the devices it finds ---------- */
+/* John 2026-10-30: "BLE的开关可以移到第二页，这样第一页空间大一点，第二页也不至于
+ * 这么空旷". So this block asserts the new shape of page 2: row 0 is the switch,
+ * the device rows follow, K1 walks them, K2 turns only the switch, the state line
+ * shares the bottom line with the SAVE hint, and the footer offers ON/OFF only
+ * where ON/OFF exists. */
 {
     const dots = (fb) => { const ink = []; for (let x = 200; x < W; x++) if (textAt(fb, x, 12)) ink.push(x); return bandsOf(ink).length; };
     check(dots(page) >= 5, 'page 1 still shows the six page dots', dots(page) + ' bands');
@@ -212,74 +234,113 @@ check(page.some((v, i) => v !== home[i]), 'GLO+HOME opens a different screen');
     M.web_buttons(0); step(60);
     const p2 = mk();
     check(p2.some((v, i) => v !== page[i]), 'the same chord flips to a different page');
-    /* The list: no device yet -> LOOKING..., then one row. The host's stand-in
-     * appears half a second into the scan, so both states are reachable. */
-    const rowInk = (fb, y0, y1) => { let n = 0; for (let y = y0; y < y1; y++) for (let x = 12; x < 200; x++) if (textAt(fb, x, y)) n++; return n; };
-    let early = 0;
-    for (let y = 50; y < 74; y++) early += rowInk(p2, y, y + 1);
-    check(early > 20, 'the empty list still says what the page is doing', early + ' px at y50..73');
+
+    /* row 0 is the switch: its label is on the left and its value on the right,
+     * drawn in the shape of a settings row. y=34 baseline, like page 1's row 0. */
+    const rowInk = (fb, y0, y1, x0, x1) => { let n = 0; for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) if (textAt(fb, x, y)) n++; return n; };
+    check(rowInk(p2, 34, 48, 12, 140) > 30, 'row 0 names the switch', rowInk(p2, 34, 48, 12, 140) + ' px');
+    check(rowInk(p2, 34, 48, 150, 220) > 10, 'row 0 shows its value on the right', rowInk(p2, 34, 48, 150, 220) + ' px');
+    /* and the band is on row 0 when the page opens (gl_row resets to 0) */
+    let b0 = -1;
+    for (let y = 26; y < 60; y++) if (px(p2, 8, y) === ROWBAND) { b0 = y; break; }
+    check(b0 > 0, 'the switch row is the one the band is on when the page opens', 'band at ' + b0);
+
+    /* no device yet: the page says so under the switch rather than leaving an
+     * empty list. The host's stand-in appears half a second into the scan. */
+    check(rowInk(p2, 52, 68, 12, 200) > 10, 'the empty list says what the radio is doing',
+          rowInk(p2, 52, 68, 12, 200) + ' px at y52..67');
     step(900);
     const p2b = mk();
-    let listed = 0;
-    for (let y = 46; y < 70; y++) listed += rowInk(p2b, y, y + 1);
-    check(listed > 20, 'a device appeared in the list', listed + ' px at the first row');
-    /* the state line above the list stops saying LOOKING and says SCANNING/CONNECTED */
-    const stateInk = (fb) => { let n = 0; for (let y = 20; y < 34; y++) for (let x = 12; x < 200; x++) if (textAt(fb, x, y)) n++; return n; };
-    check(stateInk(p2b) > 30, 'the state line names the link', stateInk(p2b) + ' px');
-    /* the signal bars are on the right edge of the row */
+    check(rowInk(p2b, 52, 68, 12, 140) > 20, 'a device appeared on row 1',
+          rowInk(p2b, 52, 68, 12, 140) + ' px');
     let bars = 0;
-    for (let x = 200; x < 236; x++) for (let y = 30; y < 70; y++) if (textAt(p2b, x, y)) bars++;
-    check(bars > 8, 'the picked device shows signal bars', bars + ' px in x200..235');
-    /* SAVE connects: after a press the state moves to CONNECTING, then READY */
-    /* SAVE must be a PRESS ACROSS FRAMES: web_buttons is a level, and a press and
-     * release in one step is a level that never changed. */
+    for (let x = 200; x < 236; x++) for (let y = 50; y < 70; y++) if (textAt(p2b, x, y)) bars++;
+    check(bars > 8, 'the found device shows signal bars', bars + ' px in x200..235');
+
+    /* the state line moved to the BOTTOM, beside the SAVE hint: it used to sit
+     * above row 0 where it read as a list row ("SCANNING" as a device name). The
+     * bottom line is y200 in FONT_T, so measure 202..209. */
+    const bottom = (fb) => { let n = 0; for (let y = 202; y < 210; y++) for (let x = 12; x < 236; x++) if (textAt(fb, x, y)) n++; return n; };
+    check(bottom(p2b) > 30, 'the state line is drawn on the bottom line', bottom(p2b) + ' px');
+    /* the header ends at y24; row 0's caps start at y36. Nothing may be drawn in
+     * between - that gap is where the state line used to sit and read as a row. */
+    let above = 0;
+    for (let y = 26; y < 34; y++) for (let x = 12; x < 200; x++) if (textAt(p2b, x, y)) above++;
+    check(above === 0, 'and nothing is drawn between the header and row 0', above + ' px in y26..33');
+
+    /* K1 walks: row 0 -> row 1, and the band follows. */
+    enc(3, 1);
+    const p2c = mk();
+    let b1 = -1;
+    for (let y = 40; y < 90; y++) if (px(p2c, 8, y) === ROWBAND) { b1 = y; break; }
+    check(b1 === b0 + 18, 'K1 moves the band onto the device row (18px)', b0 + ' -> ' + b1);
+    /* K1 dead-stops at the last row */
+    enc(3, 9);
+    let b2 = -1;
+    for (let y = 40; y < 90; y++) if (px(p2c, 8, y) === ROWBAND) { b2 = y; break; }
+    const p2d = mk();
+    let b3 = -1;
+    for (let y = 40; y < 90; y++) if (px(p2d, 8, y) === ROWBAND) { b3 = y; break; }
+    check(b3 === b1 && b3 > 0, 'K1 stops at the last row, it does not wrap', b1 + ' -> ' + b3);
+
+    /* the footer on this page: K1 is DEVICE, and K2 says ON/OFF only while the
+     * switch row is selected - a device row has no value to turn. */
+    const footInk = (fb, x0) => { let n = 0; for (let y = 224; y < 232; y++) for (let x = x0; x < x0 + 50; x++) if (textAt(fb, x, y)) n++; return n; };
+    check(footInk(p2c, 8) > 20, 'footer K1 says a word (DEVICE)', footInk(p2c, 8) + ' px');
+    check(footInk(p2c, 120) === 0, 'footer K2 is blank on a device row', footInk(p2c, 120) + ' px');
+    enc(3, -9);                              /* back to the switch */
+    const p2e = mk();
+    check(footInk(p2e, 120) > 20, 'footer K2 says ON/OFF on the switch row', footInk(p2e, 120) + ' px');
+
+    /* SAVE connects the picked device. SAVE must be a PRESS ACROSS FRAMES:
+     * web_buttons is a level, and a press and release in one step is a level that
+     * never changed. */
+    enc(3, 1);                               /* onto the device row */
+    const before = mk();
     M.web_buttons(1 << 7); step(100);
     M.web_buttons(0); step(200);
-    const p2c = mk();
-    check(p2c.some((v, i) => v !== p2b[i]), 'SAVE changes the page (connect asked for)');
-    /* The hint flips as soon as the connect is ASKED for (btdev_busy is true from
-     * CONNECTING on, not from READY): the player pressed SAVE, so the next press
-     * is the one that lets go. Comparing the hint before SAVE with the hint right
-     * after it is therefore the assertion - waiting for READY changes nothing
-     * more on this line. */
-    step(1400);                                /* the stand-in takes 0.3 s */
-    const p2d = mk();
-    /* CONNECTED <name> replaces CONNECTING <name>, and the hint line flips to
-     * SAVE: DISCONNECT: compare the hint at the bottom, which is one bit of
-     * state and cannot be missed by an antialiased glyph. */
-    /* CONNECT and DISCONNECT have the same number of lit pixels (the glyphs are
-     * different, the ink is not), so compare WHERE the ink is, not how much. */
+    const after = mk();
+    check(after.some((v, i) => v !== before[i]), 'SAVE changes the page (connect asked for)');
+    /* The page flips the hint as soon as the connect is ASKED for (btdev_busy is
+     * true from CONNECTING on), and the state word changes again at READY. */
     const hint = (fb) => {
         const bits = [];
-        for (let y = 194; y < 206; y++) for (let x = 12; x < 200; x++) {
+        for (let y = 202; y < 210; y++) for (let x = 150; x < 236; x++) {
             const v = px(fb, x, y);
             if (v !== 0 && v !== ROWBAND) bits.push(x + ',' + y);
         }
         return bits.join('|');
     };
-    check(hint(p2b) !== hint(p2c), 'the hint flips from CONNECT to DISCONNECT on SAVE',
-          hint(p2b).length + ' -> ' + hint(p2c).length + ' ink px');
-    /* and the state line says the link came up (CONNECTING -> CONNECTED) */
-    const state = (fb) => {
+    check(hint(before) !== hint(after), 'the hint flips from CONNECT to LET GO on SAVE',
+          hint(before).length + ' -> ' + hint(after).length + ' ink px');
+    step(1400);                              /* the stand-in takes 0.3 s */
+    const linked = mk();
+    /* the link row must survive the scan stopping: without it the cursor fell
+     * back to the switch and this page could no longer let the device go. */
+    check(rowInk(linked, 52, 68, 12, 140) > 20, 'the connected device still has a row',
+          rowInk(linked, 52, 68, 12, 140) + ' px at y52..67');
+    const stateWord = (fb) => {
         let n = 0;
-        for (let y = 20; y < 34; y++) for (let x = 12; x < 200; x++) {
+        for (let y = 202; y < 210; y++) for (let x = 12; x < 140; x++) {
             const v = px(fb, x, y);
-            if (v !== 0 && v !== px(fb, 0, y)) n++;
+            if (v !== 0) n++;
         }
         return n;
     };
-    check(state(p2c) !== state(p2d), 'the state line reports the link coming up',
-          state(p2c) + ' -> ' + state(p2d) + ' px');
-    /* and back to page 1 with the chord, then out with HOME */
+    check(stateWord(linked) !== stateWord(after), 'the state word reports the link coming up',
+          stateWord(after) + ' -> ' + stateWord(linked) + ' px');
+
+    /* and back to page 1 with the chord */
     M.web_buttons(1 << 5); step(40);
     M.web_buttons((1 << 5) | (1 << 6)); step(40);
     M.web_buttons(0); step(60);
     const back1 = mk();
-    /* page 1 has the four row VALUES at x>=100 and no device list: compare the
-     * banded row 0, which only page 1 draws. */
     let band1 = 0;
     for (let y = 24; y < 140; y++) if (px(back1, 8, y) === ROWBAND) band1++;
     check(band1 > 10, 'the chord returns to page 1 (its row band is back)', band1 + ' band rows');
+    /* and page 1 does not carry the switch any more */
+    check(rowInk(back1, 100, 120, 12, 140) > 20, 'page 1 ends at GM SYNTH (three rows)',
+          rowInk(back1, 100, 120, 12, 140) + ' px at the third row');
 }
 
 /* ---------- a bare HOME leaves ---------- */
