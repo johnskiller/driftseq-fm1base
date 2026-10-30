@@ -407,6 +407,30 @@ static void emit_pc(ds_state *s, const ds_track *t) {
     s->out[s->out_len++] = t->prog & 0x7F;
 }
 
+/* The program the receiver should hold on this track's channel, now.
+ *
+ * The tick path sends it while the transport runs (owner + sent_prog), but a
+ * stopped transport returns before that block - so on TRACK SET the PROG row
+ * changed the track and the synth never heard: the keys auditioned the OLD
+ * voice and the row read as broken (John 2026-10-30: "track set的program change
+ * 的时候，是不是没有发送PC，那么弹奏试听就无用了").
+ *
+ * Called on the edit, not on a timer: a detent has to be heard at once, and the
+ * sent_prog cache is updated here so the tick path does not repeat it. Whether
+ * this track OWNS the channel is not asked - the player chose the program while
+ * looking at this track, so it goes out even when another track will re-state
+ * its own on the next tick (that is the same convergence the owner rule relies
+ * on, one message later).
+ */
+void ds_send_prog(ds_state *s, uint8_t trk)
+{
+    ds_track *t = &s->pat.track[trk & 15u];
+    uint8_t ch = (uint8_t)(t->channel & 0x0Fu);
+    emit_pc(s, t);                               /* bounds-checked; 4096 B out,
+                                                  * and one edit queues 2 */
+    s->sent_prog[ch] = t->prog;
+}
+
 /* land on a position: fire its voices per on/cond/prob */
 static void land(ds_state *s, ds_track *t, int trk, uint32_t pos) {
     ds_step *st = &t->steps[pos & 63];

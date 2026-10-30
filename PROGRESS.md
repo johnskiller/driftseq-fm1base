@@ -310,6 +310,22 @@ John 2026-10-30：**"BLE的开关可以移到第二页，这样第一页空间�
 
 **链接行为什么要单独一行**：连上之后 btdev 停止扫描（`btdev_page` 只在 `BLE_DEV_OFF` 时维持 scan），`btdev_count()` 立刻归零。没有这行，光标会被挤回开关行，`SAVE` 再也按不到设备——**连得上，断不了**。测试把这个抓出来了（`SAVE` 连上后 `ble_dev==4` 但 `gl2_n==0`）。
 
+### 页脚不能"画两遍"（John 2026-10-30）
+
+**"GLOBAL page 2 scanning, 最底部有些闪烁，似乎footer和scanning重叠了"** —— 不是重叠，是**同一带每帧传了两次**。`draw_global2()` 先调 `ui_draw_footer()`（画共享的 `ROW EDIT` 并 `cv_blit(0,216)`），然后自己重画成 `DEVICE`、再 `cv_blit(0,216)`。host 只保留最后一帧所以看不出来，真机 LCD 就会先闪一下 `ROW EDIT`。
+
+改法不是"少画一次"，而是**让共享 painter 知道自己在画哪一页**：`gl_page`/`gl_row` 移到 `ui_glue.c`（unity 里排最前，`ui_screens.c` 在 644、`ui_global.c` 在 648），`ui_draw_footer()` 直接按 `gl_page` 画 `DEVICE`/`ON/OFF`，第 2 页不再覆盖。
+
+**实测**：同样 1408 ms，第 2 页 blit 数 **216 → 176**（差 40 = 2 次 × 20 帧的重复传输）。
+
+### 试听要发 PC（John 2026-10-30）
+
+**"track set的program change的时候，是不是没有发送PC，那么弹奏试听就无用了"** —— 对，PC 只在 `ds_tick` 的播放分支里发，而 `ds_tick` 在 `!playing` 时 `out_len=0; return;`。于是 TRACK SET 改 PROGRAM/CHANNEL 只改了引擎字段，合成器从没听见，试听弹的是**旧音色**。
+
+新增 `ds_send_prog(s, trk)`：从编辑本身发，不等 tick（一个 detent 必须立刻听见），同时更新 `sent_prog[ch]` 让播放路径不重发。**CHANNEL 也发**——程序属于它移到的那个通道。
+
+**实测**：改前该脚本**零 MIDI 输出**，改后 `C9 01 00`（ch10, prog 1）。测试锁死这条：`tests/trkset.txt` 88 断言，改前第 87 条就 "not sent"。
+
 ### 两态行 = 滑块，不是开关（John 2026-10-30）
 
 **"第一页的GM，第二页的BLE on/off选择都没有做到盲拧效果"** —— 原来的代码是 `if (det) 翻转`，**方向被完全忽略**：左拧和右拧都翻转，手不用看屏幕就不知道往哪拧。这不是两个孤立的 bug，是同一个错误的交互模型。
@@ -339,6 +355,22 @@ host 测试脚本把 HOME 的释放写在 GLO 之前，正好把这个 bug 藏�
 
 - **`gl_bt_set(set_ble_off() ? 0 : 1)` 参数反了**：`set_ble_off()` 为 1 表示已存 OFF，问 `? 0 : 1` 等于"已经 ON 的时候再要 ON"——开关永远关不掉。正确是 `gl_bt_set(set_ble_off())`。
 - **`const char *label = name;` 悬垂指针**：`name` 声明在 else 块内、`cv_text` 在块外读，第一次画第 2 页就 segfault。缓冲区提到循环层。
+
+### 页脚不能"画两遍"（John 2026-10-30）
+
+**"GLOBAL page 2 scanning, 最底部有些闪烁，似乎footer和scanning重叠了"** —— 不是重叠，是**同一带每帧传了两次**。`draw_global2()` 先调 `ui_draw_footer()`（画共享的 `ROW EDIT` 并 `cv_blit(0,216)`），然后自己重画成 `DEVICE`、再 `cv_blit(0,216)`。host 只保留最后一帧所以看不出来，真机 LCD 就会先闪一下 `ROW EDIT`。
+
+改法不是"少画一次"，而是**让共享 painter 知道自己在画哪一页**：`gl_page`/`gl_row` 移到 `ui_glue.c`（unity 里排最前，`ui_screens.c` 在 644、`ui_global.c` 在 648），`ui_draw_footer()` 直接按 `gl_page` 画 `DEVICE`/`ON/OFF`，第 2 页不再覆盖。
+
+**实测**：同样 1408 ms，第 2 页 blit 数 **216 → 176**（差 40 = 2 次 × 20 帧的重复传输）。
+
+### 试听要发 PC（John 2026-10-30）
+
+**"track set的program change的时候，是不是没有发送PC，那么弹奏试听就无用了"** —— 对，PC 只在 `ds_tick` 的播放分支里发，而 `ds_tick` 在 `!playing` 时 `out_len=0; return;`。于是 TRACK SET 改 PROGRAM/CHANNEL 只改了引擎字段，合成器从没听见，试听弹的是**旧音色**。
+
+新增 `ds_send_prog(s, trk)`：从编辑本身发，不等 tick（一个 detent 必须立刻听见），同时更新 `sent_prog[ch]` 让播放路径不重发。**CHANNEL 也发**——程序属于它移到的那个通道。
+
+**实测**：改前该脚本**零 MIDI 输出**，改后 `C9 01 00`（ch10, prog 1）。测试锁死这条：`tests/trkset.txt` 88 断言，改前第 87 条就 "not sent"。
 
 ### 两态行 = 滑块，不是开关（John 2026-10-30）
 

@@ -46,8 +46,9 @@
 #define GL2_DEVS 8
 #define GL2_BT   0                       /* row 0: the radio itself, not a device */
 
-static uint8_t gl_page;                  /* 0 = settings, 1 = Bluetooth devices */
-static uint8_t gl_row;
+/* gl_page and gl_row are declared in ui_glue.c: ui_screens.c's footer painter has
+ * to read them (page 2 offers K2 only on the switch row) and that file is
+ * compiled first. */
 static uint8_t gl2_was_n;                /* devices found at the last frame: a change redraws */
 /* 1 = the page was opened by the chord whose HOME has not been released yet. The
  * release of THAT press must not count as "a bare HOME leaves": ui_input walks
@@ -651,16 +652,8 @@ static void draw_global2(void)
         cv_text(148, 200, &FONT_T, btdev_busy() ? "SAVE: LET GO" : "SAVE: CONNECT",
                 RGB565(96, 96, 110));
     cv_blit_band(0, 0, 216);
-    ui_draw_footer();
-    /* K1 walks the list, which on this page is the devices: K2 has nothing to
-     * turn on a device row (connecting is SAVE, not a number), so the footer must
-     * not offer it. Painted over the shared footer, this page only. */
-    cv_begin(240, 24, TB_BG);
-    cv_text(8, 6, &FONT_T, "DEVICE", FOOT_GRAY);
-    if (gl_row == GL2_BT)
-        cv_text(120, 6, &FONT_T, "ON/OFF", FOOT_GRAY);
-    cv_blit(0, 216);                     /* the footer is its own buffer: without
-                                          * this the shared footer stays on screen */
+    ui_draw_footer();                    /* reads gl_page, so it paints DEVICE/ON-OFF
+                                          * itself: one blit of the band, not two */
 }
 
 static void draw_global(void)

@@ -143,6 +143,10 @@ static void trkset_encoder(uint8_t enc, int8_t det)
              * so this only affects what is played next — no note hangs */
             tr->channel = (uint8_t)v;
             ds_route_sync(&eng);
+            ds_send_prog(&eng, sel_track);       /* the channel moved: its program
+                                                  * belongs there too, or the keys
+                                                  * audition the previous channel's
+                                                  * voice */
         }
         break;
     }
@@ -152,6 +156,9 @@ static void trkset_encoder(uint8_t enc, int8_t det)
         if (v > 127) v = 127;
         if (v != (int)tr->prog) {
             tr->prog = (uint8_t)v;
+            ds_send_prog(&eng, sel_track);       /* the keys audition the voice you
+                                                  * just chose: a stopped transport
+                                                  * sends no PC of its own */
         }
         break;
     }

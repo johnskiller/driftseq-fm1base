@@ -190,6 +190,9 @@ void     ds_clear_track(ds_track *t);
 void     ds_play(ds_state *s);
 void     ds_stop(ds_state *s);
 void     ds_set_bpm(ds_state *s, double bpm);
+/* state one track's program on its channel NOW, in the current out buffer: the
+ * tick path only sends while playing, and TRACK SET's audition happens stopped */
+void     ds_send_prog(ds_state *s, uint8_t trk);
 void     ds_route_sync(ds_state *s);
 int      ds_channel_owner(const ds_state *s, int ch);
 int      ds_track_has_notes(const ds_state *s, int trk);            /* rebuild wire_mask/gm_mask from track[].route */

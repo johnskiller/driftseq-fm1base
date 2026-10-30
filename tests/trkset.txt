@@ -267,3 +267,42 @@ wait 40
 # the GRID keeps it (jam is always armed there), which is what makes the check
 # above a property of the page and not of the key path
 expect jam_used 1
+
+# ---- PROG and CHANNEL state the program on the wire, stopped or not ----
+#
+# The tick path sends PC only while the transport runs (owner + sent_prog), and
+# a stopped transport returns before that block - so on this page the PROG row
+# changed the track and the synth never heard it: the keys auditioned the OLD
+# voice. John 2026-10-30: "track set的program change的时候，是不是没有发送PC，
+# 那么弹奏试听就无用了". A detent now sends, from the edit itself.
+tap ENV
+wait 20
+expect mode 4
+turn K1 1
+wait 10
+expect ts_row 1                       # PROGRAM
+out
+turn K2 1
+wait 10
+expect_out USB C9 01 00              # the demo's bass is ch10 (0xC9), and one
+                                     # detent up from program 38 is 39 -> 0x01
+out
+turn K2 -1
+wait 10
+expect_out USB C9 00 00              # and back: 38 -> 0x00
+out
+# the same for the channel: a program belongs to the channel it moved to
+turn K1 -1
+wait 10
+expect ts_row 0                       # CHANNEL
+turn K2 1
+wait 10
+expect_out USB CA 00 00              # ch10 -> ch11, and program 38 stated there
+out
+turn K2 -1
+wait 10
+expect_out USB C9 00 00              # back on ch10
+out
+tap ENV
+wait 20
+expect mode 0

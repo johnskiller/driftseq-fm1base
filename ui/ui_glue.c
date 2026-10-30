@@ -59,6 +59,16 @@ static uint8_t key_black_id(uint8_t ord);
 /* the SAVE (jam) menu lives in ui_screens.c next to the footer that draws it;
  * ui.c's ui_draw ticks its timeout and ui_edit.c's routing opens/works it */
 #define JAM_MENU_FRAMES 180u
+/* GLOBAL's page lives here rather than in ui_global.c because ui_screens.c is
+ * compiled BEFORE ui_global.c in the unity build (app.c includes ui_screens at
+ * 644, ui_global at 648) and the shared footer painter needs to know which page
+ * it is painting. Without that, page 2 called ui_draw_footer() - which blitted
+ * "ROW EDIT" to the LCD - and then painted "DEVICE" over it and blitted again:
+ * two transfers of the same band every frame, which the host cannot show (it
+ * keeps the last frame) and a real LCD shows as a flicker (John 2026-10-30:
+ * "最底部有些闪烁，似乎footer和scanning重叠了"). */
+static uint8_t gl_page;                  /* GLOBAL: 0 = settings, 1 = the radio */
+static uint8_t gl_row;                   /* the row K1 is on (both pages) */
 static uint8_t jam_menu;
 static uint8_t jam_menu_sel;
 static uint16_t jam_menu_ttl;

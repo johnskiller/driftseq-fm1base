@@ -350,10 +350,20 @@ static void ui_draw_footer(void)
             cv_text(FX[k], 6, &FONT_T, FOOT_SCALE[k], FOOT_GRAY);
     } else if (ui_mode == M_GLOBAL) {
         /* K1 row, K2 edit. K3/K4 are free: the page has no subject but the
-         * instrument, so nothing here picks a track any more. */
+         * instrument, so nothing here picks a track any more.
+         *
+         * Page 2 is the one page whose footer is not a K1..K4 list: K1 walks the
+         * devices and K2 only exists on the switch row, so it names those two
+         * instead. It is painted HERE, not over the top of this painter, because
+         * painting over it meant blitting the same 24-row band to the LCD twice
+         * every frame - a flicker on hardware that the host build cannot show. */
         static const char *const FOOT_GLOBAL[4] = {"ROW", "EDIT", "", ""};
+        static const char *const FOOT_GLOBLE[4] = {"DEVICE", "", "", ""};
+        const char *const *f = gl_page ? FOOT_GLOBLE : FOOT_GLOBAL;
         for (k = 0; k < 4; k++)
-            cv_text(FX[k], 6, &FONT_T, FOOT_GLOBAL[k], FOOT_GRAY);
+            cv_text(FX[k], 6, &FONT_T, f[k], FOOT_GRAY);
+        if (gl_page && gl_row == 0)      /* the switch row is the only one K2 edits */
+            cv_text(FX[1], 6, &FONT_T, "ON/OFF", FOOT_GRAY);
     } else if (ui_mode == M_TRKSET) {
         /* K1 row, K2 value, K3 the MUTE/SOLO slider it is everywhere else, K4
          * blank (it was GLOBAL swing; the global half lives on GLOBAL, and this
