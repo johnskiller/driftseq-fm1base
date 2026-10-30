@@ -43,9 +43,9 @@ Verified by: `tools/midi_probe.mjs` (wire format), `tools/midi_ui_probe.mjs`
 | `8n kk 00` | **sent** | gate 到期（引擎 gate 池）或试听松键 (`ds_live_off`) |
 | `Cn pp` | **sent** | ds_play 启动帧，每轨一条（track 的 prog） |
 | `Bn` CC | **sent** | 鼓通道换 kit 用的 Bank Select（`CC0=120`、`CC32=0`），见 §3.1 |
-| `F8` Clock | 不发送 | 计划：作为 clock master 输出（§7） |
-| `FA/FB/FC` | 不发送 | 计划：见 §6（MMC / 走带控制） |
-| SysEx | 不发送 | 计划：dump（§7）、MMC（§6） |
+| `F8` Clock | 不发送 | 计划：作为 clock master 输出（§8）；**接收侧也丢弃**，见 §6.4 |
+| `FA/FB/FC` | 不发送（**接收已实现**） | 收：`ui_midi_dispatch` 已处理且边沿触发；发：见 §6（MMC / 走带控制） |
+| SysEx | **app 不发送** | 平台自己在发（log 帧 `F0 7D 4C 47`，走 `plat_sysex_send`）。app 侧待接：`app_sysex()` 未定义（§6.3③④）、backup 未开（§7） |
 
 ### 3.1 鼓通道的 Program Change 必须带 Bank Select
 
@@ -76,7 +76,9 @@ Verified by: `tools/midi_probe.mjs` (wire format), `tools/midi_ui_probe.mjs`
 
 - FW 不响应 CC / Program Change / Song Position / Clock（全部忽略，不崩溃）。
 - FB = FA（从 loop_start 起），不是字面 continue-from-position。
-- SysEx 未实现（接收即丢；emulator 页面拆包把 0xF0 当 1 字节，未来协议需 USB-MIDI continuation CIN 4/5/6/7 设计）。
+- **app 层 SysEx 未实现**：`app_sysex()` 未定义，USB 收到的 SysEx 全部丢弃（`app.c` 注释：「SysEx -> ignored for now」）。**平台层不是没能力** —— 发送侧 `plat_sysex_send()` 已成熟（log 帧在用它），接收侧 `APP_SYSEX` 钩子已就位，见 §6.3。
+- emulator 页面拆包把 `0xF0` 当 1 字节，**emu 里看不到也发不出 SysEx**（`web/emu/worklet.js`，§6.3⑥）。
+- pattern **不写 flash**（没有 `OBJ_PATTERN`），所以重启即丢；backup/restore 也因缺这个对象而无法启用，见 §7。
 - 无 Local Off / Omni / All-notes-off（`Bn cc=123`）处理——外部音源挂起时只能 stop。
 
 ## 6. 走带控制：MMC 与 MPC 的 SysEx（**记录，待决策**，2026-10-30）
@@ -126,36 +128,62 @@ John 给出的四条（标注为 B 级，即 MPC 响应未验证）：
 | SysEx 发送 | **无**；`engine_drain()` 按字节切 6 字节 SysEx 恰好正确，但 `app.c:354` 用它现算 CIN 会产出 `CIN F`/`CIN 0`（详见 6.3②） | `app.c`, `engine/driftseq.c` |
 | 发送 API 粒度 | `plat_midi_send(uint32_t pkt, uint32_t to)`，**一次一个 packet**，即最多 3 字节 | `plat.h` |
 
-### 6.3 决定做法之前必须先解决的四件事
+### 6.3 修正：平台早就有 SysEx 通道，MMC 不是从零开始
 
-**① 6 字节要两个 packet。** `plat_midi_send` 一次只能送一个 USB-MIDI event packet（3 字节）。一条 MMC 是 6 字节，按 USB-MIDI 打包惯例要拆成 `CIN 4`（`F0 7F 7F`）+ `CIN 7`（`06 02 F7`）。所以要么在引擎里按两个 packet 入队，要么给平台加一个「多 packet 一次发」的入口。
+（2026-10-30 本章第一版把 ①② 判成「SysEx 发送的堵点」，**那是错的**，见下。）
 
-**② 真正的堵点在 CIN，不在字节。** 我先怀疑 `engine_drain()` 会把 6 字节拆错，实测**不是**：它按 status 高 4 位判长度（`C0/D0` → 2 字节，其余 → 3），`F0` 与 `06` 都落进「3 字节」，于是 6 字节正好被切成 `F0 7F 7F` + `06 02 F7` —— 字节边界是对的。
+#### ① `app.c` 的 `st >> 4` 不是 bug —— 它只管通道消息
 
-错的是 CIN。`app.c:354` 用 `pkt = (st >> 4) | st << 8` 现算 CIN，实测这两帧得到：
+`engine_drain()` 的注释写得很清楚：CIN = status 的高 4 位「is exactly the spec's mapping for the channel voice messages this engine sends (8 note-off, 9 note-on, B CC, C program change)」。**对引擎实际发出的通道消息，这个映射是对的**。
 
-```
-bytes F0 7F 7F -> CIN F (single-byte realtime)   pkt=7F7FF00F
-bytes 06 02 F7 -> CIN 0 (misc)                   pkt=F7020600
-```
+它不能用来发 SysEx，但**SysEx 根本不该走这条函数**。第一版把「MMC 会走 engine_drain」当成前提，由此推出「CIN 全错、这是前置阻塞」—— 前提错了，结论也错了。
 
-而 USB-MIDI 规范要的是 `CIN 4`（SysEx start/continue）+ `CIN 7`（SysEx ends with 3 bytes）。`CIN 0` 这一帧 macOS 会直接丢（§3 那条注释已经踩过同样的坑），`CIN F` 更糟 —— 它宣告「这是单字节实时消息」。
+#### ② 平台已有完整且正确的 SysEx 发送路径
 
-所以 SysEx 发送需要的是**能显式指定 CIN 的入队方式**，而不是复用 `st >> 4` 这条给通道消息用的捷径：`F0` 起头写 4、`F7` 结尾那一帧写 7（或按实长 5/6）。
-
-
-**③ BLE 发送侧对 SysEx 的 CIN 处理有洞（已读代码确认）。** `le_midi.c` 的 `ble_midi_send_many()` 里：
+`plat_sysex_send(frame, n)`（`plat.h:184`，`plat_fm1.c:169`）→ `ota_wire_send()`（`usb.c:1080`），CIN 计算是标准做法：
 
 ```c
-if (cin == 0xF || cin == 5) {                    /* 不拷任何数据字节 */
-} else if (cin == 2 || cin == 0xC || cin == 0xD) { m[k++] = pkts[i] >> 16; }
-else { m[k++] = pkts[i] >> 16; m[k++] = pkts[i] >> 24; }
+uint32_t cin = k == 3u && i + 3u < n ? 4u : k == 3u ? 7u : 4u + k;   /* 4 continues; 5/6/7 end */
 ```
 
-`CIN 5` 是「SysEx 以 1 个字节结尾」，其唯一的数据字节就是终止 `F7` —— 这一支直接把它丢了。`CIN 4`/`CIN 7` 只是碰巧落进 default 分支，字节数对得上，但随后 `if (st < 0xF0) run = st;` 会把 SysEx 的数据字节 `0x06` 记成 running status。**BLE 上发 SysEx 之前要修这里**，USB 上不受影响。
+满 3 字节且后面还有 → `CIN 4`；满 3 字节且是最后 → `CIN 7`；不足 3 → `4 + k`（即 5/6/7）。**这就是 MMC 需要的全部打包逻辑，已经写好并在用。**
 
-**④ 仿真器页面层会把 SysEx 整个吃掉**（`web/emu/worklet.js` 的 out 循环，实测读代码确认）：它把每个 packet 都当成「从一个 status 字节开始」的消息，`st < 0xF0` 才按通道消息取数据字节，`F2` 特例取两个，**其余一律「its one byte and no more」**。所以 `F0 7F 7F` 只会送出 `F0`，`06 02 F7` 连状态位都没有、`st < 0xF0` 判为假且不是 `F2`，也只送 1 字节。这个循环是给通道消息写的，SysEx 需要单独按 CIN 解包，否则 emu 里永远看不到也发不出 MMC —— 而 emu 是我验证这类功能的唯一手段。
+而且这条路径**正在生产流量**：`log_line_send()`（`main_fm1.c:228`）就是 `F0 7D 4C 47 ...` 的 log 帧，走 `ota_wire_send` 出 USB。**`fm1_remote.py log` 能用，证明 SysEx 发送链路是通的。** John 说得对，我第一版把它漏了。
 
+按 `usb.c:1080` 那条公式逐字节复算（**不是真机抓包，是公式复算**），四条 MMC 全部合规范：
+
+```
+MMC PLAY F0 7F 7F 06 02 F7  (6 B) -> 2 pkt
+    CIN 4 [F0 7F 7F]  pkt=7F7FF004
+    CIN 7 [06 02 F7]  pkt=F7020607
+STOP / REC / DEFERRED 同形，只差第 5 字节：F7010607 / F7060607 / F7030607
+```
+
+log 帧（`F0 7D 4C 47` 头，最长 48 B）同样正确：中间全是 `CIN 4`，末包 `CIN 7`。
+
+**结论：从 FM-1 发 MMC 或发 pattern dump，`plat_sysex_send(frame, n)` 一个调用即可，不需要碰 `engine_drain`，也不需要自己算 CIN。**
+
+#### ③ 接收侧也有现成钩子：`APP_SYSEX`
+
+`plat.h:268` 定义 `int app_sysex(const uint8_t *p, uint32_t n)`：平台不认领的 SysEx 会交给它，`p` 是 `F0` 与 `F7` 之间的字节，返回 1 表示「这条是我的」，应答同样用 `plat_sysex_send`。`main_fm1.c:979` 的调用点已经在跑，**DriftSeq 只要定义这个函数就接上了**。
+
+（同理 `APP_USB_CMD` 收走 updater 的封装帧。）
+
+#### ④ 真正缺的是「DriftSeq 没接」，不是平台没有
+
+| 缺什么 | 现状 | 影响 |
+|---|---|---|
+| `app_sysex()` | **未定义** | 收不到任何 SysEx；`app.c:225` 注释仍写「SysEx -> ignored for now」——**这句注释已经过时**，平台侧一切就绪 |
+| `backup = true` | **`fm1.toml` 没有** | 整套 USB backup/restore 没编译进来，见 §7 |
+| emu 侧 `plat_sysex_send` | host 是空实现 `{(void)frame,(void)n;}` | **emu 里发不出 SysEx**，验证只能靠真机 |
+
+#### ⑤ BLE 那条**只影响「用 BLE 发 SysEx」**，不影响 USB
+
+`le_midi.c` `ble_midi_send_many()` 里 `if (cin == 0xF || cin == 5) { }` 会把 `CIN 5` 的唯一数据字节（终止 `F7`）丢掉，且 SysEx 数据字节会被 `if (st < 0xF0) run = st;` 记成 running status。**USB 走 `plat_sysex_send` 不受影响**；要在 BLE 上发 SysEx（例如无线备份）才需要修。
+
+#### ⑥ emu 的 `worklet.js` out 循环吞 SysEx —— 这条仍然成立
+
+它按 status 字节解包，`F0` 只送 1 字节，无状态位的数据也只送 1 字节。**emu 要看 SysEx 就得改这里。**
 
 ### 6.4 三个来源，不是一类东西（2026-10-30 追加）
 
@@ -294,10 +322,10 @@ sendmidi list
 
 1. **谁指挥谁？（最关键的岔路）**
    - **A. 外部当主机**（QY100 / DAW / MPC 发，FM-1 收）：`ui_midi_dispatch` 已经收 `FA/FB/FC`，**基本已具备**。要补的只有：SysEx 收集 + MMC 命令分派（若确认需要 MMC）、以及要不要跟 `F8`（见第 3 问）。**这条最省力，且立刻能让 QY100/DAW 用起来。**
-   - **B. FM-1 当主机**（面板 PLAY/STOP 发出去控别人）：要发 `FA/FC`（简单）或 MMC（要先修 CIN、BLE SysEx 终止字节、emu 分帧，见 6.3）。**工程量是 A 的数倍。**
+   - **B. FM-1 当主机**（面板 PLAY/STOP 发出去控别人）：要发 `FA/FC`（`plat_midi_send`，简单）或 MMC（**`plat_sysex_send` 直接就能发，见 6.3②**；只剩 emu 侧看不见这一条，见 6.3⑥）。**工程量和 A 相当，比第一版估的小得多。**
    - **C. 双向都做**：A + B，且必须处理「自己发给自己」的回灌（BLE 回声那事已定案不修，但走带会重新触发它）。
 
-2. **MMC 到底要不要做？** 依据 6.4 的证据，**`FA/FC` 已覆盖 QY100 和多数 DAW，MMC 只对 MPC 有用**。所以合理的顺序是：**先只做 A 的 `FA/FC`，把 QY100/DAW 跑通；MMC 等确认 MPC 真的认了再加。** 若同意，6.3 那四件事（CIN / BLE 终止字节 / emu 分帧 / SysEx 组包）全部可以推迟。
+2. **MMC 到底要不要做？** 依据 6.4 的证据，**`FA/FC` 已覆盖 QY100 和多数 DAW，MMC 只对 MPC 有用**。而 6.3② 已确认 **MMC 的发送用现成的 `plat_sysex_send` 即可**，不构成阻塞。所以合理的顺序是：**先做 A 的 `FA/FC` 把 QY100/DAW 跑通；MMC 等确认 MPC 真的认了再发。**
 
 3. **要不要跟 `F8` clock？（决定「同步」还是「同时开始」）**
    - 不跟（现状）：只听走带，速度各跑各的。**够用于「一起开始并按各自的表走」**，但会漂。
@@ -312,11 +340,90 @@ sendmidi list
 
 7. **MPC 自己的 SysEx** 你还提到有——那部分消息格式未给，等你的清单再排。
 
-## 7. 计划（planned，未排期）
+## 7. SysEx 与 pattern 备份/恢复（2026-10-30）
+
+John：「sysex很重要，现在的log不就是通过sysex得到的吗？未来还需要实现pattern的backup/restore，也要用sysex」
+
+这条意见推翻了 §6 第一版把 SysEx 归到「只为 MPC」的判断。SysEx 是三件事的共同基础：**log（已在用）、MMC（§6）、pattern backup/restore（本节）**。
+
+### 7.1 平台已有整套 backup/restore —— DriftSeq 只是没开
+
+`fm1.toml` 打开 `backup = true` 就会编译进 `platform/device/backup.c`（493 行）与 `platform/tools/fm1_backup.py`（432 行）。这套东西是现成的、原子的、带 CRC 的，**不需要自己写协议**：
+
+- **线格式**：沿用 updater 的 SysEx 分帧 `F0 pack7(00 59 cmd len24 body ~sum(body)) F7`，命令 `0x41` restore 请求 / `0x42` backup 数据 / `0x43` backup 结束
+- **镜像格式**：head（magic、u16 版本、u16 对象数、u32 flags、u32 CRC-32）+ 每对象一条记录（u16 id、u16 长度、u32 payload CRC-32、payload）+ tail（u32 全镜像 CRC-32）
+- **备份**：设备从主循环一帧一帧推，**播放中可以备份**（未保存的改动不计入）；`app_backup_flush()` 先把未保存的存盘，`app_backup_hold()` 期间禁止存盘
+- **恢复**：播放中拒绝（`app_backup_playing` → "STOP FIRST"）；先收完整个镜像并逐段校验 CRC，**再在屏幕上问** `RESTORE FROM USB? SEL yes / HOME no`；确认后写 journal record 再提交，**掉电可在下次开机补齐；journal 写好之前等于什么都没发生 —— 整批生效或整批不生效**
+- **RAM**：一个对象缓冲 3840 B
+
+工具的用法：
+
+```bash
+python3 tools/fm1_backup.py backup FILE [--magic XXXX] [--port NAME]
+python3 tools/fm1_backup.py restore FILE [--yes]
+python3 tools/fm1_backup.py info FILE
+```
+
+### 7.2 DriftSeq 要做的三件事
+
+**① `fm1.toml` 加 `backup = true`**，并在 `app.h` 里声明：
+
+```c
+#define APP_BACKUP_OBJS  {OBJ_SETTINGS, OBJ_PATTERN}   /* 不含 OBJ_PANEL：校准属于这台机器 */
+#define APP_BACKUP_MAGIC 0x...u                        /* 4 个 ASCII 字节 */
+#define APP_BACKUP_VERSION 1
+#define APP_BACKUP_WHAT "replaces all patterns"
+```
+
+外加四个钩子：`app_backup_playing()` / `app_backup_flush()` / `app_backup_hold(int)` / `app_backup_restored()`。
+
+**② 先有 `OBJ_PATTERN` —— 这是真正的工作量，也是当前最大的缺口。**
+
+现状实测：
+
+```
+app.h:26  enum { OBJ_SETTINGS, OBJ_PANEL, OBJ_BLE, OBJ_NOBJ };
+```
+
+**没有 pattern 对象。** `ds_pack_pattern()` 只有测试和 GLOBAL 读数在调用，SAVE 菜单只存 jam 参数，**pattern 从不写 flash**。所以现在的 FM-1 重启即失去所有 pattern。
+
+**③ 尺寸约束（硬性，必须先算清）**
+
+| 量 | 值 |
+|---|---|
+| 每对象上限 `PLAT_STORE_MAX` | **3840 B** |
+| 单轨最坏 `DS_PACK_TRACK_MAX` | 1036 B |
+| 一整个 pattern 最坏 `DS_PACK_PATTERN_MAX` | 1036 × 16 = **16576 B** |
+
+**一个满 pattern 是 4.3 个对象，装不进一个。** 所以 `OBJ_PATTERN` 不能是「一个 object = 一个 pattern」。可选：
+
+- **A. 一个 pattern 拆成 5 个 object**（`OBJ_PAT0..4`，按轨分组）。简单直接，但 object 数上限和内存在 `APP_STORE_MAP` 里要跟着改，且 backup 镜像里会多出 5 条记录
+- **B. 只存实际用到的轨**：`pack.h` 的设计本就是稀疏的（空轨 1 字节），typical pattern 远小于 16.5 KB，落到 3840 以内很常见 —— **超了才需要分片**。这符合 John 当初「至少可以按track存，没用的trk不消耗」的要求
+- **C. 多 pattern bank**：`#define DS_PATTERNS 16` 意味着 16 个 pattern。若都要存，`16 × 16576 = 265 KB`，远超 flash 预算，**必须分片 + 按需**，或只存当前 pattern + 少量存档位
+
+这一条**需要 John 拍板**（见 §7.4），因为它决定 `OBJ_` 枚举和 `APP_STORE_MAP` 的形状，是后面所有东西的地基。
+
+### 7.3 顺带解决的三笔欠账
+
+开了 `backup = true` 之后自动获得：
+
+1. **`fm1_backup.py`** 直接可用的命令行备份/恢复（不用自己写协议）
+2. **`web/backup/index.html`** 网页版备份页（`EXTRAS` 机制可挂应用自己的段）
+3. **原子性**：A/B 双扇区 + journal record，恢复中途断电不会留下半个 pattern
+
+### 7.4 待 John 拍板
+
+1. **pattern 存几个？** 只存当前 1 个（最省 flash，重启恢复现场）／存 16 个 bank（完整，但要 265 KB，必须分片）／折中（当前 + 若干存档位）
+2. **`OBJ_PATTERN` 怎么切？** 方案 A（固定 5 片）／方案 B（稀疏，超了再分）／其他
+3. **backup 走 USB 就够，还是要 BLE？** USB 现成；BLE 需要先修 `le_midi.c` 的 `CIN 5` 丢 `F7` 与 running status 问题
+4. **要不要同时做**「单 pattern 的 SysEx dump」**？** 和整包 backup 是两套需求：前者给 DAW/外部工具交换单个 pattern，后者是整机搬迁
+
+## 8. 计划（planned，未排期）
 
 | 项 | 说明 |
 |---|---|
-| SysEx pattern/settings dump | 一首歌 = 16 pattern × 16 轨 × 64 step。协议要点：通用 7-bit 打包、continuation CIN、帧校验；沿用 store 序列化已有格式 |
+| **pattern backup/restore** | **平台已实现**（`backup = true` → `backup.c` + `fm1_backup.py`），原子 + CRC。前置是 `OBJ_PATTERN`，见 §7 |
+| 单 pattern 的 SysEx dump | 与整包 backup 不同：给外部工具交换单个 pattern。可复用 `ds_pack_pattern()` 的输出 |
 | 外部 clock 同步 | F8 接收 → `ds_tick` 相位锁定（现引擎按 ms 自走）；FA=对齐 loop_start，FC=停；slave 模式开关 |
 | Clock master 输出 | 发送 F8（24/拍）+ FA/FB/FC，作为下游设备 clock 源 |
 | FW 侧 CC | 至少 Master 音量（CC27 约定已有）；旋钮映射待拍板 |
