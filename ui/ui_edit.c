@@ -216,6 +216,7 @@ static void draw_arp(void)
         h.right_c = eu ? GREEN_OK : RGB565(106, 106, 118);
         h.dots = 1;
         h.page = 2;
+        h.badge = (char *)0;
         ui_draw_header(&h);
     }
     if (!eu && k0 == 0 && n0 == 0) {                 /* fresh track: hint page */

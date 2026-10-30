@@ -233,3 +233,28 @@ tap SEL
 wait 20
 expect mode 0
 
+
+# --- the keys on this page are a speaker, not a performance: they must sound
+# (the point of the page is choosing a PROGRAM by ear) and must NOT land in the
+# jam ring, which everywhere else keeps every stray note.
+tap ENV
+wait 20
+expect mode 4
+expect jam_used 0
+key 5 down
+wait 60
+key 5 up
+wait 40
+expect jam_used 0
+# and the same key press on the GRID still jams, so this is a property of the
+# page, not of the key handling being broken
+tap HOME
+wait 20
+expect mode 0
+key 5 down
+wait 60
+key 5 up
+wait 40
+# the GRID keeps it (jam is always armed there), which is what makes the check
+# above a property of the page and not of the key path
+expect jam_used 1

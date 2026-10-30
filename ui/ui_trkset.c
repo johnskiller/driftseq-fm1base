@@ -25,6 +25,10 @@
 static uint8_t ts_row;          /* 0..TS_NROW-1, dead-stop */
 
 #define TS_NROW 5
+/* 16px rows need a 22px pitch; five of them (y30..140) leave the channel map at
+ * 144, its cells at 158..178 and the bottom line at 186, clear of the footer. */
+#define TS_Y0    30
+#define TS_PITCH 22
 #define TS_CH   0
 #define TS_PROG 1
 #define TS_ROUTE 2
@@ -71,7 +75,10 @@ static const char *const GM_PROG[128] = {
                              "TELEPHONE", "HELICOPTER", "APPLAUSE", "GUNSHOT"
 };
 
-static const char *const TS_ROUTE_NAME[3] = {"USB", "GM", "USB+GM"};
+/* ROUTE is the WIRE only (USB / BLE / BOTH). The local GM synth hears every
+ * track; turning it off is a global mix question, not a per-track destination
+ * (John 2026-10-30). */
+static const char *const TS_ROUTE_NAME[3] = {"USB", "BLE", "USB+BLE"};
 
 /* On the drum channel a program change picks a KIT, not an instrument, so the
  * PROGRAM row must not say "ACOUSTIC GRAND" on a track whose notes are 36..51.
@@ -233,30 +240,36 @@ static void draw_trkset(void)
     cv_begin(240, 224, C_BLACK);
     {
         hdr_t h;
-        /* The context says what the channel MEANS (CH=10 is the drum channel),
-         * and appends MUTE/SOLO when that is why the track is silent — on a page
-         * that edits what a track sounds like, "why don't I hear it" has to be
-         * answerable without leaving. */
-        static const char *const CTX_DRUM[3] = {"DRUM", "DRUM MUTE", "DRUM SOLO"};
-        static const char *const CTX_MEL[3]  = {"MELODIC", "MELODIC MUTE", "MELODIC SOLO"};
-        uint8_t st = tr->mute ? 1 : (tr->solo ? 2 : 0);
-        h.ctx = (char *)(is_drum_trk() ? CTX_DRUM[st] : CTX_MEL[st]);
+        /* The context says what the channel MEANS (CH=10 is the drum channel).
+         * MUTE/SOLO used to be appended to it ("MELODIC MUTE"), which failed at
+         * exactly the job it had: same white text, so the silence read as part
+         * of the channel's name (John 2026-10-30). It is a pill now - a shape
+         * says "state" before the word is read - in the same vocabulary as the
+         * hero column's M/S badges. */
+        h.ctx = (char *)(is_drum_trk() ? "DRUM" : "MELODIC");
         h.right = (char *)0;
         h.right_c = TB_TX;
         h.dots = 1;
         h.page = 3;
+        h.badge = tr->mute ? "MUTE" : (tr->solo ? "SOLO" : (char *)0);
+        h.badge_c = tr->mute ? C_AMB : TRACK_HUE(sel_track);
         ui_draw_header(&h);
     }
     for (i = 0; i < TS_NROW; i++) {
         char buf[36];
         char *v = buf;
         const char *val;
-        y = 34 + i * 20;
+        y = TS_Y0 + i * TS_PITCH;
         if (i == (int)ts_row) {                  /* the row being edited */
-            cv_rect(4, y - 5, 232, 18, RGB565(26, 26, 34));
-            cv_rect(4, y - 5, 2, 18, C_AMB);
+            cv_rect(4, y - 6, 232, 21, RGB565(26, 26, 34));
+            cv_rect(4, y - 6, 2, 21, C_AMB);
         }
-        cv_text(12, y, &FONT_T, TS_LABEL[i], (i == (int)ts_row) ? C_AMB : C_GRAY);
+        /* 16px, not 12 (John 2026-10-30: there was room and the page is read at
+         * arm's length). FONT_S for the label, FONT_B for the value: same size,
+         * different weight, so the column reads as label/value without a rule
+         * between them. FONT_T stays the smallest type on the page, which is
+         * the channel map's digits and the bottom line. */
+        cv_text(12, y, &FONT_S, TS_LABEL[i], (i == (int)ts_row) ? C_AMB : C_GRAY);
         if (i == TS_CH) {
             fmt_int(v, (int32_t)tr->channel + 1);
             val = v;
@@ -272,18 +285,18 @@ static void draw_trkset(void)
             strcpy_(txt_end(v), "%");
             val = v;
         }
-        cv_text(96, y, &FONT_T, val, BRIGHTTX);
+        cv_text(100, y, &FONT_B, val, BRIGHTTX);
         if (i == TS_SWING && !eng.global_swing) {
             /* per-track swing is a WEIGHT (global x track x 0.5), so with the
              * global at zero this percentage produces nothing. Say why here
              * rather than let the row read as a live control; K4 turns it up and
              * the hint disappears, which is the whole lesson. */
-            int w = cv_text_w(&FONT_T, val);
-            cv_text(96 + w + 8, y, &FONT_T, "GLOBAL 0", RGB565(150, 104, 48));
+            int w = cv_text_w(&FONT_B, val);
+            cv_text(100 + w + 8, y, &FONT_S, "GLOBAL 0", RGB565(150, 104, 48));
         }
     }
     /* ---- the channel map: who else lives on each channel ---- */
-    cv_text(8, 138, &FONT_T, "CHANNELS IN USE", C_GRAY);
+    cv_text(8, 144, &FONT_T, "CHANNELS IN USE", C_GRAY);
     {
         int c;
         for (c = 0; c < 16; c++) {
@@ -298,28 +311,28 @@ static void draw_trkset(void)
                     other[no++] = (uint8_t)t;
             }
             if (c == (int)tr->channel) {         /* this track's own channel */
-                cv_rect(x, 152, 12, 20, TB_TX);
+                cv_rect(x, 158, 12, 20, TB_TX);
                 fmt_int(n, c + 1);
-                cv_text(x + ((c >= 9) ? 1 : 3), 158, &FONT_T, n, TB_BG);
+                cv_text(x + ((c >= 9) ? 1 : 3), 164, &FONT_T, n, TB_BG);
             } else if (users) {                  /* taken by someone else: bright digits,
                                                   * but a hollow cell. A filled cell would
                                                   * read as "mine" at a glance (both were
                                                   * RGB 58-ish and indistinguishable in a
                                                   * pixel scan), so the fill is reserved
                                                   * for the track being edited. */
-                cv_rect(x, 152, 12, 1, RGB565(88, 88, 100));
-                cv_rect(x, 171, 12, 1, RGB565(88, 88, 100));
-                cv_rect(x, 152, 1, 20, RGB565(88, 88, 100));
-                cv_rect(x + 11, 152, 1, 20, RGB565(88, 88, 100));
+                cv_rect(x, 158, 12, 1, RGB565(88, 88, 100));
+                cv_rect(x, 177, 12, 1, RGB565(88, 88, 100));
+                cv_rect(x, 158, 1, 20, RGB565(88, 88, 100));
+                cv_rect(x + 11, 158, 1, 20, RGB565(88, 88, 100));
                 fmt_int(n, c + 1);
-                cv_text(x + ((c >= 9) ? 1 : 3), 158, &FONT_T, n, RGB565(214, 214, 224));
+                cv_text(x + ((c >= 9) ? 1 : 3), 164, &FONT_T, n, RGB565(214, 214, 224));
             } else {                             /* free: outline only, dim digits */
-                cv_rect(x, 152, 12, 1, RGB565(40, 40, 50));
-                cv_rect(x, 171, 12, 1, RGB565(40, 40, 50));
-                cv_rect(x, 152, 1, 20, RGB565(40, 40, 50));
-                cv_rect(x + 11, 152, 1, 20, RGB565(40, 40, 50));
+                cv_rect(x, 158, 12, 1, RGB565(40, 40, 50));
+                cv_rect(x, 177, 12, 1, RGB565(40, 40, 50));
+                cv_rect(x, 158, 1, 20, RGB565(40, 40, 50));
+                cv_rect(x + 11, 158, 1, 20, RGB565(40, 40, 50));
                 fmt_int(n, c + 1);
-                cv_text(x + ((c >= 9) ? 1 : 3), 158, &FONT_T, n, RGB565(74, 74, 82));
+                cv_text(x + ((c >= 9) ? 1 : 3), 164, &FONT_T, n, RGB565(74, 74, 82));
             }
             if (c == (int)tr->channel) {         /* and the sharing line below */
                 /* A local buffer, not txt_pool: this line can name up to 15
@@ -379,7 +392,7 @@ static void draw_trkset(void)
                     }
                     }
                 }
-                cv_text(8, 180, &FONT_T, s, no ? YELLOW : C_GRAY);
+                cv_text(8, 186, &FONT_T, s, no ? YELLOW : C_GRAY);
             }
         }
     }

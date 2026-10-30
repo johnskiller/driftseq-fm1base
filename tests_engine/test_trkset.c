@@ -63,27 +63,27 @@ static void one_track(ds_state *s, uint8_t ch) {
 static void test_route_masks(void) {
     ds_state s;
     one_track(&s, 5);
-    s.pat.track[0].route = DS_ROUTE_GM;
+    s.pat.track[0].route = DS_ROUTE_BLE;
     ds_route_sync(&s);
-    if (!(s.gm_mask & (1u << 5))) FAIL("ROUTE=GM must keep ch5 on the GM side");
-    if (s.wire_mask & (1u << 5)) FAIL("ROUTE=GM must take ch5 off the wire");
+    if (!(s.ble_mask & (1u << 5))) FAIL("ROUTE=BLE must put ch5 on the BLE side");
+    if (s.usb_mask & (1u << 5)) FAIL("ROUTE=BLE must take ch5 off USB");
     s.pat.track[0].route = DS_ROUTE_USB;
     ds_route_sync(&s);
-    if (!(s.wire_mask & (1u << 5))) FAIL("ROUTE=USB must put ch5 on the wire");
-    if (s.gm_mask & (1u << 5)) FAIL("ROUTE=USB must take ch5 off GM");
+    if (!(s.usb_mask & (1u << 5))) FAIL("ROUTE=USB must put ch5 on the USB side");
+    if (s.ble_mask & (1u << 5)) FAIL("ROUTE=USB must take ch5 off BLE");
     s.pat.track[0].route = DS_ROUTE_BOTH;
     ds_route_sync(&s);
-    if (!(s.wire_mask & (1u << 5)) || !(s.gm_mask & (1u << 5)))
-        FAIL("ROUTE=BOTH must be on both sides");
-    OK("route masks: GM / USB / BOTH each set exactly their own side");
+    if (!(s.usb_mask & (1u << 5)) || !(s.ble_mask & (1u << 5)))
+        FAIL("ROUTE=BOTH must be on both links");
+    OK("route masks: USB / BLE / BOTH each set exactly their own link");
 
-    /* two tracks on one channel: either one asking for the wire wins */
+    /* two tracks on one channel: either one asking for a link wins */
     s.pat.track[1].channel = 5;
     s.pat.track[1].route = DS_ROUTE_USB;
-    s.pat.track[0].route = DS_ROUTE_GM;
+    s.pat.track[0].route = DS_ROUTE_BLE;
     ds_route_sync(&s);
-    if (!(s.wire_mask & (1u << 5))) FAIL("a second track routed to USB must re-open the channel");
-    if (!(s.gm_mask & (1u << 5))) FAIL("the GM track keeps its side of a shared channel");
+    if (!(s.usb_mask & (1u << 5))) FAIL("a second track routed to USB must re-open the channel");
+    if (!(s.ble_mask & (1u << 5))) FAIL("the BLE track keeps its link of a shared channel");
     OK("route masks: a shared channel ORs both tracks");
 }
 

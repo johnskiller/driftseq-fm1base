@@ -533,6 +533,14 @@ typedef struct {
     uint16_t    right_c; /* colour for `right` */
     uint8_t     dots;    /* 1 = draw the page indicator */
     uint8_t     page;    /* which dot is lit */
+    /* A state badge drawn as a FILLED PILL after the dot row, e.g. MUTE / SOLO.
+     * The context word alone could not carry it: "MELODIC MUTE" is 13 characters
+     * of the same white as "MELODIC", so at a glance the header read as one
+     * phrase and the fact that the track is silent did not stand out from the
+     * fact that it is melodic (John 2026-10-30). A pill is a shape, so it is
+     * legible without reading. */
+    const char *badge;
+    uint16_t    badge_c;
 } hdr_t;
 
 static void ui_draw_header(const hdr_t *h)
@@ -575,6 +583,18 @@ static void ui_draw_header(const hdr_t *h)
         int rx = (h->dots ? 211 : 240 - 6) - 8 - (int)cv_text_w(&FONT_S, h->right);
         cv_text(rx, HDR_TY, &FONT_S, h->right, h->right_c);
     }
+    if (h->badge) {
+        /* right-aligned in the same slot as `right`, knocked out of the fill:
+         * the badge is a STATE, and a state read as text in the same white as
+         * the page's name is not a state, it is a word. */
+        int bw = (int)cv_text_w(&FONT_T, h->badge) + 8;
+        /* left of the page dots, which own x211..241: a badge that reached under
+         * them read as a smudge on the pill (the dots are 3px and dark, so they
+         * vanished into the fill) */
+        int bx = (h->dots ? 205 : 234) - bw;
+        cv_round_rect(bx, 5, bw, 14, 4, h->badge_c);
+        cv_text(bx + 4, 7, &FONT_T, h->badge, TB_BG);
+    }
 }
 
 static void draw_home(void)
@@ -603,7 +623,8 @@ static void draw_home(void)
     h.right_c = TB_TX;
     h.dots = 1;
     h.page = 0;
-    ui_draw_header(&h);
+    h.badge = (char *)0;
+        ui_draw_header(&h);
     for (t = 0; t < 16; t++) {
         ds_track *tr = &eng.pat.track[t];
         int y = 24 + (int)t * 12;
@@ -938,6 +959,7 @@ static void draw_grid_melodic(void)
         h.right_c = TB_TX;
         h.dots = 1;
         h.page = 1;
+        h.badge = (char *)0;
         ui_draw_header(&h);
     }
     if (key_shift != 0)
@@ -1099,6 +1121,7 @@ static void draw_grid_drum(void)
         h.right_c = TRACK_HUE(sel_track);
         h.dots = 1;
         h.page = 1;
+        h.badge = (char *)0;
         ui_draw_header(&h);
     }
     if (focus_layer)

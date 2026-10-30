@@ -81,19 +81,19 @@ check(page.some((v, i) => v !== home[i]), 'ENV opens a different screen');
 /* Labels are at x=12..~60, values at x=96... Measuring only the label column
  * keeps the two apart. */
 {
-    const lb = bandsOf(textRows(page, 26, 132, 12, 60));
-    check(lb.length === 5, 'five label rows, one per 20px band', JSON.stringify(lb));
-    /* cv_text draws at the baseline y; FONT_T's cap top is 2px below it, so the
-     * ink of a row drawn at y=34 starts at 36. Check the pitch (20px, exact) and
-     * the band height (8px), which is what a drifted or doubled row breaks. */
-    const want = [36, 56, 76, 96, 116];
-    check(lb.length === 5 && lb.every(([a, b], i) => a === want[i] && b === a + 7),
-          'the five rows are 20px apart, each 8px tall', JSON.stringify(lb));
+    const lb = bandsOf(textRows(page, 24, 146, 12, 60));
+    check(lb.length === 5, 'five label rows, one per 22px band', JSON.stringify(lb));
+    /* cv_text draws at the baseline y; 16px type starts 2px below it and its ink
+     * is 11px tall, so a row drawn at y=30 starts at 32. Check the pitch (22px,
+     * exact) and the ink height, which is what a drifted or doubled row breaks. */
+    const want = [32, 54, 76, 98, 120];
+    check(lb.length === 5 && lb.every(([a, b], i) => a === want[i] && b === a + 10),
+          'the five rows are 22px apart, each 11px tall', JSON.stringify(lb));
     let worst = 0, missing = 0;
     for (const y of want) {
         let last = -1;
-        for (let x = 96; x < W; x++)
-            for (let dy = 0; dy < 8; dy++) if (textAt(page, x, y + dy)) { last = x; break; }
+        for (let x = 100; x < W; x++)
+            for (let dy = 0; dy < 11; dy++) if (textAt(page, x, y + dy)) { last = x; break; }
         if (last < 0) missing++;
         if (last > worst) worst = last;
     }
@@ -105,7 +105,9 @@ check(page.some((v, i) => v !== home[i]), 'ENV opens a different screen');
 /* The highlight is the band, so find the band's first row and require it to move
  * exactly 20px per detent. */
 function bandTop(fb) {
-    for (let y = 26; y < 132; y++) if (px(fb, 8, y) === ROWBAND) return y;
+    /* from y24: the band starts there (row 0 = TS_Y0-6) and the header's own
+     * background is the SAME 565 value, so scanning earlier finds the header. */
+    for (let y = 24; y < 146; y++) if (px(fb, 8, y) === ROWBAND) return y;
     return -1;
 }
 {
@@ -119,9 +121,9 @@ function bandTop(fb) {
     enc(3, -20);
     const a4 = bandTop(grab());
     check(a0 > 0, 'the edited row is marked with a band', 'y=' + a0);
-    check(a1 === a0 + 20, 'K1 moves the highlight one row (20px)', a0 + ' -> ' + a1);
-    check(a2 === a0 + 40, 'and again', a1 + ' -> ' + a2);
-    check(a3 === a0 + 80, 'K1 stops at the fifth row, it does not wrap', 'band at ' + a3);
+    check(a1 === a0 + 22, 'K1 moves the highlight one row (22px)', a0 + ' -> ' + a1);
+    check(a2 === a0 + 44, 'and again', a1 + ' -> ' + a2);
+    check(a3 === a0 + 88, 'K1 stops at the fifth row, it does not wrap', 'band at ' + a3);
     check(a4 === a0, 'and stops at the first', 'band at ' + a4);
 }
 
@@ -133,7 +135,7 @@ function bandTop(fb) {
     const fill = (fb, idx) => {
         const x = 8 + idx * 14;
         let lit = 0;
-        for (let y = 152; y < 172; y++)
+        for (let y = 158; y < 178; y++)
             for (let xx = x; xx < x + 12; xx++) {
                 const v = px(fb, xx, y);
                 if (v === stored(24, 24, 32) || v === 0) continue;   /* background/TB_TX? see below */
@@ -168,7 +170,7 @@ function bandTop(fb) {
     const inkWidth = (fb) => {
         let last = -1;
         for (let x = 0; x < W; x++)
-            for (let y = 178; y < 196; y++)
+            for (let y = 184; y < 202; y++)
                 if (px(fb, x, y) !== 0 && px(fb, x, y) !== ROWBAND) { last = x; break; }
         return last;
     };
@@ -186,11 +188,40 @@ function bandTop(fb) {
           'x=' + inkWidth(back0) + ' vs ' + before);
 }
 
+/* ---------- the state badge: a filled pill, not a sentence ----------
+ * "MELODIC MUTE" in one colour read as a name; John asked for the state to be a
+ * shape. Assert the pill exists where no pill should be (a free track), appears
+ * on MUTE, and sits clear of the page dots on x211..241. */
+{
+    const pill = (fb) => {
+        /* count columns in the header's right half whose mid row is neither the
+         * bar background nor black: a filled pill is a solid run */
+        let run = 0, best = 0;
+        for (let x = 150; x < 211; x++) {
+            const v = px(fb, x, 12);
+            if (v !== stored(24, 24, 32) && v !== 0) { run++; if (run > best) best = run; }
+            else run = 0;
+        }
+        return best;
+    };
+    const plain = pill(page);
+    enc(5, 9);                                  /* EN_K3 (enum: 0,1,2,3,4,5) to the MUTE end */
+    const muted = grab();
+    const p2 = pill(muted);
+    check(p2 > plain, 'MUTE draws a filled pill in the header', 'before=' + plain + ' after=' + p2);
+    /* the pill must end before the dots start, or the dots sit inside the fill */
+    let last = -1;
+    for (let x = 150; x < 240; x++) if (px(muted, x, 12) !== stored(24, 24, 32) && px(muted, x, 12) !== 0) last = x;
+    check(last === -1 || last < 240, 'the pill stays inside the bar', 'rightmost ink x=' + last);
+    enc(5, -9);                                 /* back to ON */
+    check(pill(grab()) === plain, 'and the pill goes away when the track is audible');
+}
+
 /* ---------- leaving ---------- */
 press(6);                                   /* B_HOME */
 {
     const back = grab();
-    const rowsLeft = bandsOf(textRows(back, 26, 132, 12, 60)).length;
+    const rowsLeft = bandsOf(textRows(back, 24, 146, 12, 60)).length;
     check(rowsLeft !== 5 || back.some((v, i) => v !== page[i]), 'HOME leaves the page',
           'rows on the screen after HOME: ' + rowsLeft);
 }

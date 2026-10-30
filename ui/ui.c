@@ -191,6 +191,13 @@ static void panel_key_handler(uint8_t key, uint8_t down)
         return;                                       /* the scale/OFC layer consumed it */
     if (ui_mode != M_GRID) {                          /* non-grid: live audition only */
         int note;
+        /* TRACK SET auditions the PROGRAM you are choosing: sound yes, jam no.
+         * Everywhere else a stray note is a performance gesture the ring keeps;
+         * here the keys are a speaker for a menu, and recording them would fill
+         * the take with notes the player was only using to listen (John
+         * 2026-10-30). ds_live_on/off still go out, so ROUTE and the wire are
+         * auditioned too - the page is about where the sound goes. */
+        uint8_t jam = (ui_mode != M_TRKSET);
         if (is_drum_trk()) {
             uint8_t bi = key_black_ordinal(key);
             /* black key = that drum; the 2 reserved keys and white keys fall
@@ -204,10 +211,12 @@ static void panel_key_handler(uint8_t key, uint8_t down)
         }
         if (down) {
             ds_live_on(&eng, sel_track, (uint8_t)note, midi_vel);
-            ds_jam_capture(&eng, (uint8_t)note, midi_vel, 1);   /* always armed: jam is not a mode */
+            if (jam)
+                ds_jam_capture(&eng, (uint8_t)note, midi_vel, 1);   /* always armed: jam is not a mode */
         } else {
             ds_live_off(&eng, sel_track, (uint8_t)note);
-            ds_jam_capture(&eng, (uint8_t)note, midi_vel, 0);
+            if (jam)
+                ds_jam_capture(&eng, (uint8_t)note, midi_vel, 0);
         }
         return;
     }

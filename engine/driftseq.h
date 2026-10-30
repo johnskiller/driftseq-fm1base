@@ -13,7 +13,13 @@
 #define DS_CHAIN    64
 #define DS_GATES    64                          /* scheduled sequenced note-offs */
 
-enum { DS_ROUTE_USB = 0, DS_ROUTE_GM, DS_ROUTE_BOTH };
+/* Where a track's bytes leave the box. The local GM synth is NOT a destination
+ * here: it always hears every track, and whether it should is a GLOBAL mix
+ * question (master volume today, a GM on/off setting later) - not something a
+ * per-track switch can answer sensibly, because a track has one destination
+ * pair (USB, BLE) and the local synth is not competing for the same wire.
+ * John 2026-10-30. */
+enum { DS_ROUTE_USB = 0, DS_ROUTE_BLE, DS_ROUTE_BOTH };
 enum { DS_DIV_8 = 0, DS_DIV_8T, DS_DIV_16, DS_DIV_16T, DS_DIV_32 };
 enum { DS_VOICE_POLY = 0, DS_VOICE_MONO };
 
@@ -52,7 +58,7 @@ typedef struct {
     uint8_t  loop_start;        /* 0..63 — window = [start, start+len) mod 64 */
     uint8_t  loop_len;          /* 1..64 */
     uint8_t  channel;           /* 0..15 */
-    uint8_t  route;             /* DS_ROUTE_* */
+    uint8_t  route;             /* DS_ROUTE_USB / BLE / BOTH: the wire, never GM */
     uint8_t  prog;              /* GM program (bank MSB ignored v1) */
     uint8_t  mute;
     uint8_t  solo;              /* live-only: not packed (a performance gesture). The
@@ -114,13 +120,16 @@ typedef struct {
      * previous note first; without the byte the "previous" is unknowable and
      * every mono step would leave a note hanging. */
     uint8_t     mono_note[DS_TRACKS];
-    /* per-channel routing, recomputed from track[].route: bit set = this channel
-     * is allowed to that destination. Two tracks sharing a channel OR their
-     * bits (one channel cannot carry two routes, and GM gives them one program
-     * anyway). The engine does not send anywhere — it fills s->out — so the
-     * masks are the contract the drain side (app.c) reads. */
-    uint16_t    wire_mask;              /* USB/BLE */
-    uint16_t    gm_mask;                /* the local GM synth */
+    /* per-channel routing to the two WIRE links, recomputed from track[].route:
+     * bit set = this channel may go there. Two tracks sharing a channel OR
+     * their bits (a channel cannot carry two routes, and the receiver gives
+     * them one program anyway). The engine does not send anywhere — it fills
+     * s->out — so the masks are the contract the drain side (app.c) reads.
+     * There is no mask for the local GM synth: it hears every channel, and
+     * muting it is a global mix question (John 2026-10-30), not a per-track
+     * destination. */
+    uint16_t    usb_mask;               /* the host link */
+    uint16_t    ble_mask;               /* the Bluetooth links (both roles) */
     uint8_t     any_solo;               /* recomputed each tick: 1 = some track.solos */
     uint8_t     playing;
     double      tick_acc;               /* absolute time in ticks @24 PPQ since play (hero axis) */

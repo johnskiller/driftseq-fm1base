@@ -354,17 +354,18 @@ static void engine_drain(void)
          * never does; the event is consumed either way — the platform's send
          * drops on a full ring itself, and a disconnected wire has no listener
          * to lose. */
-        if (plat_midi_out_room(TO_USB | TO_BLE) &&
-            (eng.wire_mask >> (st & 0x0Fu)) & 1u)
-            plat_midi_send(pkt, TO_USB | TO_BLE);
-        eng_sent += n;
-        /* and into the GM synth: the wire hears it, the local sound does too —
-         * unless this channel's tracks are routed away from GM (ROUTE = USB on
-         * every track sharing the channel). d1/d2 live just past the status. */
-        if (!((eng.gm_mask >> (st & 0x0Fu)) & 1u)) {
-            i += n;
-            continue;
+        /* the two wire links are chosen per channel by ROUTE; the local GM
+         * synth is not in this decision at all (it hears everything, and
+         * silencing it is a global mix matter - John 2026-10-30) */
+        {
+            uint32_t to = 0;
+            uint8_t ch = (uint8_t)(st & 0x0Fu);
+            if ((eng.usb_mask >> ch) & 1u) to |= TO_USB;
+            if ((eng.ble_mask >> ch) & 1u) to |= TO_BLE;
+            if (to && plat_midi_out_room(to))
+                plat_midi_send(pkt, to);
         }
+        eng_sent += n;
         if ((st & 0xF0u) == 0x90u)
             gm_on(st & 15u, (uint8_t)(pkt >> 16), (uint8_t)(pkt >> 24));
         else if ((st & 0xF0u) == 0x80u)
@@ -693,6 +694,17 @@ int app_expect(const char *what, int *got)
         *got = TRK()->swing_amt;
     else if (!strcmp(what, "ts_gswing"))         /* K4: the global it multiplies by */
         *got = eng.global_swing;
+    else if (!strcmp(what, "jam_used"))          /* how much the jam ring has taken: 0 = keys auditioned only */
+    {
+        int t2, used = 0;
+        for (t2 = 0; t2 < DS_STEPS; t2++)
+            if (eng.jam.steps[t2].nvoices) used++;
+        *got = used;
+    }
+    else if (!strcmp(what, "out_usb"))           /* ROUTE at the box's edge, per link */
+        *got = (int)plat_midi_count(PORT_USB, 1);
+    else if (!strcmp(what, "out_ble"))
+        *got = (int)plat_midi_count(PORT_BLE, 1);
     else if (!strcmp(what, "ts_owner"))          /* who decides this channel's program */
         *got = ds_channel_owner(&eng, (int)TRK()->channel);
     else if (!strcmp(what, "ts_shared"))         /* how many tracks sit on this channel */

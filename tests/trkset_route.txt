@@ -1,9 +1,14 @@
 # ROUTE at the box's edge: not 'the masks were computed' but 'what left the
-# cable'. The host counts what plat_midi_send put on the wire, and the sim is
+# cable'. ROUTE is the WIRE only now (USB / BLE / BOTH); the local GM synth is
+# always fed, because whether it should be is a global mix question, not a
+# per-track destination (John 2026-10-30).
+#
+# The host counts what plat_midi_send put on the wire and the sim is
 # deterministic, so the numbers below are facts, not guesses.
 wait 600
 
-# --- put all 16 tracks on GM (the local synth): the wire must stay silent ---
+# --- all 16 tracks to BLE: the USB cable must stay silent ---
+# (routes start at BOTH = 2, so one detent DOWN is BLE = 1)
 tap ENV
 wait 20
 expect mode 4
@@ -12,6 +17,7 @@ wait 3
 turn K2 -1
 wait 3
 expect ts_route 1
+expect out_usb 0
 turn SELECT 1
 wait 3
 turn K1 2
@@ -119,119 +125,135 @@ wait 3
 expect ts_route 1
 expect track 15
 
-# USB+GM puts the mix on the wire. No track is on USB yet, so this is 0.
+# every track on BLE: the cables stay quiet no matter what the engine plays
 tap PLAY
 wait 300
 tap PLAY
 wait 20
 expect midi_out 0
 
-# --- now give every track USB back; the full mix returns ---
-expect track 15
+# --- give every track USB back: the full mix returns ---
+# K1 -9 first: the row is still on ROUTE from the loop above, and SELECT is what
+# normally resets it to the top.
+turn K1 -9
+wait 3
 turn K1 2
 wait 3
-turn K2 1
+turn K2 -1
 wait 3
+expect ts_route 0
 turn SELECT -1
 wait 3
 turn K1 2
 wait 3
-turn K2 1
+turn K2 -1
 wait 3
+expect ts_route 0
 turn SELECT -1
 wait 3
 turn K1 2
 wait 3
-turn K2 1
+turn K2 -1
 wait 3
+expect ts_route 0
 turn SELECT -1
 wait 3
 turn K1 2
 wait 3
-turn K2 1
+turn K2 -1
 wait 3
+expect ts_route 0
 turn SELECT -1
 wait 3
 turn K1 2
 wait 3
-turn K2 1
+turn K2 -1
 wait 3
+expect ts_route 0
 turn SELECT -1
 wait 3
 turn K1 2
 wait 3
-turn K2 1
+turn K2 -1
 wait 3
+expect ts_route 0
 turn SELECT -1
 wait 3
 turn K1 2
 wait 3
-turn K2 1
+turn K2 -1
 wait 3
+expect ts_route 0
 turn SELECT -1
 wait 3
 turn K1 2
 wait 3
-turn K2 1
+turn K2 -1
 wait 3
+expect ts_route 0
 turn SELECT -1
 wait 3
 turn K1 2
 wait 3
-turn K2 1
+turn K2 -1
 wait 3
+expect ts_route 0
 turn SELECT -1
 wait 3
 turn K1 2
 wait 3
-turn K2 1
+turn K2 -1
 wait 3
+expect ts_route 0
 turn SELECT -1
 wait 3
 turn K1 2
 wait 3
-turn K2 1
+turn K2 -1
 wait 3
+expect ts_route 0
 turn SELECT -1
 wait 3
 turn K1 2
 wait 3
-turn K2 1
+turn K2 -1
 wait 3
+expect ts_route 0
 turn SELECT -1
 wait 3
 turn K1 2
 wait 3
-turn K2 1
+turn K2 -1
 wait 3
+expect ts_route 0
 turn SELECT -1
 wait 3
 turn K1 2
 wait 3
-turn K2 1
+turn K2 -1
 wait 3
+expect ts_route 0
 turn SELECT -1
 wait 3
 turn K1 2
 wait 3
-turn K2 1
+turn K2 -1
 wait 3
+expect ts_route 0
 turn SELECT -1
 wait 3
 turn K1 2
 wait 3
-turn K2 1
+turn K2 -1
 wait 3
+expect ts_route 0
 expect track 0
 tap PLAY
 wait 300
 tap PLAY
 wait 20
-# 45 until program changes became per-channel. The 13 that left were one per
-# extra track: 14 tracks shared three channels, every one of them restating a
-# program its channel had already been told. Now: one PC per used channel (3)
-# and one message per note and CC the demo actually plays (29). If this number
-# drops again, a channel lost its owner; if it grows, someone is sending a
-# program the receiver never needed.
-expect midi_out 32
-shot trk_route_done.png
+# 29: the demo's own notes and CCs. The three program changes are NOT here:
+# they went out on the earlier PLAY and the receiver's copy has not changed
+# since (sent_prog still agrees), so this run restates nothing. 45 before
+# program changes became per-channel; 32 if this were a first run.
+expect midi_out 29

@@ -166,15 +166,15 @@ static void jam_advance(ds_state *s, double dt);   /* jam ring clock (defined be
 void ds_route_sync(ds_state *s)
 {
     int i;
-    s->wire_mask = 0;
-    s->gm_mask = 0;
+    s->usb_mask = 0;
+    s->ble_mask = 0;
     for (i = 0; i < DS_TRACKS; i++) {
         const ds_track *t = &s->pat.track[i];
         uint16_t bit = (uint16_t)(1u << (t->channel & 0x0F));
-        if (t->route != DS_ROUTE_GM)
-            s->wire_mask |= bit;
+        if (t->route != DS_ROUTE_BLE)
+            s->usb_mask |= bit;
         if (t->route != DS_ROUTE_USB)
-            s->gm_mask |= bit;
+            s->ble_mask |= bit;
     }
 }
 
