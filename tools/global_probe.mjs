@@ -119,6 +119,29 @@ check(page.some((v, i) => v !== home[i]), 'GLO+HOME opens a different screen');
         if (lastv > worst) worst = lastv;
     }
     check(missing === 0, 'every row draws a value at x>=100', missing + ' rows without one');
+    /* The value column must start AFTER the longest label, not at a round number.
+     * "GM SYNTH" in FONT_M ends at x=124, and the value used to start at 100: the
+     * two were drawn through each other (John 2026-10-30, "第一页的value需要向右
+     * 移动一点，现在和左边的label重叠了，主要是第三行GM SYNTH比较长"). Measure the
+     * gap between the last label pixel and the first value pixel on every row, so
+     * a bigger font or a longer label fails here instead of on his screen. */
+    {
+        let worst = 999;
+        for (const y of want) {
+            let labelEnd = -1, valueStart = -1;
+            for (let x = 12; x < 236; x++) {
+                let ink = false;
+                for (let dy = 0; dy < 16; dy++) if (textAt(page, x, y + dy)) { ink = true; break; }
+                if (!ink) continue;
+                if (x < 130) labelEnd = x;              /* labels all live left of 130 */
+                else if (valueStart < 0 && x >= 130) valueStart = x;
+            }
+            if (labelEnd > 0 && valueStart > 0 && valueStart - labelEnd < worst)
+                worst = valueStart - labelEnd;
+        }
+        check(worst >= 8, 'the value column clears the longest label',
+              'tightest label-to-value gap ' + worst + 'px');
+    }
     check(worst < 238, 'no value runs off the right edge', 'rightmost value pixel x=' + worst);
     /* the three readings sit below the settings with no band: a knob must not
      * look like it edits them, so no ROWBAND pixel may appear there. */
@@ -143,6 +166,16 @@ check(page.some((v, i) => v !== home[i]), 'GLO+HOME opens a different screen');
     };
     const a0 = bandTop(page);
     check(a0 > 0, 'the edited row has a band', 'band at ' + a0);
+    /* ...and the 2px amber rule on its left edge, exactly as TRACK SET draws it.
+     * John 2026-10-30: "Track set页面每行前有个竖线，配合选中行颜色，很美观，
+     * GLOBAL页面也要保持同样的风格". A shade alone is not the house style. */
+    {
+        let rule = 0;
+        for (let y = a0; y < a0 + 25; y++)
+            if (px(page, 4, y) === stored(238, 137, 24)) rule++;
+        check(rule >= 23, 'the band carries the amber rule on its left edge',
+              rule + ' of 25 rows at x=4');
+    }
     enc(3, 1);                              /* EN_K1 */
     const a1 = bandTop(mk());
     /* 32, not 34: the band is 25px tall at y-6 with a 34px pitch, so consecutive
@@ -244,6 +277,12 @@ check(page.some((v, i) => v !== home[i]), 'GLO+HOME opens a different screen');
     let b0 = -1;
     for (let y = 26; y < 60; y++) if (px(p2, 8, y) === ROWBAND) { b0 = y; break; }
     check(b0 > 0, 'the switch row is the one the band is on when the page opens', 'band at ' + b0);
+    {
+        let rule = 0;
+        for (let y = b0; y < b0 + 17; y++)
+            if (px(p2, 4, y) === stored(238, 137, 24)) rule++;
+        check(rule >= 15, 'page 2 bands carry the same amber rule', rule + ' of 17 rows at x=4');
+    }
 
     /* no device yet: the page says so under the switch rather than leaving an
      * empty list. The host's stand-in appears half a second into the scan. */

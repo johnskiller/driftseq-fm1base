@@ -94,7 +94,7 @@ sizeof(ds_pattern) 17,616 B
 固件构建（`build.py`，最后一次 = Track Settings 之后）：
 
 ```
-image 523,392 B of 581,564   余 58,172
+image 523,408 B of 581,564   余 58,156
 RAM   .data+.bss 68,612 B of 98,304   余 29,692
 pool  254,776 B of 344,064            余 89,288
 fwsc  611,547 B, identity FM-1_9200  md5 9a07cb18（未刷机）
@@ -281,7 +281,7 @@ AC79_SDK=/tmp/fw-AC79_AIoT_SDK JIELI_TOOLCHAIN=/home/john/.jieli/toolchain \
 | GM SYNTH | `set.gm_on` → `glo_gm_on` | 开关 | 见下 |
 
 - **K1 走行**（死停 0..2）、**K2 改值**、K3/K4 空
-- 3 行 `GL_Y0 30 / GL_PITCH 34` → y30 / 64 / 98；标签与值都是 `FONT_M`（24px 字号，John: "字号还有空间就加大"）；band `cv_rect(4, y-6, 232, 25, RGB565(26,26,34))`
+- 3 行 `GL_Y0 30 / GL_PITCH 34` → y30 / 64 / 98；标签与值都是 `FONT_M`（24px 字号，John: "字号还有空间就加大"）；band `cv_rect(4, y-6, 232, 25, RGB565(26,26,34))` + 左侧 2px 琥珀竖线 `cv_rect(4, y-6, 2, 25, C_AMB)`（与 TRACK SET 同一套，John 2026-10-30 "GLOBAL页面也要保持同样的风格"）
 - 行下三条**只读**读数（y146 / 163 / 180，`FONT_T` 灰标签 + `FONT_S` 值）：
   - `CPU` —— `plat_cpu_pct()`，进 5% 才刷新（这个数是平台每 500 ms 量的，不是每帧）
   - `XRUNS` —— `plat_xruns()`，非零时值转琥珀色（`C_AMB`），这是本页唯一会变色的读数
@@ -300,7 +300,7 @@ John 2026-10-30：**"BLE的开关可以移到第二页，这样第一页空间�
 | 1.. | 扫描到的设备名 + 右侧信号条 | 无（连接是 SAVE，不是一个数） |
 | 1（占位） | 链接行：`btdev_name()` + `LINKED`/`LINKING` | 无 |
 
-- 行几何：y34 + 18*i，band `cv_rect(4, y-5, 232, 17, …)`
+- 行几何：y34 + 18*i，band `cv_rect(4, y-5, 232, 17, …)` + 左侧 2px 琥珀竖线 `cv_rect(4, y-5, 2, 17, C_AMB)`
 - **底行一个 `FONT_T` 行两件事**：左边是 radio 状态（`SCANNING` / `CONNECTING name` / `FINDING MIDI` / `CONNECTED name` / `RADIO OFF`），右边是 `SAVE: CONNECT` / `SAVE: LET GO`。原来状态行在列表**上方**，读起来像一行设备（"SCANNING" 像设备名），所以挪到下面
 - 空列表时写 `NO DEVICES`（radio 开）/ `LOOKING...`（正在扫）
 - 页脚：K1 = `DEVICE`，K2 = `ON/OFF` **仅当光标在开关行**；设备行 K2 留空
@@ -345,7 +345,7 @@ host 测试脚本把 HOME 的释放写在 GLO 之前，正好把这个 bug 藏�
 **为什么读数在行下面而不是第五行**：它们不是设置，K1/K2 碰不到。用 `FONT_T` 灰标签 + `FONT_S` 值、行距 16px，视觉上和上面四条 band 行分开——band 是"能改的"，无 band 是"只读的"。
 
 ### 探针
-`tools/global_probe.mjs` **46 项**：第 1 页三条行带（34px pitch）+ 药丸已消失 + 三条读数 + `TAP` 行 + 页脚无溢出；第 2 页开关行在 row 0、设备行 y52、信号条、底行状态 + SAVE 提示翻转、连接后链接行仍在、页脚 `ON/OFF` 只出现在开关行；和弦翻页、裸 HOME 离开；**以及 TRACK SET 的轨号药丸仍在**（`hdr_t = {0}` 的回归保护）。
+`tools/global_probe.mjs` **49 项**：第 1 页三条行带（34px pitch）+ 药丸已消失 + 三条读数 + `TAP` 行 + 页脚无溢出；第 2 页开关行在 row 0、设备行 y52、信号条、底行状态 + SAVE 提示翻转、连接后链接行仍在、页脚 `ON/OFF` 只出现在开关行；和弦翻页、裸 HOME 离开；**以及 TRACK SET 的轨号药丸仍在**（`hdr_t = {0}` 的回归保护）。
 
 探针坑：band 判定要"连续 10 行"，单行判定会把 header 底边当成 band（报过 "band at 20"）；band 高 25px、pitch 34px，相邻 band 重叠 9px，实测步进是 **32** 不是 34。
 
@@ -372,7 +372,7 @@ host 测试脚本把 HOME 的释放写在 GLO 之前，正好把这个 bug 藏�
 **为什么读数在行下面而不是第五行**：它们不是设置，K1/K2 碰不到。用 `FONT_T` 灰标签 + `FONT_S` 值、行距 16px，视觉上和上面四条 band 行分开——band 是"能改的"，无 band 是"只读的"。
 
 ### 探针
-`tools/global_probe.mjs` **46 项**：第 1 页三条行带（34px pitch）+ 药丸已消失 + 三条读数 + `TAP` 行 + 页脚无溢出；第 2 页开关行在 row 0、设备行 y52、信号条、底行状态 + SAVE 提示翻转、连接后链接行仍在、页脚 `ON/OFF` 只出现在开关行；和弦翻页、裸 HOME 离开；**以及 TRACK SET 的轨号药丸仍在**（`hdr_t = {0}` 的回归保护）。
+`tools/global_probe.mjs` **49 项**：第 1 页三条行带（34px pitch）+ 药丸已消失 + 三条读数 + `TAP` 行 + 页脚无溢出；第 2 页开关行在 row 0、设备行 y52、信号条、底行状态 + SAVE 提示翻转、连接后链接行仍在、页脚 `ON/OFF` 只出现在开关行；和弦翻页、裸 HOME 离开；**以及 TRACK SET 的轨号药丸仍在**（`hdr_t = {0}` 的回归保护）。
 
 探针坑：band 判定要"连续 10 行"，单行判定会把 header 底边当成 band（报过 "band at 20"）；band 高 25px、pitch 34px，相邻 band 重叠 9px，实测步进是 **32** 不是 34。
 

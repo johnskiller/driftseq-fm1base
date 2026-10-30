@@ -26,6 +26,12 @@
 #define GL_PITCH 34                      /* three rows over the span four used to
                                           * take: same grammar, more air (John:
                                           * "这样第一页空间大一点") */
+/* Where the value column starts. It cannot be a round 100: "GM SYNTH" in FONT_M
+ * ends at x=124, so a value at 100 was drawn THROUGH the label (John 2026-10-30:
+ * "第一页的value需要向右移动一点，现在和左边的label重叠了，主要是第三行GM SYNTH
+ * 比较长"). 136 leaves 12px of air after the longest label and still ends a
+ * three-digit tempo well inside the band's right edge at 236. */
+#define GL_VALX  136
 #define GL_TEMPO 0
 #define GL_SWING 1
 #define GL_GM    2
@@ -514,10 +520,16 @@ static void draw_global1(void)
          * the two pages are the same grammar (a list of rows, K1 walks them, K2
          * edits), so a player who has learned one must not have to relearn where
          * "you are here" is drawn on the other. */
-        if (i == (int)gl_row)
+        if (i == (int)gl_row) {
+            /* The same two pieces TRACK SET draws: the band, and the 2px amber
+             * rule on its left edge. The rule is what makes "you are here" a
+             * shape rather than a shade - John 2026-10-30: "Track set页面每行前
+             * 有个竖线，配合选中行颜色，很美观，GLOBAL页面也要保持同样的风格". */
             cv_rect(4, y - 6, 232, 25, RGB565(26, 26, 34));
+            cv_rect(4, y - 6, 2, 25, C_AMB);
+        }
         cv_text(12, y, &FONT_M, GL_LABEL[i], (i == (int)gl_row) ? C_AMB : C_GRAY);
-        cv_text(100, y, &FONT_M, val, BRIGHTTX);
+        cv_text(GL_VALX, y, &FONT_M, val, BRIGHTTX);
     }
 
     /* Three rows of three numbers left room that the four-row draft did not, and
@@ -562,8 +574,10 @@ static void draw_global2(void)
         int rssi = 0;
 
         y = GL_Y0 + 4 + i * 18;
-        if (i == (int)gl_row)
+        if (i == (int)gl_row) {              /* band + the same amber rule */
             cv_rect(4, y - 5, 232, 17, RGB565(26, 26, 34));
+            cv_rect(4, y - 5, 2, 17, C_AMB);
+        }
 
         if (i == GL2_BT) {
             /* row 0: the radio, drawn in the shape of a settings row - label
