@@ -240,7 +240,7 @@ static void draw_trkset(void)
 
     cv_begin(240, 224, C_BLACK);
     {
-        hdr_t h;
+        hdr_t h = {0};
         /* The context says what the channel MEANS (CH=10 is the drum channel).
          * MUTE/SOLO used to be appended to it ("MELODIC MUTE"), which failed at
          * exactly the job it had: same white text, so the silence read as part

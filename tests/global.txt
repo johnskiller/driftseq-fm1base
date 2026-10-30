@@ -14,6 +14,12 @@ expect bpm 120
 expect gl_gm 1
 expect gm_alloff 0
 
+# The PATTERN reading is the packed size of the pattern summed track by track
+# (the page cannot afford a whole store object of buffer). 146 B is the demo's
+# own packed size, the same number tests_engine/test_engine.c compares against
+# ds_pack_pattern(whole) - this pins the page's arithmetic to the packer's.
+expect gl_pat_bytes 146
+
 # ---- the door ----
 press GLO
 press HOME
@@ -178,3 +184,91 @@ tap HOME
 wait 20
 expect mode 0
 expect store_writes >0
+
+# ===========================================================================
+# PAGE 2 -- the radio as a CENTRAL (GLO+HOME again flips the page)
+# John 2026-10-30: "可以把BLE扫描链接做在第二个GLOBAL页，GLO+HOME在这两页间切换，
+# header加页号". His MPC One with a Yamaha MD-BT01 on its DIN port is the reason:
+# that adapter is a PERIPHERAL, so the FM-1 has to scan and connect as a central.
+# ===========================================================================
+# (the block above left the page; the chord opens page 1 and the next chord
+# flips to page 2 - opening never lands on page 2, that is the point of the flip)
+press GLO
+press HOME
+release HOME
+release GLO
+wait 20
+expect mode 5
+expect gl_page 0
+press GLO
+press HOME
+release HOME
+release GLO
+wait 20
+expect mode 5                    # still the GLOBAL page ...
+expect gl_page 1                # ... its other half
+expect ble_dev 1                 # and it started looking straight away
+expect gl2_n 0                   # (the host's stand-in appears half a second in)
+wait 700
+expect gl2_n 1
+expect gl2_sel 0
+# K2 walks the list and dead-stops at both ends; it never wraps
+turn K2 5
+wait 10
+expect gl2_sel 0
+turn K2 -5
+wait 10
+expect gl2_sel 0
+# SAVE connects the picked device, and SAVE again lets it go. Connecting takes
+# 0.3 s in the stand-in; READY (4) is the only state in which MIDI flows.
+tap SAVE
+wait 60
+expect ble_dev 2
+wait 500
+expect ble_dev 4
+tap SAVE
+wait 200
+expect ble_dev 1                 # let go: the page looks again
+wait 500
+expect gl2_n 1
+# the scan belongs to this page: the other half of GLOBAL does not scan either
+press GLO
+press HOME
+release HOME
+release GLO
+wait 60
+expect gl_page 0
+expect ble_dev 0
+# and leaving the page with HOME stops it too
+press GLO
+press HOME
+release HOME
+release GLO
+wait 60
+expect gl_page 1
+expect ble_dev 1
+tap HOME
+wait 300
+expect mode 0
+expect ble_dev 0
+
+# ---- page 1's readings ----
+press GLO
+press HOME
+release HOME
+release GLO
+wait 40
+expect mode 5
+expect gl_page 0
+# the pattern row is what the packer would write, not sizeof(ds_pattern):
+# the demo packs to 146 B, the store object holds 3,840
+expect gl_pat 146
+expect cpu >-1
+expect xruns 0
+# and it follows an edit rather than a snapshot taken once at boot
+turn K1 3
+wait 5
+expect gl_row 3
+turn K1 -3
+wait 5
+expect gl_row 0

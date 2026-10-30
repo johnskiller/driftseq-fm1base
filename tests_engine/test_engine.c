@@ -3,6 +3,8 @@
  * plain asserts, cc -O2 -Wall; exit 0 = PASS
  */
 #include "driftseq.h"
+#include "pack.h"
+#include "demo_pattern.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -179,6 +181,52 @@ static void test_voice_limit(void) {
     printf("ok 4-voice cap\n");
 }
 
+/* The GLOBAL page reports a pattern's packed size by summing its 16 track
+ * records one at a time (DS_PACK_TRACK_MAX of pool instead of the whole store
+ * object). That is only a number worth showing if it IS the whole pattern's
+ * size: a pattern is defined as the concatenation of its tracks, so assert the
+ * two agree on the demo and on a pattern with a track of every shape. */
+static void test_pack_sum(void) {
+    ds_state s;
+    static uint8_t whole[8192], one[DS_PACK_TRACK_MAX];
+    int t, all_full = 1;
+    size_t w, sum;
+
+    ds_init(&s, 1);
+    ds_load_demo(&s);
+    w = ds_pack_pattern(whole, sizeof whole, &s.pat);
+    for (sum = 0, t = 0; t < DS_TRACKS; t++) sum += ds_pack_track(one, sizeof one, &s.pat.track[t]);
+    if (!w || w != sum) FAIL("demo: summed track records must equal the packed pattern");
+    printf("ok track records sum to the packed pattern (%u B)\n", (unsigned)w);
+
+    /* every track full: the worst case, where no run length compresses */
+    for (t = 0; t < DS_TRACKS; t++) {
+        int i;
+        ds_track *tr = &s.pat.track[t];
+        for (i = 0; i < 64; i++)
+            {
+                /* one 4-voice step and one bare gate out of every four, the
+                 * two shapes pack.c has to spell out instead of compress */
+                tr->steps[i].on = (uint8_t)(i % 4 == 0);
+                tr->steps[i].nvoices = (uint8_t)(i % 4 == 0 ? 4 : 0);
+                tr->steps[i].v[0].note = (uint8_t)(60 + i);
+                tr->steps[i].v[0].gate = 1;
+            }
+        tr->loop_len = 64;
+    }
+    w = ds_pack_pattern(whole, sizeof whole, &s.pat);
+    if (!w) all_full = 0;                    /* a full pattern may not fit: that is
+                                              * the ">4 KiB" reading, not a failure */
+    for (sum = 0, t = 0; t < DS_TRACKS && all_full; t++) {
+        size_t n = ds_pack_track(one, sizeof one, &s.pat.track[t]);
+        if (!n) { all_full = 0; break; }
+        sum += n;
+    }
+    if (all_full && w != sum) FAIL("full: summed track records must equal the packed pattern");
+    printf("ok the sum holds on a full pattern too (%u B%s)\n", (unsigned)sum,
+           all_full ? "" : ", one record over the per-track cap");
+}
+
 int main(void) {
     test_determinism();
     test_basic_fire();
@@ -188,6 +236,7 @@ int main(void) {
     test_euclid();
     test_toggle_silent_keep();
     test_voice_limit();
+    test_pack_sum();
     printf("ALL ENGINE TESTS PASSED\n");
     return 0;
 }

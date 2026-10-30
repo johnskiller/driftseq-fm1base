@@ -537,6 +537,20 @@ static int next_event_run(uint8_t t, uint8_t s, uint8_t len, uint8_t start)
 #define HDR_TY 5
 
 typedef struct {
+    /* 1 = no track pill in front of the context. The pill says "the number in
+     * this corner is a TRACK", so a page that is not about one track must not
+     * carry it: GLOBAL read as "TRACK 1 / GLOBAL", i.e. it looked like the
+     * settings of track 1 (John 2026-10-30: "GLABAL header前面的药丸1就不需要了").
+     * The context then starts where the pill did, so the bar's left edge stays
+     * put on every page.
+     *
+     * Deliberately the FIRST field and compared against an explicit 1: every
+     * hdr_t in this app is a stack struct filled field by field, never memset,
+     * so a "zero means draw" flag would read whatever was on the stack. Making
+     * the safe value 0 and asking for 1 explicitly means an untouched field
+     * draws the pill - which is right for the five track pages and costs the
+     * GLOBAL page one line. */
+    uint8_t     no_pill;
     const char *ctx;     /* KCK / 4 BAR -- whatever this page is looking at */
     const char *right;   /* S1, or MUTE */
     uint16_t    right_c; /* colour for `right` */
@@ -567,15 +581,18 @@ static void ui_draw_header(const hdr_t *h)
     cv_rect(0, 0, 240, 24, TB_BG);
     cv_rect(0, 23, 240, 1, RGB565(42, 42, 52));      /* floor: the bar owns y0..23 */
 
-    /* track number, knocked out of its own colour */
-    b = txt_next();
-    fmt_int(b, sel_track + 1);
-    ndig = (sel_track >= 9) ? 2 : 1;
-    cv_round_rect(6, pill_y, pill_w, pill_h, 6, TRACK_HUE(sel_track));
-    cv_text(6 + (pill_w - ndig * 7) / 2, 5, &FONT_S, b, TB_BG);
+    /* track number, knocked out of its own colour (pages about one track only) */
+    x = 6;
+    if (!h->no_pill) {
+        b = txt_next();
+        fmt_int(b, sel_track + 1);
+        ndig = (sel_track >= 9) ? 2 : 1;
+        cv_round_rect(6, pill_y, pill_w, pill_h, 6, TRACK_HUE(sel_track));
+        cv_text(6 + (pill_w - ndig * 7) / 2, 5, &FONT_S, b, TB_BG);
+        x = 6 + pill_w + 8;
+    }
 
     /* context, then the right cluster */
-    x = 6 + pill_w + 8;
     x = cv_text(x, HDR_TY, &FONT_S, h->ctx, TB_TX);
 
     if (h->dots) {
@@ -620,7 +637,7 @@ static void ui_draw_header(const hdr_t *h)
 static void draw_home(void)
 {
     uint8_t t;
-    hdr_t h;
+    hdr_t h = {0};
     cv_begin(240, 224, C_BLACK);
     {   /* Context line: how many BARS the hero shows (rev.25: "顶部直接写1 bar
          * 4bar这样，明确表示目前hero显示出几个bar"), then the pattern's tempo and
@@ -964,7 +981,7 @@ static void draw_grid_melodic(void)
          * readout has to stay here because GLO+K3 changes it on this page.
          * Those three were text runs at x=6/96/150 with no relation between
          * them; now the number is the pill and the rest follows it. */
-        hdr_t h;
+        hdr_t h = {0};
         char *cn = chord_name(sel_track, cursor);
         char *b = txt_next();
         strcpy_(b, div_str(tr->division));
@@ -1128,7 +1145,7 @@ static void draw_grid_drum(void)
          * the number there is no way to tell step 7 from step 8 by reading. The
          * old 20px bar carried it and the 24px rewrite dropped it -- this puts
          * it back in the same order the old bar had (page, then step). */
-        hdr_t h;
+        hdr_t h = {0};
         char *b = txt_next();
         strcpy_(b, div_str(TRK()->division));
         strcpy_(txt_end(b), "  P");

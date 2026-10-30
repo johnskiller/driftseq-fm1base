@@ -94,7 +94,7 @@ sizeof(ds_pattern) 17,616 B
 固件构建（`build.py`，最后一次 = Track Settings 之后）：
 
 ```
-image 520,348 B of 581,564   余 61,216
+image 523,040 B of 581,564   余 58,524
 RAM   .data+.bss 68,612 B of 98,304   余 29,692
 pool  254,776 B of 344,064            余 89,288
 fwsc  611,547 B, identity FM-1_9200  md5 9a07cb18（未刷机）
@@ -268,28 +268,90 @@ AC79_SDK=/tmp/fw-AC79_AIoT_SDK JIELI_TOOLCHAIN=/home/john/.jieli/toolchain \
 - **MUTE/SOLO 改成单字母底标**（`hdr_t.badge` / `badge_c`，2026-10-30）：原先拼在 ctx 里成 `MELODIC MUTE`，同色同字号，状态读成了名字的一部分。现在是 **M / S 单字母药丸**，与 hero 列同一字形同一颜色（`HERO_MS = RGB565(224,160,64)`，两边共用一个宏）。药丸 = 一个字形 + 左右各 4px = 14px 宽，x194..208，页面点从 211 起。字母**画两遍**：`cv_text` 是覆盖率混合，5px 宽的 M 在亮橙上只叠到 60%，笔画变橄榄色糊在底里（vision 读成 "H"）；画两遍覆盖率平方，笔画核心落到 TB_BG、边缘留一个软像素
 - **行数 5 → 4**（SWING 移走）：channel map 上移到 128/142..162，共享行 170
 - **行字号 12px → 16px**（`TS_Y0 30` / `TS_PITCH 22`，标签 FONT_S、值 FONT_B），五行 y30..140，channel map 下移到 144/158..178，底行 186。量得每行墨迹 11px 高，值最右 x=216，不出边
-## GLOBAL 页（2026-10-30）
+## GLOBAL 页（2026-10-30，两页）
 
-入口 **GLO+HOME**（按下沿），出口裸 HOME（松手沿）。John 的定调："入口用 GLO+HOME，FX 和 LFO 都想留作他用。反正 GLOBAL 不是很频繁"。第 6 个页面点，`h.page = 4`。
+入口 **GLO+HOME**（按下沿），出口裸 HOME（松手沿），**两页之间也是 GLO+HOME**（同一个和弦，按一次翻一页，死循环两页）。第 6 个页面点，`h.page = 4`。**header 不再有药丸**：GLOBAL 不是某条轨的页面，没有编号可挂；页号写进 header 文字本身（`GLOBAL 1/2`、`GLOBAL 2/2`），用 `/` 而不是 `-` 是因为 2/2 读起来是"两页里的第二页"，不是"2 减 2"。John 2026-10-30 定：「header 前面的药丸 1 就不需要了」。
+
+### 第 1 页 —— 全机四个数
 
 | 行 | 引擎字段 | 步进 | 备注 |
 |---|---|---|---|
 | TEMPO | `eng.bpm` 20..300 | 1 BPM，GLO 时 10 | `ds_set_bpm` 之前**全仓零调用**，tempo 在此之前不可改 |
-| SWING | `eng.global_swing` | 1，GLO 时 10 | 从 TRACK SET K4 迁来 |
-| TRK SWING | `pat.track[sel].swing_amt` | 1，GLO 时 10 | **与上者是同一个数**：`global × trk × 0.5`，页面上写明了 |
+| SWING | `eng.global_swing` | 1，GLO 时 10 | 与 TRACK SET 第 5 行是**两个数**：`global × trk × 0.5` |
 | GM SYNTH | `set.gm_on` → `glo_gm_on` | 开关 | 见下 |
 | BLUETOOTH | `set.ble_off` | 开关 | 与 `plat_ble_enable` 同步 |
 
-- **K1 走行**（死停 0..4）、**K2 改值**、**K3 换轨**（TRK SWING 的主语）、K4 空
-- **TAP TEMPO = 最右白键（key 26 / G5）**：按下沿，取最近 4 个间隔均值，`60000/mean`；超过 2 s 视为新测量；纯手调 tempo 会清空 tap 平均（否则下一次 tap 会跳回旧值）。测试里 `tapkey` 自身占 90 ms，500 ms 间隔要写 410 的 wait
-- **本页按键只试听、不写 jam**（同 TRACK SET）
-- 5 行 y30 + 24*i，band `cv_rect(4, y-6, 232, 21, RGB565(26,26,34))`，与 TRACK SET 同一语法
+- **K1 走行**（死停 0..3）、**K2 改值**、K3/K4 空
+- 4 行 y30 + 26*i，band `cv_rect(4, y-6, 232, 21, RGB565(26,26,34))`
+- 行下三条**只读**读数（y136 / 152 / 168，`FONT_T` 灰标签 + `FONT_S` 值）：
+  - `CPU` —— `plat_cpu_pct()`，进 5% 才刷新（这个数是平台每 500 ms 量的，不是每帧）
+  - `XRUNS` —— `plat_xruns()`，非零时值转琥珀色（`C_AMB`），这是本页唯一会变色的读数
+  - `PATTERN` —— 实际字节数 + 折算扇区，如 `1836/4096 1S`。**不是**"剩余 pattern 空间"：flash 里目前只存 settings（`OBJ_SETTINGS`），pattern bank 还没设计（`chain[64]` 全仓零读写），所以能报的只有"这个 pattern 要是存下来要占多少"。报一个并不存在的银行余量会是在说谎。测量走 `ds_pack_track()` **逐轨累加**（pattern 就是 16 条 track 记录的拼接），每次一秒一次；用整对象缓冲会是 3,840 B 的池，实际只要 1,040 B
+- 最后一行注释 `TAP: RIGHTMOST KEY`（y194）
+
+**为什么读数用"进 % 才刷新"而不是每帧算**：`ds_pack_pattern()` 要序列化整条 pattern，每帧调等于每帧做一次存档。三条读数各自记住上一次显示的值，变化不足一档就不重算。
+
+### 第 2 页 —— BLE 设备（central 那一半）
+
+- 顶行是**链接状态**（不是行标签）：`BT OFF` / `SCANNING` / `CONNECTING` / `SEARCHING` / `CONNECTED`，琥珀色，来自 `plat_ble_device()`
+- 列表 5 行 y44 + 22*i，名字走 `btdev_name()`；选中行右侧三格信号条
+- **K1 走列表，K2/K3/K4 空，SAVE = 连接 / 断开**
+- 页脚被 `draw_global2` 自己覆盖 K1 的单词为 `DEVICE`：这一页 K1 的主语是列表，不是"行"。K2 没有主语（SAVE 才是连接），页脚不写
+- 空列表时写 `NO DEVICES`；扫描中点 `SCANNING`
+- 提示行 `SAVE: CONNECT` / `SAVE: DISCONNECT`
+
+**进页面自动开始扫描**：`global_frame()` 在 `ui_mode == M_GLOBAL && gl_page && !ui.looking` 时置 `ui.looking = 1`；离开页面（`global_leave()`）和总开关关闭（`BLE_OFF`）时清掉并 `plat_ble_scan(0)`。`ui.looking` 是平台的扫描开关，`btdev_page()` 靠它决定要不要驱动列表。
+
+**两页都要扫吗**：不。第 1 页不碰 radio；第 2 页一打开就扫，因为这一页唯一的内容就是"附近有什么"。
+
+### 一个 UI 陷阱：同帧释放两个键 = 误判离开
+
+`ui_input` 按 `EN_K1..EN_K4、GLO、HOME` 的顺序**逐个**释放。GLO+HOME 这种和弦，如果同一帧里两个键都放开，先处理 GLO 会把 `glo_held` 清零，紧接着 HOME 的释放就被读成"裸 HOME 离开页面"——**翻页变成了关页**。
+
+host 测试脚本把 HOME 的释放写在 GLO 之前，正好把这个 bug 藏住了；wasm 里按帧推进，暴露出来。
+
+修法：`glo_held` 之外再加一个 `gl_chord` 锁存，在**按下**时置位（"这次 HOME 是被和弦按下的"），在 HOME 的**释放**消费它一次。这是 `gl_opening` 的推广——原来那个锁存只保护"开页"这一个方向。
+
+### 第 1 页的空间分配（John 2026-10-30 问"剩下的空间放什么"）
+
+第 1 页原来 4 行到 y108 就没了，y120 到页脚（y216）之间有近 100px 空白。John 提的三个候选（tap tempo 说明、CPU 负荷、剩余 pattern 空间）里：
+
+- **tap tempo 说明**：收成一行 `TAP: RIGHTMOST KEY`（y194）。不能再长——这一页其余部分是数值表，说明句一多就把表挤成注释。
+- **CPU 负荷**：`plat_cpu_pct()` 确实有（`audio_cpu_pct` ← `fm1b_dbg.cpu_q12`，音频 block 里量的实际负载，约 16 block 平滑）。显示成 `CPU 47%`。
+- **剩余 pattern 空间**：**没有这个数**。全仓唯一的存储对象是 `OBJ_SETTINGS`（`plat_store_save(OBJ_SETTINGS,…)`），pattern bank 根本没实现（`chain[64]` 零读写、`flash[16]` 只有清空循环）。能报的只有"当前 pattern 打包后占多少"，所以标成 `PATTERN 146/3840 1S`（字节 / 一个存储对象 / 需要几个 4 KiB 扇区）。**报一个并不存在的银行余量会是在说谎**。
+- **XRUNS**：顺手加的一条。`plat_xruns()` 之前全仓零调用，音频欠载一次就 ++，这是"为什么刚才咔了一下"的唯一线索，比任何静态信息都值得占一行。非零转琥珀色。
+
+**FW 版本号没放**：现在没有可显示的版本串。`APP_VERSION` 默认 `"DEV"`（`device/unity.c`），只有 `--release X.Y.Z` 才变成真版本，而 identity（`FM-1_9200`）是打包器写进 fwsc 头部的，app 运行时读不到。要放得先有一条"版本从哪来"的路（编译期 `-D` 注入日期/哈希，或读 flash 里的 identity），那是另一件事，不在这一页里顺手加。
+
+**为什么读数在行下面而不是第五行**：它们不是设置，K1/K2 碰不到。用 `FONT_T` 灰标签 + `FONT_S` 值、行距 16px，视觉上和上面四条 band 行分开——band 是"能改的"，无 band 是"只读的"。
+
+### 探针
+`tools/global_probe.mjs` **35 项**：第 1 页四条行带 + 药丸已消失 + 注释两行 + `TAP` 行 + 页脚无溢出；第 2 页状态行 / 列表 / 信号条 / SAVE 提示翻转 / 连接后状态行变化；和弦翻页回第 1 页、裸 HOME 离开页且本页墨迹归零；**以及 TRACK SET 的轨号药丸仍在**（`hdr_t = {0}` 的回归保护）。
+
+### 顶栏 6 点的坑
+`dx = 211 + i*6` 在 i=5 时是 241，出 240 屏；改 5px 间距（211..236）。
 
 ### GM 开关 = 监听开关，不是静音
 `app.c` 的 drain 里四个 `gm_*` 被 `if (glo_gm_on)` 包住：关掉只是**不再喂** EAS。但只停喂会挂音——关闭瞬间正在响的音，它的 note-off 排在 `eng.out` 后面，等送到时接收端已经不听了，EAS 没有看门狗，声部会一直渲染。所以关闭时**先发 CC123 再关闸**（`gm_panic()`，原本就叫 `gm_stop`，改名是因为 panic 才是它的语义）。恢复时不重发 PC：`sent_prog` 不清，因为 CC123 不是 reset，接收端的音色状态没变。实测：关掉后整轮播放对 EAS 零 note-on，重新打开后计数恢复。
 
 ### 设定持久化（此前完全缺失）
 `plat_store_save()` 在 driftseq 里**零调用**——`set_dirty` 置了位没人用，所有设定断电即丢。现在 `set_commit()` 在**退出 GLOBAL 页**时写（`OBJ_SETTINGS`），不在每个 detent 写：4 KiB 扇区擦写，设定页的正常形状就是"改一堆然后走开"。`settings_t` 加 `gm_on`，开机在 `app_init` 里恢复。**蓝牙不在这里恢复**：平台按 `APP_BLE_AT_BOOT` 自己起，重复告知只会和启动竞争。
+
+### 第 1 页的空间分配（John 2026-10-30 问"剩下的空间放什么"）
+
+第 1 页原来 4 行到 y108 就没了，y120 到页脚（y216）之间有近 100px 空白。John 提的三个候选（tap tempo 说明、CPU 负荷、剩余 pattern 空间）里：
+
+- **tap tempo 说明**：收成一行 `TAP: RIGHTMOST KEY`（y194）。不能再长——这一页其余部分是数值表，说明句一多就把表挤成注释。
+- **CPU 负荷**：`plat_cpu_pct()` 确实有（`audio_cpu_pct` ← `fm1b_dbg.cpu_q12`，音频 block 里量的实际负载，约 16 block 平滑）。显示成 `CPU 47%`。
+- **剩余 pattern 空间**：**没有这个数**。全仓唯一的存储对象是 `OBJ_SETTINGS`（`plat_store_save(OBJ_SETTINGS,…)`），pattern bank 根本没实现（`chain[64]` 零读写、`flash[16]` 只有清空循环）。能报的只有"当前 pattern 打包后占多少"，所以标成 `PATTERN 146/3840 1S`（字节 / 一个存储对象 / 需要几个 4 KiB 扇区）。**报一个并不存在的银行余量会是在说谎**。
+- **XRUNS**：顺手加的一条。`plat_xruns()` 之前全仓零调用，音频欠载一次就 ++，这是"为什么刚才咔了一下"的唯一线索，比任何静态信息都值得占一行。非零转琥珀色。
+
+**FW 版本号没放**：现在没有可显示的版本串。`APP_VERSION` 默认 `"DEV"`（`device/unity.c`），只有 `--release X.Y.Z` 才变成真版本，而 identity（`FM-1_9200`）是打包器写进 fwsc 头部的，app 运行时读不到。要放得先有一条"版本从哪来"的路（编译期 `-D` 注入日期/哈希，或读 flash 里的 identity），那是另一件事，不在这一页里顺手加。
+
+**为什么读数在行下面而不是第五行**：它们不是设置，K1/K2 碰不到。用 `FONT_T` 灰标签 + `FONT_S` 值、行距 16px，视觉上和上面四条 band 行分开——band 是"能改的"，无 band 是"只读的"。
+
+### 探针
+`tools/global_probe.mjs` **35 项**：第 1 页四条行带 + 药丸已消失 + 注释两行 + `TAP` 行 + 页脚无溢出；第 2 页状态行 / 列表 / 信号条 / SAVE 提示翻转 / 连接后状态行变化；和弦翻页回第 1 页、裸 HOME 离开页且本页墨迹归零；**以及 TRACK SET 的轨号药丸仍在**（`hdr_t = {0}` 的回归保护）。
 
 ### 顶栏 6 点的坑
 `dx = 211 + i*6` 在 i=5 时是 241，出 240 屏；改 5px 间距（211..236）。**TRACK SET 的药丸右界 208** 仍安全。
@@ -304,7 +366,8 @@ AC79_SDK=/tmp/fw-AC79_AIoT_SDK JIELI_TOOLCHAIN=/home/john/.jieli/toolchain \
 - 探针：`ts_row` `ts_ch` `ts_prog` `ts_route` `ts_voice` `ts_swing` `ts_gswing` `ts_owner` `ts_shared` `ts_prog_hash`(djb2)
 
 ### 测试
-- `tests/trkset.txt`：**76 断言**全通过（门、五个字段两端死停、1-based 显示、逐轨独立、PROGRAM 行 djb2、HOME/SEL 出口）
+- `tests/global.txt`：**71 断言**全通过（第 1 页四行两端死停、tap tempo 120/160 两档、GM 双向 + panic、退出写盘、第 2 页扫描/选中/连接/断开、反向契约"K2 在第 2 页动不了任何东西"）
+- `tests/trkset.txt`：**85 断言**全通过（门、五个字段两端死停、1-based 显示、逐轨独立、PROGRAM 行 djb2、HOME/SEL 出口）
 - `tests/trkset_route.txt`：**ROUTE 到线缆边界** —— 16 轨全 GM → `midi_out == 0`；全 USB → `midi_out == 32`（45 是旧值：多出的 13 条是每条共享轨各发一次 PC）
 - `tests/trkset_owner.txt`：**21 断言** —— 鼓通道 owner=0(4 条里最低)、bass owner=3（11 条空轨不能抢）、lead owner=4、改空轨 PROG 不动 owner、改 owner PROG 才动
 - `tests_engine/test_trkset.c`：ROUTE 掩码 / MONO 掐音 / SWING / 通道改动后 off 走原通道

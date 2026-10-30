@@ -68,6 +68,8 @@ static uint16_t jam_menu_ttl;
 static uint8_t global_button(uint8_t btn, uint8_t released);
 static void global_encoder(uint8_t enc, int8_t det);
 static uint8_t global_key(uint8_t key, uint8_t down);
+static void global_frame(void);
+static uint8_t global_save(uint8_t btn);
 static void draw_global(void);
 
 static void jam_menu_act(uint8_t which);

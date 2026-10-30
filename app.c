@@ -673,6 +673,7 @@ void app_frame(void)
     ui_input_poll();
     ui_midi_dispatch();                      /* MIDI in as input, on the same schedule */
     engine_tick();                           /* the sequencer runs on real delta time */
+    global_frame();                          /* GLOBAL page 2: the scan is up only while it is */
     if (FM1B_BLE_CENTRAL) {                  /* looking: a device found is named at once (REC connects to it) */
         static int found;
         int n = ui.looking ? btdev_count() : 0, ev;
@@ -750,6 +751,23 @@ int app_expect(const char *what, int *got)
         *got = (int)gl_row;
     else if (!strcmp(what, "gl_gm"))
         *got = glo_gm_on ? 1 : 0;
+    else if (!strcmp(what, "gl_page"))           /* GLOBAL: 0 the settings, 1 the radio's devices */
+        *got = (int)gl_page;
+    else if (!strcmp(what, "gl2_sel"))           /* the device row K2 walks */
+        *got = (int)gl2_sel;
+    else if (!strcmp(what, "gl_pat_bytes"))
+        *got = (int)gl_pattern_bytes();
+    else if (!strcmp(what, "gl2_n"))             /* devices found */
+        *got = (int)btdev_count();
+    /* ble_dev and ble are the platform's own expect names (plat_host.c), so they
+     * are not repeated here: app_expect runs first, and a second one would never
+     * be reached. */
+    else if (!strcmp(what, "gl_pat"))            /* PATTERN row: packed bytes, or -1 for "more than" */
+        *got = (int)(gl_pattern_bytes() == 0xFFFFFFFFu ? 0x7FFFFFFF : (int32_t)gl_pattern_bytes());
+    else if (!strcmp(what, "cpu"))               /* the CPU row */
+        *got = (int)plat_cpu_pct();
+    else if (!strcmp(what, "xruns"))
+        *got = (int)plat_xruns();
     else if (!strcmp(what, "gm_noteons"))       /* EAS's own view: notes fed to it */
         *got = (int)gm_noteons;
     else if (!strcmp(what, "gm_reset")) {        /* zero the two counters (a window) */

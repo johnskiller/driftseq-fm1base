@@ -207,7 +207,7 @@ static void draw_arp(void)
          * The context keeps the "N BAR" wording because the strip below is the
          * same time axis as HOME's hero, and two views of one axis must not
          * describe the same span in two notations (rev.25). */
-        hdr_t h;
+        hdr_t h = {0};
         char *b = txt_next();
         fmt_int(b, (int32_t)hero_bars);
         strcpy_(txt_end(b), " BAR");
@@ -637,6 +637,8 @@ static void ui_button(uint8_t btn, uint8_t down, uint8_t released)
         else ds_play(&eng);
         break;
     case B_SAVE:
+        if (global_save(btn))
+            break;                                /* GLOBAL page 2: connect/let go */
         jam_menu = 1;                             /* every SAVE opens the choice (no silent default) */
         jam_menu_sel = 0;
         jam_menu_ttl = JAM_MENU_FRAMES;
