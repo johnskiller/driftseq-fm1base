@@ -498,6 +498,16 @@ static void ui_leds(uint32_t *litK, uint32_t *dimK, uint32_t *litB, uint32_t *di
 
     *litK = *dimK = *litB = *dimB = 0;
 
+    /* The keybed's lights mean ONE thing at a time, and on the SCALE page it
+     * is not the pattern. With OFC on the bed is a chord-keyboard with three
+     * zones (DEG / ROOT / CHORD) bracketed underneath, so a step light there
+     * would point at a key that belongs to a zone -- and since every root press
+     * writes a step and walks the cursor, the step lights ACCUMULATED into
+     * "the bed gets brighter the more you play" (John, 2026-10-30: "随着弹奏
+     * 逐渐越亮越多"). The quartile ruler goes with them: it is a step ruler
+     * (c divides 16 steps), and John's call is that it only earns its place on
+     * drums. scale_leds owns the whole bed on this page instead. */
+    if (ui_mode != M_SCALE) {
     for (c = 0; c < 16; c++) {
         uint8_t s = (uint8_t)(page * 16 + c);
         ds_step *st = &tr->steps[s];
@@ -537,6 +547,7 @@ static void ui_leds(uint32_t *litK, uint32_t *dimK, uint32_t *litB, uint32_t *di
         if ((c & 3) == 0)
             *dimK |= 1u << key;
     }
+    }
     /* One white key = one step of the CURRENT page (03 §2.3 "cursor 所在 16 格页
      * 内映射"). Beats outside the page belong to keys that show other steps, so
      * nothing extra is drawn. */
@@ -545,7 +556,7 @@ static void ui_leds(uint32_t *litK, uint32_t *dimK, uint32_t *litB, uint32_t *di
      * 黑键，那么这个黑键亮起，对应鼓点的白键亮起". Without this the panel gives no
      * feedback about which instrument the white keys are currently describing,
      * which is the one thing you cannot infer from the keys themselves. */
-    if (is_drum && drum_sel < NDRUM) {
+    if (is_drum && ui_mode != M_SCALE && drum_sel < NDRUM) {
         uint8_t bk = key_black_id(drum_sel);   /* black ordinal -> key id */
         if (bk != 0xFF)
             *litK |= 1u << bk;

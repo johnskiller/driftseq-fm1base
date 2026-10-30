@@ -726,6 +726,16 @@ int app_expect(const char *what, int *got)
         *got = (TRK()->steps[0].nvoices << 8) | (TRK()->steps[0].nvoices ? TRK()->steps[0].v[0].note : 0);
     else if (!strcmp(what, "snapped"))           /* the cursor step's first voice, post-snap */
         *got = TRK()->steps[cursor].nvoices ? TRK()->steps[cursor].v[0].note : -1;
+    /* The panel's two key masks as the app computes them, for the lights
+     * tests: `expect lit_keys 0x...` / `expect dim_keys 0x...`. The host's own
+     * "leds" line is prose (one char a key); a mask is what a test can assert
+     * without re-deriving the piano layout, and it is the same value that goes
+     * to plat_lights. */
+    else if (!strcmp(what, "lit_keys") || !strcmp(what, "dim_keys")) {
+        uint32_t lit, dim, lb, db;
+        ui_leds(&lit, &dim, &lb, &db);
+        *got = (int)(what[0] == 'l' ? lit : dim);
+    }
     else if (!strcmp(what, "ts_row"))            /* TRACK SET: the row K2 edits */
         *got = ts_row;
     else if (!strcmp(what, "ts_ch"))             /* and the five fields under test */

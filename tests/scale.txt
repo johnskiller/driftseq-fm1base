@@ -416,3 +416,79 @@ key 25 up
 key 26 up
 wait 20
 
+# --- the panel's key lights on the SCALE page (John 2026-10-30) -------------
+# "在scale状态下不需要0,4,8,12的键盘标尺（标尺只对drum有用）；左边级数7个键、
+#  右边和弦8个键需要dim，然后和弦按下有效的需要亮起"
+#
+# The bug this locks out: every root press writes a step and walks the cursor,
+# and the GRID's step lights were drawn on every page too -- so on SCALE the bed
+# got brighter with every chord played ("随着弹奏逐渐越亮越多").
+#
+# This block starts from a fresh boot so no earlier section's OFC selection or
+# cursor can leak in (the same trap tests/preset.txt hit): reboot, pick a melodic
+# track, open SCALE, and only then look at the bed.
+reboot
+wait 600
+turn SELECT 4
+wait 60
+expect track 4
+tap SEL
+wait 40
+expect mode 3
+expect ofc 0
+# OFC off: the whole bed is the live keyboard (every key plays a snapped note),
+# so 0..18 sit dim; the component zone does not exist in this mode, and there is
+# no step ruler on this page at all.
+expect lit_keys 0x0
+expect dim_keys 0x7ffff
+# OFC on: degrees 0..6 dim, components 19..26 dim (a key's id is its position on
+# this panel, so the two zones are 0x7f and 0x7f80000)
+turn K3 1
+wait 40
+expect ofc 1
+expect lit_keys 0x0
+expect dim_keys 0x7f8007f
+# nothing accumulates: four roots in a row leave the zones exactly as none did,
+# and only the last one is lit as the selection
+key 7 down
+wait 30
+key 7 up
+wait 30
+key 9 down
+wait 30
+key 9 up
+wait 30
+key 11 down
+wait 30
+key 11 up
+wait 30
+key 13 down
+wait 30
+key 13 up
+wait 30
+expect lit_keys 0x2000       # key 13 = the root just played
+expect dim_keys 0x7f8007f    # and the zones did not grow
+# a valid chord lights its components: MAJ is key 19
+key 19 down
+wait 30
+key 19 up
+wait 30
+expect lit_keys 0x82000      # key 13 (root) + key 19 (MAJ)
+# a nonsense set stops claiming a chord: adding DIM (23) and SUS (25) makes two
+# thirds, oc_resolve says n == 0, the lit components go out and the selection
+# stays -- the same silence the chord row shows on screen
+key 23 down
+wait 30
+key 23 up
+wait 30
+key 25 down
+wait 30
+key 25 up
+wait 30
+expect lit_keys 0x2000
+expect dim_keys 0x7f8007f
+# leaving the page hands the bed back to the pattern, step ruler and all
+tap SEL
+wait 40
+expect mode 0
+expect dim_keys 0x204081     # keys 0,7,14,21 of the bed

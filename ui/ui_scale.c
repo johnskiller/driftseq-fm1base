@@ -472,27 +472,57 @@ uint32_t sc_marks(void)
 /* the name of the current Active Chord, for the painter and the host probe */
 void sc_chord_name_str(char *buf) { sc_chord_name(buf, sc_tones_n); }
 
-/* the panel's key lights for this layer: with OFC on the whole right zone
- * sits DIM (John 2026-10-29) and each pressed/selected key lights — the
- * panel shows the selection, not just "this zone does something". */
+/* The panel's key lights for the SCALE page. John, 2026-10-30: "在scale状态下
+ * 不需要0,4,8,12的键盘标尺（标尺只对drum有用）反而是左边级数7个键，右边和弦
+ * 8个键需要dim，然后和弦按下有效的需要亮起".
+ *
+ * So on this page the bed is the CHORD KEYBOARD and nothing else: the seven
+ * degree keys and the eight component keys sit DIM as the zones they are, and
+ * what is selected lights. The step ruler and the step lights are the GRID's
+ * (ui_leds skips them here) -- the ruler divides 16 steps, and a step has no
+ * meaning on a page that writes one chord per press and walks the cursor.
+ *
+ * "有效" (valid) is the point of the lit set: a component that makes the chord
+ * nonsense -- two thirds (MIN+DIM, MIN+SUS, ...) or two sevenths (7+M7) -- is a
+ * key press that produces nothing (oc_resolve returns n == 0 and sc_revoice
+ * silences), so lighting it would claim a chord that is not there. The root is
+ * different: it always sounds its own pitch, so it always lights. */
 static void scale_leds(uint32_t *litK, uint32_t *dimK, uint32_t *litB, uint8_t is_drum)
 {
     uint8_t i;
-    if (sc_ofc && !is_drum) {
-        for (i = 0; i < OC_NCOMP; i++)               /* the component zone: dim base */
-            *dimK |= 1u << (19 + i);
-        for (i = 0; i <= 6; i++)                     /* the degree zone: dim base —
-                                                      * but CHR has no degrees (John) */
+    if (ui_mode == M_SCALE && !is_drum) {
+        /* the degree zone: keys 0..6 sit dim -- except CHR, which has no
+         * degrees at all (the object does not exist, John 2026-10-29) */
+        for (i = 0; i <= 6; i++)
             if (sc_kind != SC_CHR) *dimK |= 1u << i;
-        for (i = 0; i < OC_NCOMP; i++)               /* a selected component lights */
-            if (sc_mask >> i & 1u) *litK |= 1u << (19 + i);
         if (sc_deg_key != 0xFF)                      /* the walking degree lights */
             *litK |= 1u << sc_deg_key;
-        if (sc_root_key != 0xFF)                     /* the selected root lights */
-            *litK |= 1u << sc_root_key;
-    }
-    if (ui_mode == M_SCALE)
+        if (sc_ofc) {
+            uint8_t valid = oc_resolve(sc_mask).n != 0;
+            for (i = 0; i < OC_NCOMP; i++)           /* the component zone: dim base */
+                *dimK |= 1u << (19 + i);
+            /* a selected component lights, but only while the set still makes a
+             * chord; the moment it does not, the whole group stops claiming it
+             * (the screen says the same thing: sc_chord_name is empty) */
+            if (valid)
+                for (i = 0; i < OC_NCOMP; i++)
+                    if (sc_mask >> i & 1u) *litK |= 1u << (19 + i);
+            if (sc_root_key != 0xFF)                 /* the selected root lights */
+                *litK |= 1u << sc_root_key;
+        } else {
+            /* OFC off: the bed is the plain scale keyboard -- every key is live
+             * (it plays a snapped note), so the whole bed sits dim and the held
+             * root, if any, lights. Components do not exist in this mode. */
+            for (i = 7; i <= 18; i++)
+                *dimK |= 1u << i;
+            if (sc_root_key != 0xFF && sc_root_key >= 7)
+                *litK |= 1u << sc_root_key;
+        }
         *litB |= 1u << B_SEL;                        /* the page is open: SEL is live */
+        return;
+    }
+    /* not the SCALE page: nothing here (ui_leds owns the bed there) */
+    (void)litK; (void)dimK; (void)litB;
 }
 
 /* ---- the SCALE page (painter) ----
