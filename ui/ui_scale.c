@@ -136,6 +136,15 @@ static uint8_t cap[DS_VOICES];
 static uint8_t rel_n;
 static uint8_t rel[27];
 
+/* Only the two grid pages write steps. The chord layer still SOUNDS everywhere
+ * (that is what it is for), so the page check belongs on the write and not on
+ * the key: TRACK SET auditions the PROGRAM you are choosing and says so in its
+ * own comment, GLOBAL auditions and taps tempo, and the hero is the hero. */
+static uint8_t sc_write_ok(void)
+{
+    return ui_mode == M_GRID || ui_mode == M_SCALE;
+}
+
 /* Write this gesture's pitches to the cursor step, then advance - the same
  * contract as the GRID's stepEntry (override the step, revive the gate, cursor
  * +1 dead stop), so the layer does not invent a second recording rule. Nothing
@@ -146,7 +155,7 @@ static void sc_off_write(void)
     ds_track *tr = TRK();
     ds_step *st = &tr->steps[cursor];
     uint8_t i;
-    if (!cap_n) return;
+    if (!cap_n || !sc_write_ok()) return;
     while (st->nvoices)
         ds_voice_remove(tr, cursor, st->v[0].note);
     for (i = 0; i < cap_n; i++)
@@ -302,7 +311,9 @@ static void sc_revoice(uint8_t root_note)            /* rebuild sc_tones from st
  * (root-down writes the single snapped note when no flavor is selected) */
 static void sc_grid_write(void)
 {
-    ds_track *tr = TRK();
+    ds_track *tr;
+    if (!sc_write_ok()) return;
+    tr = TRK();
     ds_step *st = &tr->steps[cursor];
     uint8_t t;
     while (st->nvoices)                           /* replace the step, as stepEntry does */
@@ -358,19 +369,17 @@ static uint8_t scale_key_hook(uint8_t key, uint8_t down)
 {
     uint8_t is_drum = is_drum_trk();
     if (is_drum) return 0;                        /* drums: everything raw */
-    /* two gates that used to be on one branch only.
-     *   focus_layer  - the EDIT layer edits written voices; the scale layer must
-     *                  not eat its keys. This gate was missing on the OFC-off
-     *                  branch, so EDIT was dead whenever OFC was off.
-     *   ui_mode      - only the GRID writes steps. TRACK SET auditions the
-     *                  program you are choosing and says so in its own comment
-     *                  ("recording them would fill the take with notes the
-     *                  player was only using to listen"); with OFC on, that page
-     *                  wrote anyway. GRID and the SCALE page keep writing - the
-     *                  SCALE page has always been a second grid, and it is where
-     *                  you play the chord you are building. */
+    /* The EDIT layer edits written voices, so the chord layer must not eat its
+     * keys. This gate was missing on the OFC-off branch, so EDIT was dead
+     * whenever CHORD KEYS was off. */
     if (focus_layer) return 0;
-    if (ui_mode != M_GRID && ui_mode != M_SCALE) return 0;
+    /* NOTHING ELSE IS GATED HERE. The chord layer is how the instrument sounds,
+     * so it sounds on every page: gating the hook on ui_mode made CHORD KEYS
+     * silently stop working on the hero ("回到hero后自动退出了ofc", John
+     * 2026-10-31). What must be gated is the WRITE, and that is sc_write_ok():
+     * the two grid pages write, every other page only auditions (TRACK SET
+     * auditions the program you are choosing, GLOBAL auditions, the hero is the
+     * hero). */
     if (!sc_ofc) {                                /* OFC off: a plain keyboard that
                                                    * records one step per gesture */
         int note = 53 + (int)key + key_shift;

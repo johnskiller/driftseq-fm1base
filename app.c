@@ -918,6 +918,20 @@ int app_expect(const char *what, int *got)
             if (eng.jam.steps[t2].nvoices) used++;
         *got = used;
     }
+    else if (!strcmp(what, "jam_notes"))         /* voices per slot -> a chord is one slot, three notes */
+    {
+        /* jam_used counts SLOTS, so a three-note chord and a single note both
+         * read 1. This reads the total voices, which is what says whether the
+         * chord layer handed the ring all of its notes (chord = 3). */
+        int t2, vs = 0;
+        for (t2 = 0; t2 < DS_STEPS; t2++) {
+            uint8_t vi;
+            for (vi = 0; vi < eng.jam.steps[t2].nvoices; vi++) vs++;
+        }
+        *got = vs;
+    }
+    else if (!strcmp(what, "jam_notes0"))        /* and the first slot's count alone */
+        *got = (int)eng.jam.steps[0].nvoices;
     else if (!strcmp(what, "out_usb"))           /* ROUTE at the box's edge, per link */
         *got = (int)plat_midi_count(PORT_USB, 1);
     else if (!strcmp(what, "out_ble"))

@@ -301,3 +301,50 @@ The write itself is the GRID's contract, not a second rule: override the step, r
 
 - `tests/steprecord.txt` (49) — the write, the chord-as-one-gesture, override-not-append, EDIT add and remove with CHORD KEYS off, TRACK SET not writing, CHORD KEYS on keeping the old press-time path, drums untouched.
 - `tools/steprecord_probe.mjs` (7 px) — the same claims on the SHIPPED wasm, by changed cells. Verified to FAIL (2/7) against the pre-fix build, so it is a test of the bug and not of the code.
+
+### The gate is on the write, not on the key — regression, and why
+
+The first cut of the step-record fix (5f5e317) opened `scale_key_hook()` with
+
+```c
+if (ui_mode != M_GRID && ui_mode != M_SCALE) return 0;
+```
+
+That is the wrong place for the question. It reads as "these pages own keys",
+but the question the pages actually differ on is narrower: **which pages write a
+step**. Putting it on the key meant the chord layer stopped owning keys anywhere
+else, so on the hero, in TRACK SET, and on GLOBAL every press fell through to the
+plain audition path: one raw key, no snap, no chord. John reported it as
+"回到hero后自动退出了ofc" — the setting was still ON; the sound had been taken
+away from it. That the two symptoms arrived as one report is the tell: a page
+switching the setting off and a page silencing the setting look identical from
+the player's seat.
+
+The two claims are different and must not share a gate:
+
+- **the chord layer is how the instrument sounds** — every page, no exception.
+  This is not a grid feature that leaks; it is the keyboard's own behaviour.
+- **writing a step is what the grid pages do** — `M_GRID` and `M_SCALE` only.
+
+`sc_write_ok()` asks the second question, and it is asked by the two functions
+that write (`sc_off_write()`, `sc_grid_write()`), never by the key. `focus_layer`
+(the EDIT fade-in) stays on the key, because it is about who receives the press,
+not about what gets recorded.
+
+The lesson generalises to the rest of the UI: when a new rule appears to be about
+"which page is this", find the ACTION it constrains first, and gate that. A gate
+on the input is almost always wider than the rule it was meant to express.
+
+### Test consequences
+
+- `tests/chordsound.txt` (28) — CHORD KEYS on, MAJ: the chord sounds from the
+  SCALE page AND from the hero, note for note (`jam_notes` 4 = root + third +
+  fifth + seventh, not the 1 that `jam_used` would report for the same slot);
+  the hero and TRACK SET sound but do not write; the GRID still writes; the
+  setting survives every page change. Reverse-verified: restoring the wide gate
+  fails 4.
+- `tools/chordsound_probe.mjs` (7) — the same claims on the shipped wasm, by the
+  MIDI that leaves the instrument. The hero draws no live-note readout (a
+  picture of the PATTERN, not of the keyboard), so sound is the only honest
+  witness: the probe asserts the hero emits `[67,71,74,81]`, the same four notes
+  the SCALE page emits. Reverse-verified: restoring the wide gate fails 3.

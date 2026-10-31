@@ -1,0 +1,117 @@
+# The chord layer sounds on every page; only the two grid pages write
+#
+# John 2026-10-31: "scale页面，opc on的弹奏内容没有进jam，回到hero后自动退出了ofc，
+# 应该保持的"
+#
+# Both symptoms came from ONE mistake I made in the step-record fix (5f5e317):
+# the page gate went on the KEY instead of on the WRITE. scale_key_hook() did
+# "if (ui_mode != M_GRID && ui_mode != M_SCALE) return 0" at the top, so on the
+# hero (and on every other page) the chord layer handed the key back to the
+# plain audition path: one raw note, no snap, no chord - which from the player's
+# seat is exactly "回到hero后自动退出了ofc". The setting was still ON; the
+# sound had been taken away from it.
+#
+# The gate belongs on the write, because the two claims are different:
+#   the chord layer is HOW THE INSTRUMENT SOUNDS  -> every page
+#   writing a step is WHAT THE GRID PAGES DO      -> M_GRID and M_SCALE only
+# sc_write_ok() is that second question, and it is asked by sc_off_write() and
+# sc_grid_write(), not by the key.
+#
+# This file pins both halves, and the jam ring is the witness for the first:
+# jam_used counts SLOTS (a chord is one slot), so jam_notes counts VOICES - only
+# that number can tell "the chord arrived" from "one note arrived".
+
+tap SEQ
+wait 20
+turn SELECT 3
+wait 40
+expect ts_ch 0                     # a melody track: the chord layer owns its keys
+
+# --- CHORD KEYS on, MAJ on, played from the SCALE page ---
+tap SEL
+wait 30
+expect mode 3
+turn K3 1
+wait 30
+expect ofc 1                       # GATE
+turn K1 1
+wait 30
+expect ofc_mask 127                # no component selected yet: the root alone
+key 24 down 60                     # a component key: selects the third
+wait 60
+key 24 up 60
+wait 60
+expect jam_notes 0                 # nothing played yet
+key 14 down 100                    # the root: the chord speaks
+wait 250
+expect jam_notes 4                 # root + third + fifth + seventh reach the ring
+key 14 up 100
+wait 350
+expect jam_notes 4                 # released: still captured
+
+# The SCALE page is one of the two writing pages, so the root above also wrote
+# its chord into step 0 (4 voices, first 67: 0x443) and moved the cursor. That is
+# the pre-existing behaviour, not a side effect of this fix.
+expect step0 1091
+expect cursor 1
+
+# --- the same chord, played from the HERO ---
+# This is the regression: with the page gate on the key, this section produced
+# no jam content at all, because the key never reached the chord layer.
+tap HOME
+wait 80
+expect mode 0
+expect ofc 1                       # the setting was never reset - it never is
+expect jam_notes 4                 # the ring keeps what it took
+key 14 down 100
+wait 250
+expect jam_notes 8                 # and it takes this chord too, from the hero
+key 14 up 100
+wait 350
+expect jam_notes 8
+
+# --- but the hero does not WRITE a step ---
+# Sounding everywhere must not turn every page into a recorder: that was the
+# fault the over-wide gate was trying to fix, and the narrow one still fixes it.
+expect step0 1091                  # unchanged: the hero does not write
+expect cursor 1
+
+# --- nor does TRACK SET, with CHORD KEYS on ---
+tap ENV
+wait 40
+expect mode 4
+expect sel_track 3
+expect step0 1091
+key 14 down 100
+wait 250
+expect jam_notes 12                # it still sounds (and the ring still keeps it)
+key 14 up 100
+wait 350
+expect step0 1091                  # but it is not recorded
+expect cursor 1
+
+# --- the grid pages still write ---
+# CHORD KEYS on writes on PRESS (that path always worked; it is the CHORD KEYS
+# off path that needed the gesture rule). 4 voices, first voice 67: 0x443.
+tap HOME
+wait 80
+tap SEQ
+wait 40
+expect mode 1
+expect cursor 1
+key 14 down 100
+wait 250
+key 14 up 100
+wait 250
+expect step0 1091                  # step 0 unchanged: the cursor is on step 1 now
+expect cursor 2                    # and the write advanced it
+
+# --- CHORD KEYS off keeps the setting across a trip to the hero ---
+# The other half of "应该保持的": the setting is live-only (not persisted to
+# flash), but it must survive page changes.
+tap HOME
+wait 80
+expect ofc 1
+tap SEQ
+wait 40
+expect ofc 1

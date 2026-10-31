@@ -674,3 +674,36 @@ John：「我建议drum的preset就用有值的那9个」，随后指出更根�
 **踩到的坑（都是探针错，不是产品错）**：① 探针原来在 track 0 上测「每页 PRESET 都生效」，而 0..2 都是鼓轨，改成先 SELECT 到 track 3（旋律）再测页面；② `pz_prog` 只在转旋钮后更新，读「当前轨 program」要用 `ts_prog`；③ **PC 是两字节消息，值在 d1**，探针读 d2 导致八套 kit 全报 0——这条曾让我误判成 drain 分帧 bug，读原始包 `c9 8 0` 才定位。
 
 **尺寸**：image **524,976**（+320 B）/ 581,564；RAM 68,692；fwsc `c8302226ddf74e2a65460ea10cf1a575`，611,547 B，已拷进 `build/emu/`；wasm `424b161f9c485cca0f4ec5dc9ca39a5a`，413,261 B；8933/8930 双端口同件。真机仍是最早的 `8412daad`，本版未刷。
+
+## 和弦层在每一页都发声；写 step 只属于两个 grid 页 —— 2026-10-31 实测
+
+**John 报告**："scale页面，opc on的弹奏内容没有进jam，回到hero后自动退出了ofc，应该保持的"
+
+**两个症状，一个错。** 上一步修 step record（`5f5e317`）时，我把页面门加在了**按键**上：
+
+```c
+if (ui_mode != M_GRID && ui_mode != M_SCALE) return 0;   // scale_key_hook() 开头
+```
+
+于是 hero、TRACK SET、GLOBAL 上的每一个按键都被交回普通试听路径：**单音、不 snap、不成和弦**。设置一直是 ON，发声权被拿走了 —— 从演奏者角度看，"这一页替我关了 OFC"和"这一页把 OFC 变成哑的"是同一件事，所以它们被一起报上来。
+
+**门属于动作，不属于输入。** 两个命题不同，不能共用一个门：
+
+- **和弦层 = 这件乐器怎么发声** —— 每一页，无例外。
+- **写 step = 两个 grid 页的职责** —— 只有 `M_GRID` / `M_SCALE`。
+
+新增 `sc_write_ok()` 问第二个问题，由两个写函数（`sc_off_write()` / `sc_grid_write()`）调用，按键不问它。`focus_layer`（EDIT 淡入层）仍留在按键上，因为它管的是"谁收到这次按键"，不是"记不记录"。
+
+**实测证据（host）**：`jam_used` 只数**格子**，三音和弦和单音都读 1，所以为它加了 `jam_notes`（数 voice）。OFC on + MAJ + 选过三度：SCALE 页弹根音 → `jam_notes` **4**（根/三/五/七），hero 上同样 **4**，TRACK SET 上 **4**，格子都不写。反向：把宽门放回去，hero 读到 **1**（单音），测试失败 4 条。
+
+**另一件实测澄清**：不选任何 component 时，`sc_revoice()` 里 `!sc_mask` 直接 `sc_tones[0] = root` 就 return —— **OFC on 本来就不是和弦**。要测和弦必须先按一个 component 键（key 24+）。这点先前被我当成 bug 查了一轮，是设计。
+
+**测试**：`tests/chordsound.txt` **28** 条；`tools/chordsound_probe.mjs` **7** 项。两者都反向验证过（旧代码分别失败 **4** 和 **3**）。host 全量 **684** 通过（`basic.txt` 35 条模板遗留一直在）。
+
+**探针 lesson**：第一版探针断言"hero 会画出和弦"，实测 **0 px 变化** —— hero 画的是 **pattern 的图**，不是键盘，本来就不显示实时音。改成读 MIDI 出口：hero 发出的正是 `[67,71,74,81]`，与 SCALE 页逐音一致。**屏幕不是唯一的证人，声音才是。**
+
+**另一件探针 lesson**：整帧比对不可用 —— 空跑一次 hero 往返、什么都没弹，底部 y212..214 也差 **611 px**（页面往返自己改那三行）。格子区是 y0..211，只比这一段。
+
+**尺寸**：image **527,888** / RAM **68,744** / fwsc **`3d0e5399a6cc79b60a0233ef78cd964e`**（611,547 B）；wasm **`cde14b1808d4d9f31eaba3f33ccdcabe`**（421,316 B）；8933 / 8930 双端口实测同件、`no-store`。
+
+**既有欠账（在 master `549ccec` 上同样失败，与本轮无关）**：`jam_sound_probe.mjs` 2/3、`midi_probe.mjs` 3/14。用 worktree 对照过 `549ccec`，数字一模一样。
