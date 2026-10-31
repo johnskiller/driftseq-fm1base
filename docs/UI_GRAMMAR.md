@@ -269,3 +269,35 @@ Sounding notes are left alone on purpose: each one already has its gate-off
 scheduled in `eng.gates[]` keyed by track, so it ends on time whether or not the
 step that started it still exists. Panicking would cut a note that was going to
 end by itself in 20 ms.
+
+---
+
+## 6. Step record: who owns a key, and when a step is written
+
+John 2026-10-31: "melody grid的step record有问题，只有在ofc on的情况下step record才有效". Report was exact; the blast radius was larger than the report.
+
+**Who owns the key.** `scale_key_hook()` sits at the top of `panel_key_handler()`, above the GRID's `stepEntry`. A hook that consumes a key (`return 1`) owns it completely, so anything it does not do never happens. With CHORD KEYS off it consumed every key and only auditioned — the grid's stepEntry never ran, and nothing was ever written. CHORD KEYS off is the BOOT state, so this was every melody track from power-on.
+
+**Three faults, one branch.** The OFC-off branch was missing both gates the OFC-on branch also lacked:
+
+| gate | what it protects | what went wrong without it |
+|---|---|---|
+| `focus_layer` | the EDIT layer edits written voices | EDIT was dead whenever CHORD KEYS was off — no voice could be added or removed |
+| `ui_mode` | only GRID/SCALE write steps | TRACK SET, which auditions the PROGRAM you are choosing, wrote a step |
+
+Both gates now sit at the top of the hook, above the OFC dispatch, so they cannot diverge again. GRID and SCALE keep writing (the SCALE page has always been a second grid); every other page auditions only.
+
+**When a step is written.** John's decision: one step per **gesture**, written when the **last** key comes up.
+
+- Writing on press cannot express a chord: the second note would already be a step late.
+- Writing on the last release makes keys that are down together one step, with no CHORD KEYS engaged.
+- The player hears live audition either way, so the timing of the write is invisible in performance — only the grid differs.
+
+The write itself is the GRID's contract, not a second rule: override the step, revive the gate, cursor +1 dead stop. It lives in `sc_off_write()`, next to the state it reads.
+
+**Two sets, two jobs.** `sc_held[]` is what the page NAMES (pitches sounding, for the OFC-off readout). `rel[]`/`cap[]` are what the step will CONTAIN (pitches pressed, in press order). They are not the same set: a key whose snap lands on a pitch already down is the same pitch, not a second press, and must not eat a step.
+
+### Test consequences
+
+- `tests/steprecord.txt` (49) — the write, the chord-as-one-gesture, override-not-append, EDIT add and remove with CHORD KEYS off, TRACK SET not writing, CHORD KEYS on keeping the old press-time path, drums untouched.
+- `tools/steprecord_probe.mjs` (7 px) — the same claims on the SHIPPED wasm, by changed cells. Verified to FAIL (2/7) against the pre-fix build, so it is a test of the bug and not of the code.

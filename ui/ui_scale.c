@@ -114,6 +114,48 @@ static int ui_snap(int note)
     return note - (pc - best);
 }
 
+/* ---- the OFC-off gesture (John 2026-10-31) --------------------------------
+ * OFC off used to consume every key and write nothing, so step record on a
+ * melody track only ever worked with OFC ON - the shipped default is OFF.
+ * OFC off is now a plain keyboard that writes one step per GESTURE: notes go
+ * down, and the step is written when the LAST one comes up.
+ *
+ * Why on release rather than on press: a chord has to reach one step, and on
+ * press the second note of a chord would already be a step late. Writing on
+ * the last release is what makes C-E-G land as one multi-voice step without
+ * OFC engaged. What the player hears is live audition either way, so the
+ * timing of the WRITE is invisible in performance; only the grid differs.
+ *
+ * Two things this must remember:
+ *   cap_n / cap[]  the pitches this gesture will write, in press order
+ *   rel_n / rel[]  the pitches still physically down; the write fires at zero
+ * (the name readout's sc_held[] above is the same set, but it is the READOUT's
+ *  state - it is what the page prints, and it must stay one thing only.) */
+static uint8_t cap_n;
+static uint8_t cap[DS_VOICES];
+static uint8_t rel_n;
+static uint8_t rel[27];
+
+/* Write this gesture's pitches to the cursor step, then advance - the same
+ * contract as the GRID's stepEntry (override the step, revive the gate, cursor
+ * +1 dead stop), so the layer does not invent a second recording rule. Nothing
+ * held at all (or nothing in the first DS_VOICES) writes nothing: a stray tap
+ * that snapped onto an already-down pitch must not eat a step. */
+static void sc_off_write(void)
+{
+    ds_track *tr = TRK();
+    ds_step *st = &tr->steps[cursor];
+    uint8_t i;
+    if (!cap_n) return;
+    while (st->nvoices)
+        ds_voice_remove(tr, cursor, st->v[0].note);
+    for (i = 0; i < cap_n; i++)
+        ds_voice_add(tr, cursor, cap[i], midi_vel, 1);
+    st->on = 1;
+    edit_voice = 0;
+    if (cursor < 63u) cursor++;
+}
+
 /* the sounding tones right now (root alone, or the resolved chord), snapped */
 static uint8_t sc_tones_n;
 static uint8_t sc_tones[4];
@@ -316,29 +358,63 @@ static uint8_t scale_key_hook(uint8_t key, uint8_t down)
 {
     uint8_t is_drum = is_drum_trk();
     if (is_drum) return 0;                        /* drums: everything raw */
-    if (!sc_ofc) {                                /* OFC off: snap only */
+    /* two gates that used to be on one branch only.
+     *   focus_layer  - the EDIT layer edits written voices; the scale layer must
+     *                  not eat its keys. This gate was missing on the OFC-off
+     *                  branch, so EDIT was dead whenever OFC was off.
+     *   ui_mode      - only the GRID writes steps. TRACK SET auditions the
+     *                  program you are choosing and says so in its own comment
+     *                  ("recording them would fill the take with notes the
+     *                  player was only using to listen"); with OFC on, that page
+     *                  wrote anyway. GRID and the SCALE page keep writing - the
+     *                  SCALE page has always been a second grid, and it is where
+     *                  you play the chord you are building. */
+    if (focus_layer) return 0;
+    if (ui_mode != M_GRID && ui_mode != M_SCALE) return 0;
+    if (!sc_ofc) {                                /* OFC off: a plain keyboard that
+                                                   * records one step per gesture */
         int note = 53 + (int)key + key_shift;
+        uint8_t i;
+        if (note < 0) note = 0;
+        if (note > 127) note = 127;
         note = ui_snap(note);
         if (down) {
             ds_live_on(&eng, sel_track, (uint8_t)note, midi_vel);
             ds_jam_capture(&eng, (uint8_t)note, midi_vel, 1);
-            /* remember it for the name readout. Same key twice (or a key whose
-             * snap lands on a note already down) must not double up: sc_held is
-             * the set of PITCHES sounding, not the list of presses. */
-            if (sc_held_n < 27) {
-                uint8_t i;
-                for (i = 0; i < sc_held_n; i++)
-                    if (sc_held[i] == (uint8_t)note) break;
-                if (i == sc_held_n) sc_held[sc_held_n++] = (uint8_t)note;
+            /* two sets, two jobs: sc_held is what the page NAMES (pitches
+             * sounding), rel/cap is what the step will CONTAIN (pitches
+             * pressed). A key whose snap lands on a pitch already down adds to
+             * neither - it is the same pitch, not a second press. */
+            for (i = 0; i < rel_n; i++)
+                if (rel[i] == (uint8_t)note) break;
+            if (i == rel_n) {
+                if (rel_n < 27) rel[rel_n++] = (uint8_t)note;
+                if (cap_n < DS_VOICES) cap[cap_n++] = (uint8_t)note;
+                if (sc_held_n < 27) {
+                    for (i = 0; i < sc_held_n; i++)
+                        if (sc_held[i] == (uint8_t)note) break;
+                    if (i == sc_held_n) sc_held[sc_held_n++] = (uint8_t)note;
+                }
             }
         } else {
-            uint8_t i;
             ds_live_off(&eng, sel_track, (uint8_t)note);
+            ds_jam_capture(&eng, (uint8_t)note, midi_vel, 0);
             for (i = 0; i < sc_held_n; i++)
                 if (sc_held[i] == (uint8_t)note) {
                     sc_held[i] = sc_held[--sc_held_n];
                     break;
                 }
+            for (i = 0; i < rel_n; i++)
+                if (rel[i] == (uint8_t)note) {
+                    rel[i] = rel[--rel_n];
+                    break;
+                }
+            /* the last key up ends the gesture: this is where the step is
+             * written. Not on press - see sc_off_write(). */
+            if (!rel_n) {
+                sc_off_write();
+                cap_n = 0;
+            }
         }
         return 1;
     }
@@ -347,7 +423,6 @@ static uint8_t scale_key_hook(uint8_t key, uint8_t down)
      * sounding is GATE — the notes live while the root is physically held
      * (sc_gate). A LATCH sounding mode is specced but awaits the stop
      * gesture decision. Component keys TOGGLE: press a lit one to unselect. */
-    if (focus_layer) return 0;                    /* EDIT layer keeps raw notes */
     if (key <= 6) {                               /* DEGREES I..VII: the chord walks */
         if (sc_kind == SC_CHR)
             return 1;                             /* John: CHR has no scale degrees —

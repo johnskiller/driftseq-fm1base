@@ -1,0 +1,195 @@
+# Melody step record with CHORD KEYS off (John 2026-10-31)
+#
+# "melody grid的step record有问题，只有在ofc on的情况下step record才有效"
+#
+# The report was exactly right, and it was worse than a corner case: OFC off is
+# the BOOT state (ui_edit.c:749 sets sc_ofc = 0), so step record on a melody
+# track was broken on every melody track from power-on until the player found
+# the CHORD KEYS knob.
+#
+# Root cause: scale_key_hook() sits above the GRID's key handling in
+# panel_key_handler(), and its OFC-off branch consumed every key with "return 1"
+# after only auditioning it. The GRID's stepEntry never saw the key, so nothing
+# was written. With OFC on, that branch calls sc_grid_write() itself, so that
+# path worked.
+#
+# Two more faults fell out of the same branch:
+#   - no focus_layer gate: the EDIT layer was dead whenever OFC was off (the
+#     hook ate its keys), so voices could not be added or removed there.
+#   - no page gate (the OFC-on branch had none either): on TRACK SET, which
+#     auditions the PROGRAM you are choosing, a key with OFC on wrote a step.
+#     That page's own comment says recording there "would fill the take with
+#     notes the player was only using to listen".
+#
+# John's decision on how OFC-off records (2026-10-31): "选3" - one step per
+# gesture, written when the LAST key comes up, so a chord lands as one
+# multi-voice step without CHORD KEYS engaged. Keys down together are the chord.
+#
+# TWO HOST-DSL TRAPS this file is shaped around:
+#   1. A key edge is only seen by a poll, so every "key ... down" needs a "wait"
+#      before anything that depends on it. Two edges in one poll period are one
+#      edge and the press vanishes silently.
+#   2. "turn SELECT n" is RELATIVE and wraps. Re-issuing "turn SELECT 3" in each
+#      section walks off the track (3 -> 6 -> 9) and lands on empty tracks, where
+#      every assertion about notes fails for the wrong reason. So this file
+#      turns to track 3 once and stays there; sections are separated by
+#      HOME-then-SEQ, which resets the cursor and keeps the track.
+
+tap SEQ
+wait 20
+expect mode 1
+turn SELECT 3
+wait 30
+expect sel_track 3
+expect ts_ch 0                     # drums are ch9, so this is a melody track
+expect ofc 0                       # boot state: CHORD KEYS off
+expect cursor 0
+
+# --- 1. the bug itself: a key with OFC off writes a step ---
+expect step0 304                   # 1 voice, note 48
+key 14 down 60
+wait 20
+expect held_n 1                    # it IS sounding (this always worked)
+expect step0 304                   # nothing is written while the key is down
+expect cursor 0
+key 14 up 60
+wait 20
+expect held_n 0
+expect step0 323                   # written on release: 1 voice, note 67 (G4)
+expect cursor 1                    # and the cursor advanced, as stepEntry does
+
+# --- 2. a chord is one step, not three ---
+# Keys down together, released in any order: the write happens at the LAST
+# release. This is the whole reason for writing on release instead of on press
+# (on press, the second note of a chord would already be a step late).
+tap HOME
+wait 60
+tap SEQ
+wait 40
+turn K1 -1                         # the cursor is global, not per-page: rewind it
+wait 20
+expect sel_track 3                 # HOME+SEQ keeps the track
+expect cursor 0
+expect step0 323                   # section 1's write is still here
+key 7 down 40
+wait 20
+key 11 down 40
+wait 20
+key 14 down 40
+wait 20
+expect cursor 0                    # three keys down: still no write
+expect step0 323
+key 7 up 40
+wait 20
+expect cursor 0                    # two still down: no write
+key 11 up 40
+wait 20
+expect cursor 0                    # one still down: no write
+key 14 up 40
+wait 20
+expect cursor 1                    # the last release writes it
+expect step0 828                   # 3 voices (0x300), first voice 60 (C4)
+
+# --- 3. the write overrides the step rather than appending ---
+# Same contract as stepEntry: clear what was there, write the gesture, revive
+# the gate. The cursor is at 1 now, so this lands on step 1.
+key 7 down 40
+wait 20
+key 7 up 40
+wait 20
+expect cursor 2
+expect step0 828                   # step 0 is untouched by the later writes
+
+# --- 4. EDIT layer works with OFC off ---
+# It did not before: the hook consumed the keys, so no voice could be added or
+# removed on a melody track unless CHORD KEYS was on.
+#
+# EDIT's rule is the grid's: pressing a note the step ALREADY has removes it,
+# pressing a new one adds it, and the cursor never advances. So this section
+# does both, on the chord section 2 wrote (C4 E4 G4 = 828, 3 voices, first 60).
+tap HOME
+wait 60
+tap SEQ
+wait 40
+turn K1 -2
+wait 20
+expect cursor 0
+expect step0 828
+expect focus 0
+tap EDIT
+wait 20
+expect focus 1
+expect cursor 0
+key 14 down 60                     # G4 is in the chord: this REMOVES it
+wait 20
+key 14 up 60
+wait 20
+expect cursor 0                    # EDIT never advances
+expect step0 572                   # 2 voices (0x200), first voice 60: C4 E4
+key 9 down 60                      # D4 is not in it: this ADDS one
+wait 20
+key 9 up 60
+wait 20
+expect cursor 0
+# 3 voices, first voice 60: C4 E4 D4; remove compacts so D4 lands last
+expect step0 828
+tap EDIT
+wait 20
+expect focus 0
+
+# --- 5. a page that only auditions does not record ---
+# TRACK SET auditions the PROGRAM you are choosing. With OFC ON this page used
+# to write a step; its own comment says it must not.
+tap SEL
+wait 20
+turn K3 1
+wait 20
+expect ofc 1
+tap ENV
+wait 30
+expect mode 4
+expect sel_track 3
+expect step0 828
+key 14 down 60
+wait 20
+key 14 up 60
+wait 20
+expect step0 828                  # auditioned, not recorded
+expect cursor 0
+
+# --- 6. turning CHORD KEYS back on keeps the old (working) path ---
+tap HOME
+wait 60
+tap SEQ
+wait 40
+turn K1 -1
+wait 20
+expect cursor 0
+expect ofc 1
+expect step0 828
+key 14 down 60
+wait 20
+key 14 up 60
+wait 20
+expect cursor 1                    # OFC on writes on PRESS, via sc_grid_write
+expect step0 323                   # 1 voice, note 67: the root alone
+
+# --- 7. drums never reach this layer ---
+# is_drum_trk() returns early, so a drum track's white key still toggles a step.
+tap ENV
+wait 30
+expect mode 4
+turn SELECT 1
+wait 20
+expect sel_track 4
+turn SELECT 1
+wait 20
+turn SELECT 1
+wait 20
+expect sel_track 6
+turn SELECT -3
+wait 20
+turn SELECT -3
+wait 20
+expect sel_track 0
+expect ts_ch 9
