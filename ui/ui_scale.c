@@ -24,9 +24,13 @@
  * While a root is held, changing the set re-voices live (jam follows); the
  * GRID write happens once, when the set resolves to a chord. */
 
-enum { SC_MAJ, SC_MIN, SC_DOR, SC_MIX, SC_HMI, SC_PMAJ, SC_PMIN, SC_BLU, SC_CHR, SC_NKIND };
+/* CHROMATIC first: it is the default and the least surprising thing for K1 to
+ * be sitting on (John 2026-10-31: scale 应该把chromatic作为默认，放第一个). The
+ * order is the knob's travel, so "first" is the dead stop at the bottom. */
+enum { SC_CHR, SC_MAJ, SC_MIN, SC_DOR, SC_MIX, SC_HMI, SC_PMAJ, SC_PMIN, SC_BLU, SC_NKIND };
 /* pitch-class sets, bit n = tonic+n sounds */
 static const uint16_t SC_SET[SC_NKIND] = {
+    0x0FFF,                                    /* CHR  everything */
     0x0AB5,                                    /* MAJ  0 2 4 5 7 9 11 */
     0x05AD,                                    /* MIN  0 2 3 5 7 8 10 */
     0x06AD,                                    /* DOR  0 2 3 5 7 9 10 */
@@ -34,8 +38,7 @@ static const uint16_t SC_SET[SC_NKIND] = {
     0x09AD,                                    /* HMI  0 2 3 5 7 8 11 */
     0x0295,                                    /* PMAJ 0 2 4 7 9 */
     0x04A9,                                    /* PMIN 0 3 5 7 10 */
-    0x04E9,                                    /* BLU  0 3 5 6 7 10 */
-    0x0FFF                                     /* CHR  everything */
+    0x04E9                                     /* BLU  0 3 5 6 7 10 */
 };
 
 enum { OC_MAJ, OC_SEV, OC_M7, OC_MIN, OC_DIM, OC_ADD9, OC_SUS, OC_SIX, OC_NCOMP };
@@ -590,8 +593,8 @@ static void scale_leds(uint32_t *litK, uint32_t *dimK, uint32_t *litB, uint8_t i
  * interval strip and a REAL piano-keybed diagram (proper black/white offsets,
  * zone brackets under the keys, the held root lit). */
 static const char *const SC_FULL[SC_NKIND] = {
-    "MAJOR", "MINOR", "DORIAN", "MIXOLYDIAN", "HARM.MINOR", "PENT.MAJOR",
-    "PENT.MINOR", "BLUES", "CHROMATIC"
+    "CHROMATIC", "MAJOR", "MINOR", "DORIAN", "MIXOLYDIAN", "HARM.MINOR",
+    "PENT.MAJOR", "PENT.MINOR", "BLUES"
 };
 
 static void draw_scale(void)

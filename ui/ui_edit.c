@@ -709,8 +709,9 @@ static void ui_init(void)
     glo_held = 0;
     sel_track = 0;
     jam_menu_close();                        /* boot: no menu, no ttl */
-    /* the SCALE page's live-only state (ui_scale.c): boot = MAJ/C/OFC off */
-    sc_kind = SC_MAJ;
+    /* the SCALE page's live-only state (ui_scale.c): boot = CHR/C/OFC off
+     * (John 2026-10-31: chromatic is the default) */
+    sc_kind = SC_CHR;
     sc_tonic = 0;
     sc_ofc = 0;
     sc_root_key = 0xFF;

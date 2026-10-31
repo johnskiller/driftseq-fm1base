@@ -68,7 +68,7 @@ const enc = (role, n) => { M.web_enc(role, n); step(40); };
 
 /* plat.h's bit order (the panel prints SEL, the code calls it SCL) */
 const BTN = { SEL: 1, ENV: 2, GLO: 5, HOME: 6 };
-const EN = { SELECT: 0, K3: 5 };            /* SELECT, ALGO, PRESET, K1, K2, K3, K4 */
+const EN = { SELECT: 0, K1: 3, K3: 5 };     /* SELECT, ALGO, PRESET, K1, K2, K3, K4 */
 
 /* a key press as the panel would deliver it: web_key(id, vel, press);
  * vel 0 IS the release, which is how the firmware's scan reports it */
@@ -86,6 +86,10 @@ step(600);                                   /* the demo pattern loads */
 for (let i = 0; i < 4; i++) enc(EN.SELECT, 1);
 step(80);
 press(BTN.SEL);                              /* SEL opens SCALE */
+enc(EN.K1, 1);                               /* MAJOR: the page boots CHROMATIC now
+                                              * (John 2026-10-31), and this probe is
+                                              * about the DIATONIC bed: its degree zone
+                                              * and its in/out-of-scale colouring */
 step(160);
 
 const degDim  = 0x7f;                        /* keys 0..6 */

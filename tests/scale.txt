@@ -7,6 +7,7 @@
 wait 600
 turn SELECT 3                     # the demo's bass track (ch 0, melodic)
 tap SEL                           # the SCALE page opens
+turn K1 1                         # MAJOR — the page defaults to CHROMATIC now (John 2026-10-31), and this file tests the diatonic behaviour: the degree walk, the scale's own thirds and sevenths
 turn K3 1                         # OFC on
 tap SEL                           # back
 
@@ -142,9 +143,9 @@ wait 20
 
 # -- CHR kills the degree keys (John: the object doesn't exist) --
 tap SEL
-turn K1 8                        # CHROMATIC
+turn K1 -1                       # CHROMATIC (first on the knob, the bottom stop)
 tap SEL
-expect scale 2048                # kind 8 (CHR) << 8 | tonic 0
+expect scale 0                   # kind 0 (CHR) << 8 | tonic 0
 key 7 down 100                   # C
 key 19 down 100                  # MAJ: C E G
 key 0 down 100                   # degree I: DEAD in CHR (no new events)
@@ -178,9 +179,9 @@ wait 20
 
 # -- John 2026-10-29 1b: the degree speaks of the tonic, never of the root --
 tap SEL
-turn K1 -8                        # back to C MAJOR (the CHR block left it chromatic)
+turn K1 1                         # back to C MAJOR (the CHR block left it chromatic)
 tap SEL
-expect scale 0
+expect scale 256                  # kind 1 (MAJ) << 8 | tonic 0
 tap SEL
 turn K3 -1                        # OFF clears the selection (K3 0 = zero detents = no-op)
 tap SEL
@@ -436,6 +437,12 @@ tap SEL
 wait 40
 expect mode 3
 expect ofc 0
+turn K1 1                         # MAJOR: rebooting lands on CHROMATIC, which has no degrees to dim
+tap SEL
+wait 20
+expect scale 256
+tap SEL
+wait 20
 # OFC off: the whole bed is the live keyboard (every key plays a snapped note),
 # so 0..18 sit dim; the component zone does not exist in this mode, and there is
 # no step ruler on this page at all.

@@ -17,8 +17,11 @@
 wait 600
 turn SELECT 3                     # the demo's bass track (ch 0, melodic)
 tap SEL                           # the SCALE page opens
-turn K1 8                         # CHROMATIC: every key sounds its own pitch
 wait 20
+# CHROMATIC is the page's default and the first stop on K1 (John 2026-10-31),
+# so nothing has to be selected for every key to sound its own pitch. Asserted,
+# not assumed: the scale readback is kind<<8|tonic.
+expect scale 0
 
 # --- nothing held: no readout ---
 expect held_n 0
