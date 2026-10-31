@@ -771,12 +771,18 @@ static void scale_encoder(uint8_t enc, int8_t det)
 
 static uint8_t scale_button(uint8_t btn)               /* returns 1 = consumed */
 {
-    if (btn == B_SEL) {                                /* SEL toggles the page */
-        ui_mode = (ui_mode == M_SCALE) ? M_HOME : M_SCALE;
+    if (btn == B_SEL) {
+        /* SEL is SCALE's door, and it is a page key like the others now
+         * (docs/UI_GRAMMAR.md rule 4): it used to toggle back to the hero, which
+         * is the inconsistency John named. Pressing it on the page turns the
+         * page; SCALE has one, so it stays. HOME is still the way out. */
+        ui_page_key(M_SCALE, ui_mode);
         return 1;
     }
     if (ui_mode != M_SCALE) return 0;
-    if (btn == B_HOME || btn == B_SEQ || btn == B_ARP)
-        ui_mode = M_HOME;                              /* any screen switch leaves */
+    if (btn == B_HOME || btn == B_SEQ || btn == B_ARP || btn == B_ENV)
+        return 0;                                      /* the page keys handle themselves:
+                                                        * a door goes where it says, it
+                                                        * does not bounce through HOME */
     return 0;                                          /* PLAY/REC/SAVE work as ever */
 }

@@ -889,6 +889,8 @@ int app_expect(const char *what, int *got)
     }
     else if (!strcmp(what, "gm_alloff"))        /* CC123 sent to EAS, ever */
         *got = (int)gm_alloff;
+    else if (!strcmp(what, "focus"))             /* GRID's EDIT layer (not a page) */
+        *got = focus_layer ? 1 : 0;
     else if (!strcmp(what, "key_shift"))         /* the keybed's octave: OCT+/- when no menu is up */
         *got = (int)key_shift;
     else if (!strcmp(what, "jam_menu"))          /* the decision popup is up (docs/UI_GRAMMAR.md) */

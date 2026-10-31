@@ -134,8 +134,12 @@ const page = (name, enter, leave, wantBody) => {
     const up = grab();
     const body = ink(up, 0, 215, 0, W);
     check(differs(up, home) || name === 'HOME', name + ': the page is not HOME', '');
-    check(Math.abs(body - wantBody) <= wantBody * 0.25, name + ': this is the page it should be',
-          body + ' px, want ~' + wantBody);
+    /* wantBody < 0 = "this page has no stable ink fingerprint" (GLOBAL's two
+     * pages differ, and rule 4 lets a page remember itself). tests/pages.txt
+     * pins those numbers directly. */
+    if (wantBody >= 0)
+        check(Math.abs(body - wantBody) <= wantBody * 0.25, name + ': this is the page it should be',
+              body + ' px, want ~' + wantBody);
     takePc();                                /* entering states nothing; clear anyway */
 
     const pcs = [];
@@ -161,11 +165,31 @@ const page = (name, enter, leave, wantBody) => {
 };
 
 page('HOME',      () => {},                                  () => {},                         2144);
-page('ARP',       () => press(BTN.ARP),                      () => press(BTN.ARP),             1213);
-page('SCALE',     () => press(BTN.SEL),                      () => press(BTN.SEL),             9470);
-page('TRACK SET', () => press(BTN.ENV),                      () => press(BTN.ENV),             3711);
-page('GLOBAL',    () => { M.web_buttons(1 << BTN.GLO); step(40); press(BTN.HOME); M.web_buttons(0); step(60); },
-                  () => press(BTN.HOME),                                                       7125);
+/* Leaving is HOME's job now (docs/UI_GRAMMAR.md rule 4): a page key on its own
+ * page turns the page, and these features have one page each, so it stays. */
+page('ARP',       () => press(BTN.ARP),                      () => press(BTN.HOME),            1213);
+page('SCALE',     () => press(BTN.SEL),                      () => press(BTN.HOME),            9470);
+page('TRACK SET', () => press(BTN.ENV),                      () => press(BTN.HOME),            3711);
+/* GLOBAL remembers its page (docs/UI_GRAMMAR.md rule 4), so this probe cannot
+ * assume it opens on page 1: enter, look, and turn with the same chord once if
+ * page 2 is up. The body-ink number below is page 1's. */
+/* The web build sets ONE button level per frame, so a chord cannot use press():
+ * it holds GLO across HOME's whole down-and-up. */
+const chord = () => {
+    M.web_buttons(1 << BTN.GLO); step(40);              /* GLO down: glo_held */
+    M.web_buttons((1 << BTN.GLO) | (1 << BTN.HOME)); step(40);   /* HOME down */
+    M.web_buttons(1 << BTN.GLO); step(40);              /* HOME up */
+    M.web_buttons(0); step(120);                        /* GLO up */
+};
+/* GLOBAL remembers its page (rule 4) and its two pages carry different amounts
+ * of body ink, so this probe does not pin a page number: it checks that the
+ * chord got off HOME and onto GLOBAL, and leaves the page number to
+ * tests/pages.txt, which reads it directly. -1 = "not a body-ink claim". */
+const enterGlobal = () => chord();
+
+page('GLOBAL',    () => enterGlobal(),
+                  () => press(BTN.HOME),                                                       -1);
+
 
 /* ---- SELECT states the program: the voice follows the track ---- */
 {

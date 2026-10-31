@@ -405,8 +405,7 @@ static uint8_t global_button(uint8_t btn, uint8_t released)
              * sets one level per frame and drops both together, closed the page
              * on the second chord every time. */
             gl_opening = 1;
-            gl_page ^= 1;
-            gl_row = 0;
+            ui_page_key(M_GLOBAL, ui_mode);   /* rule 4: the same turn every feature gets */
             /* The scan runs while page 2 is up (btdev_page owns that): nothing
              * to start here, but the list's cursor must not point past a list
              * that restarts empty. */
@@ -416,9 +415,14 @@ static uint8_t global_button(uint8_t btn, uint8_t released)
         return 1;                        /* the page owns HOME while it is up */
     }
     if (!released && glo_held) {         /* the chord: open */
+        /* Opening does NOT reset the page (docs/UI_GRAMMAR.md rule 4: a feature
+         * remembers its page). It used to force page 1, on the theory that
+         * "opening never lands on page 2" - but page 2 is a scan list that starts
+         * itself when it is looked at, so a player who was working there and
+         * stepped out came back to the settings and had to turn again. The rule
+         * is one rule: you arrive where you left. */
         ui_mode = M_GLOBAL;
         gl_opening = 1;
-        gl_page = 0;
         gl_row = 0;
         focus_layer = 0;
         return 1;

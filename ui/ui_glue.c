@@ -75,7 +75,11 @@ static uint8_t key_black_id(uint8_t ord);
 static uint16_t pz_ttl;                  /* frames left: 0 = no popup */
 static uint8_t  pz_trk;                  /* the track it named (the popup is about one) */
 static uint8_t  pz_prog;                 /* and the program, so a probe can read it */
-static uint8_t gl_page;                  /* GLOBAL: 0 = settings, 1 = the radio */
+/* GLOBAL's page number is the shared table's (docs/UI_GRAMMAR.md rule 4): it is
+ * the one feature with two pages, and it stopped having a private variable when
+ * every feature got a page count. The name stays because the page's own code and
+ * the tests read it by that name. */
+#define gl_page (ui_page[M_GLOBAL])       /* 0 = settings, 1 = the radio */
 static uint8_t gl_row;                   /* the row K1 is on (both pages) */
 static uint8_t jam_menu;
 static uint8_t jam_menu_sel;

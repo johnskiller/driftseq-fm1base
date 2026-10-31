@@ -215,7 +215,7 @@ wait 10
 expect pz_prog 47
 expect_out USB C0 2F 00
 out
-tap SEL                               # SEL closes SCALE (a HOME would land on GRID)
+tap HOME                              # HOME is the way out of SCALE now (rule 4)
 wait 20
 expect mode 0
 

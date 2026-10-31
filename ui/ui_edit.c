@@ -651,13 +651,23 @@ static void ui_button(uint8_t btn, uint8_t down, uint8_t released)
     if (trkset_button(btn))
         return;                                   /* ENV (toggle) + leaves */
     switch (btn) {
-    case B_HOME:                                  /* emu: HOME toggles HOME <-> GRID */
-        ui_mode = (ui_mode == M_HOME) ? M_GRID : M_HOME;
-        focus_layer = 0;
+    /* The page keys (docs/UI_GRAMMAR.md rule 4): a button is a door, and pressing
+     * the door of the page you are already on turns to the next page of that
+     * feature - which, one page in, means staying put. HOME is also the way back
+     * from everywhere, so from any other page it is a trip to the hero; from the
+     * hero it is already there and stays. That asymmetry is the one John picked
+     * (2026-10-31) and it is the only one that does not strand the player. */
+    case B_HOME:
+        if (ui_mode != M_HOME) {
+            ui_mode = M_HOME;
+            focus_layer = 0;                      /* the layer belongs to GRID */
+        } else {
+            focus_layer = 0;
+        }
         break;
-    case B_SEQ:  ui_mode = M_GRID; break;
-    case B_ARP:  ui_mode = M_ARP;  break;
-    case B_EDIT: if (ui_mode == M_GRID) focus_layer ^= 1; break;
+    case B_SEQ:  ui_page_key(M_GRID, ui_mode); break;
+    case B_ARP:  ui_page_key(M_ARP, ui_mode);  break;
+    case B_EDIT: if (ui_mode == M_GRID) focus_layer ^= 1; break;   /* a LAYER, not a page */
     case B_PLAY:
         if (eng.playing) ds_stop(&eng);
         else ds_play(&eng);

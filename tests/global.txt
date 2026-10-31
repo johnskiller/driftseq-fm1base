@@ -204,14 +204,26 @@ expect store_writes >0
 # header加页号". His MPC One with a Yamaha MD-BT01 on its DIN port is the reason:
 # that adapter is a PERIPHERAL, so the FM-1 has to scan and connect as a central.
 # ===========================================================================
-# (the block above left the page; the chord opens page 1 and the next chord
-# flips to page 2 - opening never lands on page 2, that is the point of the flip)
+# (the block above left the page. A page remembers where it was left
+# (docs/UI_GRAMMAR.md rule 4), so this block does not trust the page number: it
+# opens, and turns with the same chord until page 1 is up. The chord on page 1
+# flips to page 2 and back.)
 press GLO
 press HOME
 release HOME
 release GLO
 wait 20
 expect mode 5
+press GLO
+press HOME
+release HOME
+release GLO
+wait 60
+press GLO
+press HOME
+release HOME
+release GLO
+wait 60
 expect gl_page 0
 press GLO
 press HOME
@@ -288,7 +300,8 @@ wait 100
 expect gl_row 1
 expect gl_ble 1
 expect ble_dev 1
-# the scan belongs to this page: the other half of GLOBAL does not scan either
+# the scan belongs to this page: the other half of GLOBAL does not scan either.
+# On page 2 the chord turns to page 1 (the same key, the same rule).
 press GLO
 press HOME
 release HOME
@@ -310,13 +323,20 @@ expect mode 0
 expect ble_dev 0
 
 # ---- page 1's readings ----
+# leave and come back: the page remembers itself, so come back to page 2 and turn
 press GLO
 press HOME
 release HOME
 release GLO
 wait 40
 expect mode 5
-expect gl_page 0
+expect gl_page 1                  # where the last block left it
+press GLO
+press HOME
+release HOME
+release GLO
+wait 60
+expect gl_page 0                  # the chord turns 2 -> 1
 # page 1 no longer carries the switch: three rows, and K1 dead-stops there
 expect gl_row 0
 turn K1 9

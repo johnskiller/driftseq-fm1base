@@ -9,6 +9,37 @@
 /* ---- UI state (emu globals parity) ---- */
 enum { M_HOME = 0, M_GRID, M_ARP, M_SCALE, M_TRKSET, M_GLOBAL };
 static uint8_t ui_mode = M_HOME;
+
+/* How many pages each feature has, and which one it was last shown on
+ * (docs/UI_GRAMMAR.md rule 4). GLOBAL is 2 and everything else is 1 today; the
+ * table exists now so that a press on the button of the page you are already on
+ * has ONE meaning everywhere: turn to that feature's next page, and with a
+ * single page that is the same page. GLOBAL grew its second page before this
+ * table did and carried the idea alone (gl_page); it now goes through here like
+ * everything else.
+ *
+ * Indexed by ui_mode, so the two arrays below must stay in that order. */
+static const uint8_t ui_pages[] = { 1, 1, 1, 1, 1, 2 };
+static uint8_t ui_page[sizeof ui_pages];      /* 0 = page 1 */
+
+/* The page key (rule 4): leave to a feature, or turn its page if already there.
+ *
+ * This is the whole rule, in one place, because it used to be three different
+ * rules in three files - HOME toggled HOME/GRID, SEQ and ARP entered and then
+ * ignored the key, ENV and SEL toggled back to the hero - and the inconsistency
+ * was real enough that John called it out by name (2026-10-31).
+ *
+ * Returns 1: the key was this page's own. */
+static uint8_t ui_page_key(uint8_t mode, uint8_t cur)
+{
+    uint8_t n = ui_pages[mode];
+    if (cur != mode) {
+        ui_mode = mode;                       /* the door: arrives on its own page */
+        return 1;
+    }
+    ui_page[mode] = (uint8_t)((ui_page[mode] + 1u) % n);   /* the page turn */
+    return 1;
+}
 static uint8_t focus_layer;                  /* 0 base 1 EDIT (GRID only) */
 static uint8_t cursor;                       /* 0..63, dead-stop */
 static uint8_t edit_voice;                   /* melodic: active voice (pitch order) */

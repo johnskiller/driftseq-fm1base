@@ -160,22 +160,24 @@ static void trkset_encoder(uint8_t enc, int8_t det)
 static uint8_t trkset_button(uint8_t btn)
 {
     if (btn == B_ENV) {
-        ui_mode = (ui_mode == M_TRKSET) ? M_HOME : M_TRKSET;
-        ts_row = 0;
-        focus_layer = 0;
+        /* ENV is TRACK SET's door and a page key like the others
+         * (docs/UI_GRAMMAR.md rule 4): it used to toggle back to the hero. The row
+         * cursor still starts at the top when you arrive, because arriving is
+         * what "which row am I on" is about; a second press does not re-home it,
+         * since that press is a page turn, not an arrival. */
+        uint8_t was = ui_mode;
+        ui_page_key(M_TRKSET, ui_mode);
+        if (was != M_TRKSET) {
+            ts_row = 0;
+            focus_layer = 0;
+        }
         return 1;
     }
     if (ui_mode != M_TRKSET)
         return 0;
-    if (btn == B_HOME) {
-        ui_mode = M_HOME;
-        return 1;                                /* consumed: the generic B_HOME case
-                                                  * would otherwise toggle HOME->GRID
-                                                  * on the mode we just cleared. SEQ and
-                                                  * ARP fall through to their own cases:
-                                                  * they already set the page you asked
-                                                  * for. */
-    }
+    if (btn == B_HOME)
+        return 0;                                /* HOME is HOME's, not this page's:
+                                                  * see the ui_button case */
     return 0;
 }
 

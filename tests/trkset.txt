@@ -2,14 +2,15 @@
 # not the pixels — the pixels are checked separately by the shots below.
 wait 600
 
-# --- the door: ENV toggles the page, ENV again leaves ---
+# --- the door: ENV opens the page; ENV on the page is a page turn (one page in,
+#     that means staying), and HOME is the way out (docs/UI_GRAMMAR.md rule 4) ---
 expect mode 0
 tap ENV
 wait 20
 expect mode 4
 expect ts_row 0
 shot trk_open.png
-tap ENV
+tap HOME
 wait 20
 expect mode 0
 
@@ -238,7 +239,7 @@ tap SEL
 wait 20
 expect mode 3
 expect ofc 0
-tap SEL
+tap HOME
 wait 20
 expect mode 0
 
@@ -312,6 +313,6 @@ wait 10
 expect_no_out USB B9 00 78
 expect_no_out USB C9 00 00
 out
-tap ENV
+tap HOME
 wait 20
 expect mode 0

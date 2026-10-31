@@ -120,9 +120,97 @@ to a decision, not the decision. GLOBAL page 2 stops using it entirely.
 
 ---
 
+## 4. Page keys: a button is a door, and a second press is a page turn
+
+John 2026-10-31: "页面打开逻辑也不一致：现在home按钮是在hero和grid间切换，arp和seq是进入页面，
+再次按无效，env和scale都是在相应页面和hero间切换，比较混乱。统一改为按钮就是进入相应页面，
+重复按进入同一功能的不同页面（现在每个功能只有一个页面，所以就是停留在原页面），
+这样是不是更清晰？和glo+home的逻辑也一致"
+
+He is right that GLO+HOME was the one coherent one, so it becomes the rule for
+everything:
+
+| press | result |
+|---|---|
+| the button of a page you are NOT on | go there, on that feature's remembered page |
+| the button of the page you ARE on | turn to that feature's next page; with one page, stay put |
+| HOME, from any other page | go to HOME (it is the way back, see below) |
+| HOME, already on HOME | stay put |
+
+**Every feature has a page count**, even when the count is 1. `ui_page[mode]`
+holds the page last shown, so a feature with two pages comes back where it was
+left rather than at page 1 -- the same thing GLOBAL already did with `gl_page`.
+
+| key | page | pages today |
+|---|---|---|
+| HOME | M_HOME | 1 |
+| SEQ | M_GRID | 1 |
+| ARP | M_ARP | 1 |
+| ENV | M_TRKSET | 1 |
+| SEL | M_SCALE | 1 |
+| GLO+HOME | M_GLOBAL | 2 |
+
+GLOBAL keeps working exactly as it did; it simply stops being the only page with
+a page number. Its header (`GLOBAL 1/2`, `GLOBAL 2/2`) is the model for the rest:
+when a feature grows a second page, its header says `SCALE 1/2` the same way.
+
+### HOME is the way back, and that is not in conflict
+
+HOME arrives from a page button and leaves from any other page. The asymmetry is
+deliberate and John picked it: on the panel HOME is the button the hand reaches
+for to get out, and a page key that also refused to leave would strand the player.
+So HOME is the one key whose meaning depends on where you are -- but the meaning
+is the same in both directions: *HOME goes to HOME*. From GRID it is a trip to
+the hero; from the hero it is already there.
+
+### EDIT is not a page key
+
+EDIT toggles the GRID's focus layer (PIT/GAT/VEL/PROB/SEL) and has no page of its
+own. It stays a layer switch, and only on GRID -- which is where the layer exists.
+
+### Where the code puts it
+
+`ui_page[]` and `ui_pages[]` live in `ui.c` next to `ui_mode`, and one function
+does all of it:
+
+```c
+static uint8_t ui_page_key(uint8_t mode, uint8_t cur)
+{
+    uint8_t n = ui_pages[mode];
+    if (cur != mode) { ui_mode = mode; return 1; }        /* the door */
+    ui_page[mode] = (uint8_t)((ui_page[mode] + 1u) % n);  /* the turn */
+    return 1;
+}
+```
+
+Every page key routes through it: SEQ and ARP from `ui_edit.c`, SEL from
+`ui_scale.c`, ENV from `ui_trkset.c`, GLO+HOME from `ui_global.c`. `gl_page` is
+now `ui_page[M_GLOBAL]` spelled differently, so GLOBAL's own code and its tests
+did not move -- the point was to stop it being a special case, not to rewrite it.
+
+Two consequences worth stating because they were behaviour before:
+
+- **GLOBAL arrives on the page it was left on.** Opening used to force page 1,
+  on the theory that "opening never lands on page 2". But page 2 is the scan
+  list and it starts itself when looked at, so a player working there who
+  stepped out came back to the settings and had to turn again. "You arrive
+  where you left" is one rule for every feature.
+- **HOME still closes GLOBAL** even though HOME is also a page key. The page
+  owns HOME while it is up (`global_button` returns 1 on a bare HOME release),
+  and a chord on page 1 turns to page 2. Both paths exist and `tests/pages.txt`
+  pins them.
+
+---
+
 ## Test consequences
 
-- `global.txt`: the BLE connect / let-go assertions move from SAVE to K2 detents.
+- `pages.txt` (new, 46): each page key reaches its page, a second press stays
+  put (one page each), HOME arrives from every page and leaves every page, and
+  GLOBAL's page number is remembered across a trip to GLOBAL and back.
+- `global.txt`: the BLE connect / let-go assertions move from SAVE to K2 detents;
+  its page-number blocks now say which page they start on instead of trusting
+  the chord to reset it.
+- Probes that left a page with `press(SEL)` / `press(ENV)` now leave with HOME.
 - `jam` assertions: SAVE still opens the menu; commit is OCT+, not SAVE.
 - A popup must be **closable without committing**: assert that OCT- leaves the
   ring exactly as it was, not merely that the menu closed.

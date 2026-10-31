@@ -149,7 +149,9 @@ check(lit() === (1 << 13), 'two thirds: the lights drop the chord (only the root
  * fourth root) is a voiced step, so it lights rather than dimming. Asserting
  * "the ruler is present" means the ruler's OTHER marks are there — a voiced
  * step at a quartile position legitimately replaces the dim mark. */
-press(BTN.SEL);
+/* HOME, not SEL: SEL is SCALE's door and a second press turns its page (one page
+ * in, that is staying) - docs/UI_GRAMMAR.md rule 4. */
+press(BTN.HOME);
 step(200);
 const rulerDim = dim() & STEP_RULER, rulerLit = lit() & STEP_RULER;
 check((rulerDim | rulerLit) === STEP_RULER && rulerDim !== 0,

@@ -494,8 +494,10 @@ key 25 up
 wait 30
 expect lit_keys 0x2000
 expect dim_keys 0x7f8007f
-# leaving the page hands the bed back to the pattern, step ruler and all
-tap SEL
+# leaving the page hands the bed back to the pattern, step ruler and all.
+# HOME is the way out now: SEL is SCALE's door and a second press turns its page
+# (one page in, that means staying), docs/UI_GRAMMAR.md rule 4.
+tap HOME
 wait 40
 expect mode 0
 expect dim_keys 0x204081     # keys 0,7,14,21 of the bed
