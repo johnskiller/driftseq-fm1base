@@ -105,8 +105,6 @@ static void cv_frame_begin(void)
 
 static void ui_draw(void)
 {
-    if (jam_menu && jam_menu_ttl && --jam_menu_ttl == 0)
-        jam_menu_close();                        /* 3 s idle: the footer is a readout again */
     if (pz_ttl) {                             /* the PRESET popup owns the screen
                                                * while it is up: it IS the answer
                                                * to "which voice am I on". It draws
@@ -116,6 +114,15 @@ static void ui_draw(void)
                                                * never a half-updated page. */
         pz_ttl--;
         preset_draw();
+        return;
+    }
+    if (jam_menu) {                           /* a decision popup, same apparatus as
+                                               * the PRESET one: it replaces the page
+                                               * rather than sitting on it, because a
+                                               * menu that shares the screen with the
+                                               * thing it is about is a menu you read
+                                               * two ways (docs/UI_GRAMMAR.md) */
+        jam_menu_draw();
         return;
     }
     cv_begin(240, 224, C_BLACK);              /* painters blit their own bands */
@@ -573,7 +580,7 @@ static void ui_leds(uint32_t *litK, uint32_t *dimK, uint32_t *litB, uint32_t *di
      * cursor-step toggle, not an armed mode, so it has no idle light) */
     if (eng.playing)   *litB |= 1u << B_PLAY;
     if (focus_layer) *litB |= 1u << B_EDIT;
-    if (jam_menu) *litB |= 1u << B_SAVE;     /* the SAVE menu is open: SAVE is live */
+    if (jam_menu) *litB |= 1u << B_SAVE;     /* the menu is open: SAVE is what opened it */
     if (ui_mode == M_TRKSET) *litB |= 1u << B_ENV;   /* this page's door is ENV */
 }
 

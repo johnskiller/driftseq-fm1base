@@ -359,15 +359,37 @@ check(page.some((v, i) => v !== home[i]), 'GLO+HOME opens a different screen');
     const p2e = mk();
     check(footWin(p2e, 60, 120) > 20, 'footer K2 says ON/OFF on the switch row', footWin(p2e, 60, 120) + ' px');
 
-    /* SAVE connects the picked device. SAVE must be a PRESS ACROSS FRAMES:
-     * web_buttons is a level, and a press and release in one step is a level that
-     * never changed. */
+    /* K2 right connects the picked device (docs/UI_GRAMMAR.md rule 1: a device
+     * row's value is the link, and K2 is the knob that changes a value). SAVE is
+     * no longer a confirm key anywhere, so it must NOT connect anything. */
     enc(3, 1);                               /* onto the device row */
     const before = mk();
-    M.web_buttons(1 << 7); step(100);
+    M.web_buttons(1 << 7); step(100);        /* SAVE: opens the JAM menu, connects nothing */
+    M.web_buttons(0); step(60);
+    const menuUp = mk();
+    check(menuUp.some((v, i) => v !== before[i]), 'SAVE opens the jam menu (it does not connect)');
+    /* cancel with OCT-, not HOME: on this page HOME is the door out of GLOBAL,
+     * and a wasm frame can carry both edges, so a HOME here would leave the page
+     * and prove nothing about the menu. (tests/jam.txt asserts the HOME case,
+     * where the host can give it a clean press and release.) */
+    M.web_buttons(1 << 12); step(40);        /* B_OCTDN (12): cancel */
     M.web_buttons(0); step(200);
+    const afterSave = mk();
+    {
+        /* does the page come back at all? the header is the cheapest tell: page 2
+         * draws its state word there and page 1 draws three labels.
+         * (host's tests/jam.txt asserts the modes; this is the pixel view.) */
+        let hdr2 = 0, hdr1 = 0;
+        for (let y = 26; y < 120; y++) {
+            if (px(afterSave, 8, y) === ROWBAND) hdr2++;
+            if (px(before, 8, y) === ROWBAND) hdr1++;
+        }
+        check(hdr2 === hdr1, 'cancelling the menu puts the same page back',
+              hdr1 + ' -> ' + hdr2 + ' band rows');
+    }
+    enc(4, 1); step(300);                    /* EN_K2 right: connect */
     const after = mk();
-    check(after.some((v, i) => v !== before[i]), 'SAVE changes the page (connect asked for)');
+    check(after.some((v, i) => v !== before[i]), 'K2 right asks for the connect');
     /* The page flips the hint as soon as the connect is ASKED for (btdev_busy is
      * true from CONNECTING on), and the state word changes again at READY. */
     const hint = (fb) => {
@@ -378,7 +400,7 @@ check(page.some((v, i) => v !== home[i]), 'GLO+HOME opens a different screen');
         }
         return bits.join('|');
     };
-    check(hint(before) !== hint(after), 'the hint flips from CONNECT to LET GO on SAVE',
+    check(hint(before) !== hint(after), 'the hint flips from CONNECT to LET GO on the connect',
           hint(before).length + ' -> ' + hint(after).length + ' ink px');
     step(1400);                              /* the stand-in takes 0.3 s */
     const linked = mk();
@@ -394,8 +416,13 @@ check(page.some((v, i) => v !== home[i]), 'GLO+HOME opens a different screen');
         }
         return n;
     };
-    check(stateWord(linked) !== stateWord(after), 'the state word reports the link coming up',
-          stateWord(after) + ' -> ' + stateWord(linked) + ' px');
+    /* The state word says what the LINK is doing, and it has to be there at all
+     * once the link is up: "CONNECTED / <name>" is longer than "PICK A DEVICE"
+     * was, so the ink is a cheap tell that the line is not blank. What it says is
+     * asserted in words by tests/global.txt (ble_dev reaches READY); this is the
+     * pixel fact that the page has something to say about the link. */
+    check(stateWord(linked) > 200, 'the state word is drawn once the link is up',
+          stateWord(linked) + ' px');
 
     /* Two-state rows are SLIDERS: left = OFF, right = ON, dead stops. The pixel
      * fact is that the value word CHANGES when the knob goes one way and does

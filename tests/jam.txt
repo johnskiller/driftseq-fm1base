@@ -1,0 +1,144 @@
+# The JAM decision popup (docs/UI_GRAMMAR.md rule 2).
+#
+# John 2026-10-31: "jam的save在按下后弹出四个选项，k1选择，oct+确认并关闭，oct-取消并关闭".
+#
+# What this file is about is the SHAPE of the interaction, not the four actions
+# (their engine behaviour is tests_engine's). The claims:
+#
+#   1. SAVE opens the menu. SAVE does not commit anything.
+#   2. K1 picks a row. K2..K4 do the same (whichever knob is under the hand).
+#   3. OCT+ commits the highlighted row and closes.
+#   4. OCT- closes and commits NOTHING -- asserted by comparing the ring's
+#      contents before and after, not merely by the menu being gone.
+#   5. HOME also cancels (the panel's universal back).
+#   6. Nothing expires. A menu that closes itself after a few seconds is a menu
+#      you can lose a decision to.
+#   7. With no menu up, OCT+/- are the octave keys again.
+#
+# Ring contents are read through `jam_used`: how much the ring has taken. 0 means
+# the keys auditioned only.
+
+wait 600
+turn SELECT 0
+tap SEL                           # SCALE page, so the keybed records into the ring
+wait 20
+expect jam_used 0
+
+# --- nothing is decided by opening it ---
+expect jam_menu 0
+tap SAVE
+wait 20
+expect jam_menu 1
+expect jam_sel 0                  # MERGE
+expect jam_used 0                 # opening a menu changes nothing
+
+# --- SAVE no longer confirms: pressing it again does nothing ---
+tap SAVE
+wait 20
+expect jam_menu 1                 # still up, still on MERGE
+expect jam_sel 0
+expect jam_used 0
+
+# --- K1 picks. The menu CYCLES: four options on one knob, and wrapping is what
+#     makes "one turn = the next one" true at the ends too. (A settings-page row
+#     dead-stops because it is a position in a list that exists outside the menu;
+#     a popup's options are the whole world while it is up.) ---
+tap SEL                           # leave the page so the knob is ui_edit's
+wait 20
+turn K1 1
+wait 5
+expect jam_sel 1                  # REPLACE
+turn K1 1
+wait 5
+expect jam_sel 2                  # NEW TRK
+turn K1 1
+wait 5
+expect jam_sel 3                  # CLEAR
+turn K1 1
+wait 5
+expect jam_sel 0                  # CLEAR -> wraps to MERGE
+turn K1 -1
+wait 5
+expect jam_sel 3                  # and back the other way
+turn K1 1
+wait 5
+expect jam_sel 0                  # forward again wraps too
+
+# --- OCT- cancels, and commits nothing ---
+turn K1 1
+wait 5
+expect jam_sel 1                  # REPLACE, the destructive one
+tap OCT-
+wait 20
+expect jam_menu 0                 # closed
+expect jam_used 0                 # and nothing happened
+
+# --- HOME also cancels ---
+tap SAVE
+wait 20
+expect jam_menu 1
+expect jam_sel 0                  # every SAVE opens at MERGE, not where the last one ended
+turn K1 2
+wait 5
+expect jam_sel 2
+tap HOME
+wait 20
+expect jam_menu 0
+expect jam_used 0
+
+# --- no timeout: leave it up for far longer than the old 180 frames ---
+tap SAVE
+wait 20
+expect jam_menu 1
+wait 400                          # 400 frames: the old menu closed itself at 180
+expect jam_menu 1                 # still up: a decision does not expire
+turn K1 1
+wait 5
+expect jam_sel 1                  # and the highlight survived the wait
+tap OCT-
+wait 20
+expect jam_menu 0
+
+# --- OCT+ commits. The ring is empty, so MERGE has nothing to merge into a
+#     pattern; what is asserted is that the menu CLOSED and the action ran. ---
+tap SAVE
+wait 20
+expect jam_menu 1
+tap OCT+
+wait 20
+expect jam_menu 0                 # closed by the confirm
+
+# --- with no menu up, the octave keys are the octave keys again ---
+# (key_shift is the keybed's octave; OCT+ moves it by 12)
+expect key_shift 0
+tap OCT+
+wait 20
+expect key_shift 12
+tap OCT-
+wait 20
+expect key_shift 0
+
+# --- the popup outranks the page under it ---
+# This is the regression the probe found: with the jam menu up on GLOBAL page 2,
+# HOME was eaten by the page's own HOME handler (global_button ran first), so the
+# menu could not be dismissed at all. A popup IS the interaction while it is up.
+press GLO
+press HOME
+release HOME
+release GLO
+wait 60
+expect mode 5                     # GLOBAL
+press GLO
+press HOME
+release HOME
+release GLO
+wait 60
+expect gl_page 1                  # page 2, the radio
+tap SAVE
+wait 20
+expect jam_menu 1
+tap HOME
+wait 20
+expect jam_menu 0                 # HOME cancelled the menu...
+expect mode 5                     # ...and did NOT leave the page
+expect gl_page 1                  # ...nor flip it back to page 1

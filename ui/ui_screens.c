@@ -277,7 +277,7 @@ static void kn_poke(uint8_t enc)
  * closes, and 3 s of no input closes it (the footer is a readout, not a
  * resident layer). The engine call sits in jam_menu_act(); the menu itself
  * only moves a cursor so probes can assert on state, not pixels alone.
- * State + JAM_MENU_FRAMES live in ui_glue.c (declared before both callers). */
+ * State lives in ui_glue.c (declared before both callers). */
 static const char *const JAM_MENU_LABELS[4] = {"MERGE", "REPLACE", "NEW TRK", "CLEAR"};
 
 /* the menu's actions, in jam_menu_sel order. NEW TRK also selects the track
@@ -305,7 +305,53 @@ static void jam_menu_act(uint8_t which)
     }
 }
 
-static void jam_menu_close(void) { jam_menu = 0; jam_menu_ttl = 0; }
+static void jam_menu_close(void) { jam_menu = 0; }
+
+/* The JAM menu as a decision popup (docs/UI_GRAMMAR.md rule 2): the same
+ * apparatus as the PRESET popup - it replaces the page, it owns the screen, it
+ * paints its own footer - rather than the footer band it used to be.
+ *
+ * Why it moved: the four options were drawn in the footer, which is a 24 px strip
+ * with five 56 px columns, so they competed for space with the page above them and
+ * the highlight had to be an inverted box squeezed around a word. A decision gets
+ * a decision's room, and the same room the PRESET popup already had.
+ *
+ * K1 picks, OCT+ = OK, OCT- = Cancel. The footer says so, because a popup whose
+ * only exits are two unlabelled keys is a puzzle. */
+static void jam_menu_draw(void)
+{
+    int i, y, w;
+    cv_begin(240, 216, RGB565(16, 16, 21));
+
+    cv_text(8, 6, &FONT_T, "JAM", C_AMB);
+    cv_text(240 - 8 - (int)cv_text_w(&FONT_T, "SAVE TO WHERE?"), 6, &FONT_T,
+            "SAVE TO WHERE?", RGB565(96, 96, 110));
+
+    /* Four rows, 34 px apart, the highlighted one in FONT_M and amber: size and
+     * colour both, so the selection reads from arm's length and without colour
+     * vision alone. */
+    for (i = 0; i < 4; i++) {
+        y = 34 + i * 34;
+        w = (int)cv_text_w(&FONT_M, JAM_MENU_LABELS[i]);
+        if (i == (int)jam_menu_sel) {
+            cv_rect(6, y - 4, 228, 30, RGB565(46, 40, 26));
+            cv_rect(6, y - 4, 3, 30, C_AMB);        /* the same amber rule as a GLOBAL row */
+            cv_text((240 - w) / 2, y, &FONT_M, JAM_MENU_LABELS[i], BRIGHTTX);
+        } else {
+            cv_text((240 - w) / 2, y, &FONT_M, JAM_MENU_LABELS[i],
+                    RGB565(120, 120, 134));
+        }
+    }
+    cv_blit(0, 0);
+
+    /* its own footer: the two ways out, named. No "SAVE: OK" - SAVE does not
+     * confirm anything any more. */
+    cv_begin(240, 24, TB_BG);
+    cv_text(8, 6, &FONT_T, "K1 PICK", FOOT_GRAY);
+    cv_text(104, 6, &FONT_T, "OCT+ OK", C_AMB);
+    cv_text(176, 6, &FONT_T, "OCT- ESC", FOOT_GRAY);
+    cv_blit(0, 216);
+}
 
 /* ---- footer (prefix-free, fixed columns, 10px) ----
  * The footer is the contract "手不用看旋钮就知道在改什么" (03 §0), so the GLO
@@ -325,16 +371,6 @@ static void ui_draw_footer(void)
     static const uint8_t FX[5] = {8, 64, 120, 176, 204};
     uint8_t k;
     cv_begin(240, 24, TB_BG);
-    if (jam_menu) {                              /* the SAVE menu owns the footer */
-        for (k = 0; k < 4; k++) {
-            if (k == jam_menu_sel)
-                cv_rect(FX[k] - 3, 0, 56, 24, TB_TX);       /* highlight: inverted box */
-            cv_text(FX[k], 6, &FONT_T, JAM_MENU_LABELS[k],
-                    k == jam_menu_sel ? TB_BG : FOOT_GRAY);
-        }
-        cv_blit(0, 216);
-        return;
-    }
     if (ui_mode == M_GRID && is_drum_trk() && focus_layer) {
         for (k = 0; k < 3; k++)
             cv_text(FX[k], 6, &FONT_T, FOOT_DRUM[k], C_AMB);

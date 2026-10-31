@@ -57,8 +57,9 @@ static uint8_t key_white_id(uint8_t ord);
 static uint8_t key_black_id(uint8_t ord);
 
 /* the SAVE (jam) menu lives in ui_screens.c next to the footer that draws it;
- * ui.c's ui_draw ticks its timeout and ui_edit.c's routing opens/works it */
-#define JAM_MENU_FRAMES 180u
+ * ui_edit.c's routing opens/works it. It has no idle timeout any more: a menu
+ * with options that can silently expire is exactly what docs/UI_GRAMMAR.md
+ * forbids (John 2026-10-31: OCT+ 确认并关闭, OCT- 取消并关闭). */
 /* GLOBAL's page lives here rather than in ui_global.c because ui_screens.c is
  * compiled BEFORE ui_global.c in the unity build (app.c includes ui_screens at
  * 644, ui_global at 648) and the shared footer painter needs to know which page
@@ -78,7 +79,6 @@ static uint8_t gl_page;                  /* GLOBAL: 0 = settings, 1 = the radio 
 static uint8_t gl_row;                   /* the row K1 is on (both pages) */
 static uint8_t jam_menu;
 static uint8_t jam_menu_sel;
-static uint16_t jam_menu_ttl;
 /* The GLOBAL page (ui_global.c, included after every other page because ui.c
  * and ui_edit.c both call into it while ui_global itself needs their state:
  * glo_held, key_shift, midi_vel, txt_*, ui_draw_footer). */
@@ -99,6 +99,7 @@ static void preset_text(char *b, uint8_t prog, uint8_t is_kit);
 
 static void jam_menu_act(uint8_t which);
 static void jam_menu_close(void);
+static void jam_menu_draw(void);
 
 /* text builders (ui_text.c) */
 static char *txt_next(void);

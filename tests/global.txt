@@ -255,25 +255,39 @@ turn K1 -9
 wait 10
 expect gl_row 0
 expect gl2_sel -1
-# K2 on a device row has nothing to turn: connecting is SAVE, not a number
+# A device row's value IS the link, and K2 is the knob that changes a value on a
+# settings page (docs/UI_GRAMMAR.md rule 1). The LIST is K1's job and the VERB is
+# K2's: picking a device with K1 is navigation, turning K2 is the commitment.
 turn K1 1
 wait 10
-turn K2 3
-wait 10
 expect gl2_sel 0
-expect ble_dev 1
-# SAVE connects the picked device, and SAVE again lets it go. Connecting takes
-# 0.3 s in the stand-in; READY (4) is the only state in which MIDI flows.
-tap SAVE
+expect ble_dev 1                 # picked, and still not connected
+# K2 RIGHT connects the picked device. Connecting takes 0.3 s in the stand-in;
+# READY (4) is the only state in which MIDI flows.
+turn K2 1
 wait 60
 expect ble_dev 2
 wait 500
 expect ble_dev 4
-tap SAVE
+# right again on an established link is not a second connect: the call is a
+# no-op, and the link stays up (a re-ask would drop and re-raise it)
+turn K2 1
+wait 100
+expect ble_dev 4
+# K2 LEFT lets it go: the page looks again
+turn K2 -1
 wait 200
-expect ble_dev 1                 # let go: the page looks again
+expect ble_dev 1
 wait 500
 expect gl2_n 1
+# and left again with nothing to let go is a no-op too, not a second goodbye
+expect gl_row 1
+expect gl_ble 1
+turn K2 -1
+wait 100
+expect gl_row 1
+expect gl_ble 1
+expect ble_dev 1
 # the scan belongs to this page: the other half of GLOBAL does not scan either
 press GLO
 press HOME

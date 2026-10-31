@@ -554,7 +554,6 @@ static void ui_encoder(uint8_t enc, int8_t det)
             if (sel < 0) sel = 3;
             if (sel > 3) sel = 0;
             jam_menu_sel = (uint8_t)sel;
-            jam_menu_ttl = JAM_MENU_FRAMES;      /* touching the menu re-arms the timeout */
         }
         return;
     }
@@ -613,6 +612,31 @@ static void ui_encoder(uint8_t enc, int8_t det)
 static void ui_button(uint8_t btn, uint8_t down, uint8_t released)
 {
     (void)down;
+    /* A popup outranks the page it is over, because the popup IS the interaction
+     * while it is up (docs/UI_GRAMMAR.md). This has to be the FIRST thing checked:
+     * it used to sit after global_button below, so on GLOBAL page 2 a HOME that
+     * was meant to cancel the jam menu was eaten by the page's own HOME handler
+     * and the menu could not be dismissed at all - the probe caught it as "the
+     * page did not come back".
+     *
+     * OK / Cancel, and only those: OCT+ commits and closes, OCT- closes and
+     * commits nothing, HOME is the panel's universal back and cancels too. SAVE
+     * is NOT a confirm key (rule 3) - pressing it again while the menu is up does
+     * nothing, rather than acting on whatever happens to be highlighted.
+     *
+     * These two buttons are the octave keys when no menu is up; a menu makes them
+     * OK/Cancel and nothing else changes. */
+    if (jam_menu) {
+        if (released) {
+            if (btn == B_OCTUP) {
+                jam_menu_act(jam_menu_sel);
+                jam_menu_close();
+            } else if (btn == B_OCTDN || btn == B_HOME) {
+                jam_menu_close();
+            }
+        }
+        return;
+    }
     /* GLO+HOME opens GLOBAL on the PRESS edge, which is the only edge that can
      * see the chord: GLO never reaches ui_button (ui_input tracks it itself),
      * and by the release the player may already have let GLO go. So this is
@@ -626,15 +650,6 @@ static void ui_button(uint8_t btn, uint8_t down, uint8_t released)
         return;                                   /* SEL/the SCALE page consumed it */
     if (trkset_button(btn))
         return;                                   /* ENV (toggle) + leaves */
-    if (jam_menu) {                               /* the menu owns SAVE/HOME until it closes */
-        if (btn == B_SAVE) {
-            jam_menu_act(jam_menu_sel);
-            jam_menu_close();
-        } else if (btn == B_HOME) {
-            jam_menu_close();
-        }
-        return;
-    }
     switch (btn) {
     case B_HOME:                                  /* emu: HOME toggles HOME <-> GRID */
         ui_mode = (ui_mode == M_HOME) ? M_GRID : M_HOME;
@@ -648,11 +663,11 @@ static void ui_button(uint8_t btn, uint8_t down, uint8_t released)
         else ds_play(&eng);
         break;
     case B_SAVE:
-        if (global_save(btn))
-            break;                                /* GLOBAL page 2: connect/let go */
+        /* SAVE opens the menu; it never confirms one (docs/UI_GRAMMAR.md). GLOBAL
+         * page 2 no longer claims it: its link moved onto K2, where a row's value
+         * belongs. */
         jam_menu = 1;                             /* every SAVE opens the choice (no silent default) */
         jam_menu_sel = 0;
-        jam_menu_ttl = JAM_MENU_FRAMES;
         break;
     case B_REC:                                    /* v1: REC = cursor step toggle (emu) */
         {   uint8_t on = TRK()->steps[cursor].on;

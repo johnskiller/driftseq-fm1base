@@ -230,32 +230,41 @@ static int gl2_dev(void)
     return gl2_link() ? 0 : (int)gl_row - 1;
 }
 
-/* SAVE on this page connects to the picked device, or lets a connected one go -
- * the same verb btdev_save speaks. The page owns it here rather than ui_button's
- * SAVE (which opens the jam menu): a menu on top of the scan list would hide the
- * thing the press is about. */
-static void gl2_save(void)
+/* The device row's verb, on K2 like every other way of changing a value on a
+ * settings page (docs/UI_GRAMMAR.md: 设定页面 K1 row, K2 value). Right connects
+ * the picked device, left lets a connected one go.
+ *
+ * It used to be SAVE. John 2026-10-31: "ble连接不应该用save按钮，而应该用k2来连接/断开".
+ * The reason it is K2 and not merely a moved key: connecting is what that row's
+ * value IS. The row reads CONNECTED / LET GO / PAIRING, and K2 is the knob that
+ * changes a row's value on every other page.
+ *
+ * A direction that does not apply does nothing and says nothing: turning right
+ * on an established link is not a second connect, and turning left on an idle
+ * one is not a second goodbye. Re-asking the radio for a state it already has is
+ * what the two-state rows elsewhere (GM, the Bluetooth switch) avoid too. */
+static void gl2_verb(int8_t det)
 {
     int ev;
     if (gl_row == GL2_BT || set_ble_off()) {
-        /* nothing to connect: the switch is not a device */
-        app_say("BLUETOOTH", set_ble_off() ? "OFF" : "PICK A DEVICE");
+        /* the switch row is the radio's, not a device's; K2 on it is gl_bt_set's */
         return;
     }
-    if (gl2_link()) {                    /* the link row: SAVE lets it go */
+    if (det > 0) {
+        if (gl2_link())
+            return;                      /* already linked: not a second connect */
+        btdev_choose((uint8_t)gl2_dev());
         ev = btdev_save();
-        app_say("BLE DEVICE", btdev_word(ev));
-        ui.redraw = 1;
-        return;
+        if (ev == BTDEV_CONNECTING)
+            app_say("BLE DEVICE", btdev_name());
+        else
+            app_say("BLE DEVICE", btdev_word(ev));
+    } else {
+        if (!gl2_link())
+            return;                      /* nothing to let go */
+        ev = btdev_save();
+        app_say("BLE DEVICE", ev == BTDEV_LET_GO ? "DISCONNECTED" : btdev_word(ev));
     }
-    btdev_choose((uint8_t)gl2_dev());
-    ev = btdev_save();
-    if (ev == BTDEV_CONNECTING)
-        app_say("BLE DEVICE", btdev_name());
-    else if (ev == BTDEV_LET_GO)
-        app_say("BLE DEVICE", "DISCONNECTED");
-    else
-        app_say("BLE DEVICE", btdev_word(ev));
     ui.redraw = 1;
 }
 
@@ -311,6 +320,9 @@ static void global_encoder(uint8_t enc, int8_t det)
             int on = gl_want(!set_ble_off(), det);
             if (on != (set_ble_off() ? 0 : 1))
                 gl_bt_set(on);
+        } else {
+            gl2_verb(det);               /* a device row: its value is the link
+                                          * itself (right connect, left let go) */
         }
         return;
     }
@@ -357,17 +369,6 @@ static uint8_t global_key(uint8_t key, uint8_t down)
         ds_live_on(&eng, sel_track, (uint8_t)note, midi_vel);
     else
         ds_live_off(&eng, sel_track, (uint8_t)note);
-    return 1;
-}
-
-/* SAVE on page 2 connects or disconnects; on page 1 it is the jam menu's, as on
- * every other page. Same shape as global_button: the page claims the button or
- * refuses it, and ui_button carries on when it refuses. */
-static uint8_t global_save(uint8_t btn)
-{
-    if (ui_mode != M_GLOBAL || !gl_page || btn != B_SAVE)
-        return 0;
-    gl2_save();
     return 1;
 }
 
@@ -698,8 +699,18 @@ static void global_frame(void)
      * there and SAVE would connect to the wrong device. */
     r = gl2_rows();
     if (r != gl2_was_n) {
+        /* Clamp to the last row, but never onto row 0 by accident: row 0 is the
+         * radio switch, and K2 on it turns the radio OFF. A player who has just
+         * let a link go has his hand on K2 and his eye on a device row; pulling
+         * the cursor onto the switch means his next detent kills Bluetooth
+         * instead of picking another device (found by the test that turns K2
+         * left twice: the second turn, meant as a no-op, switched the radio off).
+         * So the floor is 1 whenever there is a device row to sit on. */
+        int floor = (r > 1) ? 1 : 0;
         if ((int)gl_row > (int)r - 1)
             gl_row = (uint8_t)((int)r - 1);
+        if ((int)gl_row < floor)
+            gl_row = (uint8_t)floor;
         if (gl_row != GL2_BT)
             btdev_choose((uint8_t)gl2_dev());
         gl2_was_n = r;
