@@ -1,0 +1,134 @@
+# SAVE: the take is decided by PLAYING, not by the clock
+#
+# John 2026-10-31: "hero页面jam还是没能保存。jam之后选save，replace，然后seq看到所有
+# step都是空的"
+#
+# Three faults, and the third is the one that emptied the track:
+#
+#   1. WHICH PASS IS THE TAKE. ds_jam_save_* used to compute it at save time as
+#      jam_abs >> 6 - "whatever pass the wall clock is in when the player presses
+#      SAVE". The ring is 64 steps of 1/16; at 120 BPM a step is 125 ms, so a pass
+#      is exactly EIGHT SECONDS. Play a phrase, take a breath, reach for SAVE, and
+#      every note had been rolled into "the previous pass" and was skipped as the
+#      previous take's residue. The target track came out empty. Nothing expired
+#      because nothing was timed out - the take's identity was derived from the
+#      clock instead of from the playing.
+#      Fix: state.jam_pass, stamped by ds_jam_capture when a note lands.
+#
+#   2. SAVE inside a popup did nothing. "SAVE is not a confirm key" (rule 3) was
+#      implemented as "SAVE is inert while a popup is up", so a second press
+#      vanished. It now replaces the popup with its own, opening on SAFE.
+#
+#   3. Keys pressed while a popup is up were still captured into the ring - the
+#      decision is about the ring's contents, and a hand brushing the keybed after
+#      the player stopped playing must not land in the take being saved. They still
+#      SOUND. This went through two files: the first guard sat in scale_key_hook
+#      and only covered the CHORD layer, while panel_key_handler has its own
+#      audition path that captures by itself. One entry point now: sc_jam().
+#
+# This file tests all three against a track that is genuinely empty (track 5),
+# because "ts_notes did not change" cannot prove anything on a track that already
+# has notes - the first version of this test used track 4 (4 notes) and read a
+# pass for failure.
+
+tap SEQ
+wait 20
+turn SELECT 5
+wait 40
+expect sel_track 5
+expect ts_notes 0                  # track 5 is the first empty melodic track
+
+# --- 3. a key pressed while the popup is up sounds but is not captured ---
+tap SEL
+wait 20
+expect jam_used 0
+expect gm_noteons 0
+tap SAVE
+wait 40
+expect jam_menu 1
+key 14 down 100
+wait 200
+expect gm_noteons 1                # it SOUNDS: this is an instrument, not a mode
+expect jam_used 0                  # but the decision's take does not gain a note
+key 14 up 100
+wait 100
+expect jam_used 0
+tap OCT-                           # cancel; nothing was decided
+wait 40
+expect jam_menu 0
+
+# --- 2. SAVE still works while a popup is up (it replaces it, on SAFE) ---
+# The highlight must be moved OFF row 0 first: a popup that ignores the second
+# SAVE and one that reopens on SAFE look identical while the cursor is already
+# on SAFE. (First draft asserted only jam_sel 0 and passed against the broken
+# build - the test was measuring the safe row, not the press.)
+tap SAVE
+wait 40
+expect jam_menu 1
+turn K2 2
+wait 20
+expect jam_sel 2                  # NEW TRK, so the row is somewhere non-default
+tap SAVE
+wait 40
+expect jam_menu 1                  # still up - SAVE never confirms
+expect jam_sel 0                   # and the fresh one opened on MERGE, the safe row
+tap OCT-
+wait 40
+expect jam_menu 0
+
+# --- 1. the take survives a wait longer than one pass (8 s at 120 BPM) ---
+# Without the fix this is the bug: the note is captured in pass 0, the clock
+# rolls to pass 1 while the player thinks, and REPLACE saves nothing.
+tap HOME
+wait 80
+key 14 down 100
+wait 200
+key 14 up 100
+wait 200
+expect jam_used 1                  # the ring took the note
+wait 9000                          # NINE SECONDS: past the 64-step wrap
+expect jam_used 1                  # still the take (waiting does not expire it)
+tap SAVE
+wait 40
+expect jam_menu 1
+turn K2 1
+wait 20
+expect jam_sel 1                   # REPLACE
+tap OCT+
+wait 60
+expect jam_menu 0
+expect jam_notes 0                 # the ring handed the take over and reset
+expect ts_notes 1                  # AND THE TRACK HAS IT
+
+# --- and the wait does not resurrect an older take ---
+# John's other decision (2026-10-28) still holds: a later phrase replaces an
+# earlier one, it does not accumulate. Play one phrase, wait past the wrap, play a
+# second, save: only the second is in the track.
+tap ENV
+wait 40
+expect mode 4
+turn K1 -9
+wait 40
+expect ts_notes 1
+tap SEQ
+wait 40
+turn SELECT 6
+wait 40
+expect ts_notes 0
+tap HOME
+wait 80
+key 14 down 100                   # phrase one: C5 (key 14 = note 67)
+wait 200
+key 14 up 100
+wait 9100                          # past the wrap: that phrase is now "older"
+key 16 down 100                    # phrase two: E5 (note 69)
+wait 200
+key 16 up 100
+wait 200
+tap SAVE
+wait 40
+turn K2 1
+wait 20
+tap OCT+
+wait 60
+expect ts_notes 1                  # ONE phrase, not two: the take is the later pass

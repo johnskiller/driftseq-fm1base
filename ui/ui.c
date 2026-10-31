@@ -54,6 +54,9 @@ static uint8_t sort_vs[4][3];
 static void edit_key_handler(uint8_t key, uint8_t down);
 /* ui_scale.c (included last): the SCALE page + one-finger chords */
 static uint8_t scale_key_hook(uint8_t key, uint8_t down);
+/* ui_scale.c's one jam entry point (ui_scale.c is compiled after this file in
+ * the unity build, so the plain audition path below needs it declared here). */
+static void    sc_jam(uint8_t note, uint8_t vel, uint8_t down);
 static void scale_encoder(uint8_t enc, int8_t det);
 static uint8_t scale_button(uint8_t btn);
 static void draw_scale(void);
@@ -271,11 +274,11 @@ static void panel_key_handler(uint8_t key, uint8_t down)
         if (down) {
             ds_live_on(&eng, sel_track, (uint8_t)note, midi_vel);
             if (jam)
-                ds_jam_capture(&eng, (uint8_t)note, midi_vel, 1);   /* always armed: jam is not a mode */
+                sc_jam((uint8_t)note, midi_vel, 1);   /* always armed: jam is not a mode */
         } else {
             ds_live_off(&eng, sel_track, (uint8_t)note);
             if (jam)
-                ds_jam_capture(&eng, (uint8_t)note, midi_vel, 0);
+                sc_jam((uint8_t)note, midi_vel, 0);
         }
         return;
     }
@@ -458,10 +461,10 @@ static void ui_midi_note(int32_t note, uint8_t down, uint8_t vel)
             panel_key_handler((uint8_t)key, down);          /* the whole grid behaviour */
         else if (down) {
             ds_live_on(&eng, sel_track, (uint8_t)note, midi_vel);
-            ds_jam_capture(&eng, (uint8_t)note, midi_vel, 1);   /* out-of-bed notes jam too */
+            sc_jam((uint8_t)note, midi_vel, 1);   /* out-of-bed notes jam too */
         } else {
             ds_live_off(&eng, sel_track, (uint8_t)note);
-            ds_jam_capture(&eng, (uint8_t)note, midi_vel, 0);
+            sc_jam((uint8_t)note, midi_vel, 0);
         }
     }
 }

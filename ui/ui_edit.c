@@ -636,6 +636,17 @@ static void ui_button(uint8_t btn, uint8_t down, uint8_t released)
      * These two buttons are the octave keys when no menu is up; a menu makes them
      * OK/Cancel and nothing else changes. */
     if (pm_up()) {
+        /* SAVE is not a confirm key, but it is still SAVE: pressing it while a
+         * decision is up used to vanish into this return, and the player reads
+         * that as "SAVE does nothing". It replaces the popup with its own (the
+         * newest question wins) and opens on SAFE. One rule, no exception to
+         * remember: SAVE opens the SAVE popup, from anywhere, including on top
+         * of another popup. */
+        if (btn == B_SAVE) {
+            if (released)
+                popup_open(PM_JAM);
+            return;
+        }
         if (released) {
             if (btn == B_OCTUP) {
                 popup_act(pm_sel);

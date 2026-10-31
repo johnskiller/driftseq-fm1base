@@ -655,6 +655,7 @@ void ds_jam_reset(ds_state *s)
     s->jam_held_n = 0;
     s->jam_abs = 0;
     s->jam_acc = 0.0;
+    s->jam_pass = 0;                         /* the take is the CURRENT pass (see jam_pass) */
     memset(s->jam_slot_pass, 0xFF, sizeof s->jam_slot_pass);   /* no slot in pass 0 yet */
 }
 
@@ -684,6 +685,9 @@ void ds_jam_capture(ds_state *s, uint8_t note, uint8_t vel, uint8_t down)
             s->jam.steps[pos].on = 0;
         }
         s->jam_slot_pass[pos] = pass;
+        /* a hit is what makes a pass the take: the take follows the player, not
+         * the clock that happens to be running when they reach for SAVE */
+        s->jam_pass = pass;
         ds_voice_remove(&s->jam, pos, note);
         ds_voice_add(&s->jam, pos, note, vel, 1);
         for (i = 0; i < s->jam_held_n; i++)
@@ -751,7 +755,7 @@ int ds_jam_save_merge(ds_state *s, uint8_t trk)
 {
     ds_track *t;
     uint32_t k;
-    uint8_t vi, pass = (uint8_t)(s->jam_abs >> 6);
+    uint8_t vi, pass = s->jam_pass;      /* the take, not the clock: see jam_pass */
     if (trk >= DS_TRACKS) return -1;
     t = &s->pat.track[trk];
     /* save the CURRENT pass (the take): slots are stamped with the pass they were
@@ -789,7 +793,7 @@ int ds_jam_save_replace(ds_state *s, uint8_t trk)
                keep_mute = t->mute, keep_voice_mode = t->voice_mode, keep_swing = t->swing_amt;
         ds_track fresh;
         uint32_t k;
-        uint8_t vi, pass = (uint8_t)(s->jam_abs >> 6);
+        uint8_t vi, pass = s->jam_pass;   /* the take, not the clock */
         ds_clear_track(&fresh);
         fresh.channel = keep_channel; fresh.prog = keep_prog; fresh.route = keep_route;
         fresh.mute = keep_mute; fresh.voice_mode = keep_voice_mode;

@@ -383,3 +383,50 @@ KEYS, and for each, two separate questions (**SOUND** via `gm_noteons`,
 
 A page may sound without writing. A page must never write without sounding.
 Testing one of the two is exactly how both bugs hid.
+
+### The take belongs to the playing, not to the clock
+
+`ds_jam_save_*` decided which notes were "the take" by asking the wall clock:
+`pass = jam_abs >> 6` at the moment SAVE was pressed. The ring is 64 steps of
+1/16, so at 120 BPM a pass is **eight seconds**. Play a phrase, take a breath,
+reach for SAVE — and every note is now stamped with an older pass, which the
+save loop skips as "the previous take's residue". The track comes out empty.
+John: *"jam之后选save，replace，然后seq看到所有step都是空的"*.
+
+Nothing expired, and no timer was involved. The take's identity was derived from
+a clock that keeps running while the player thinks, instead of from the playing.
+
+`state.jam_pass` is the take: `ds_jam_capture` stamps it on every hit, and the
+saves read it. The ring therefore holds **the last phrase played**, however long
+the player then waits — which is what John's 2026-10-28 decision ("C E G, then a
+pass later A B A B, must save as A B A B alone") actually asked for. The earlier
+reading of that decision was "the take is whatever pass it is now", which also
+threw away the phrase the player meant to keep.
+
+**Two smaller faults found in the same report:**
+
+- **SAVE inside a popup did nothing.** Rule 3 ("SAVE is not a confirm key") had
+  been implemented as "SAVE is inert while a popup is up", so the second press
+  vanished. It now replaces the popup with its own, opening on SAFE: one rule,
+  no exception — SAVE opens the SAVE popup, from anywhere.
+- **Keys pressed while a popup is up were still captured into the ring.** The
+  popup is a decision about the ring's contents; a hand brushing the keybed after
+  the player stopped playing must not land in the take being saved. They still
+  SOUND. The guard first went into `scale_key_hook`, which only covers the CHORD
+  layer — `panel_key_handler` has its own audition path that captures by itself,
+  so half the keys still got through. One entry point now: `sc_jam()`, called by
+  every writer, exactly like `sc_write_ok()`.
+
+**Test consequences.**
+
+- `tests/jamsave.txt` (25) — the take survives a **9-second** wait (past the
+  64-step wrap), the wait does not resurrect an older take, SAVE replaces a popup
+  on SAFE (the highlight is moved to row 2 first: a popup that ignores SAVE and
+  one that reopens on SAFE look identical while the cursor is already on SAFE —
+  the first draft asserted only `jam_sel 0` and passed against the broken build),
+  and a key pressed while a popup is up sounds but is not captured.
+  Reverse-verified: wall-clock pass → 3 failures; inert SAVE → 2; capture during
+  popup → 7.
+- The test uses **track 5**, not track 4: "ts_notes did not change" proves nothing
+  on a track that already has notes (track 4 has four), and the first version of
+  this file read that as a pass for the bug.

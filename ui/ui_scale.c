@@ -145,6 +145,25 @@ static uint8_t sc_write_ok(void)
     return ui_mode == M_GRID || ui_mode == M_SCALE;
 }
 
+/* THE ONE PLACE A NOTE ENTERS THE RING.
+ *
+ * A popup is a decision about the ring's contents, so while one is up the keys
+ * still sound but are not captured: a hand brushing the keybed after the player
+ * has stopped playing (and started deciding) must not land in the take they are
+ * about to MERGE. This was first written as a guard inside scale_key_hook, which
+ * only covered the CHORD layer -- the plain audition path in panel_key_handler
+ * captures on its own, so the guard missed half the keys. Same lesson as
+ * sc_write_ok(): one rule, one entry point, every writer calls it.
+ *
+ * TRACK SET is the other audition-only page and keeps its own exclusion at its
+ * call sites (it auditions a PROGRAM, not a performance).
+ */
+static void sc_jam(uint8_t note, uint8_t vel, uint8_t down)
+{
+    if (pm_up()) return;
+    ds_jam_capture(&eng, note, vel, down);
+}
+
 /* Write this gesture's pitches to the cursor step, then advance - the same
  * contract as the GRID's stepEntry (override the step, revive the gate, cursor
  * +1 dead stop), so the layer does not invent a second recording rule. Nothing
@@ -183,7 +202,7 @@ static void sc_apply(void)
             if (sc_tones[j] == sc_prev[i]) gone = 0;
         if (gone) {
             ds_live_off(&eng, sel_track, sc_prev[i]);
-            ds_jam_capture(&eng, sc_prev[i], midi_vel, 0);
+            sc_jam(sc_prev[i], midi_vel, 0);
         }
     }
     for (i = 0; i < sc_tones_n; i++) {
@@ -192,7 +211,7 @@ static void sc_apply(void)
             if (sc_prev[j] == sc_tones[i]) gone = 0;
         if (gone) {
             ds_live_on(&eng, sel_track, sc_tones[i], midi_vel);
-            ds_jam_capture(&eng, sc_tones[i], midi_vel, 1);
+            sc_jam(sc_tones[i], midi_vel, 1);
         }
     }
     sc_prev_n = sc_tones_n;
@@ -389,7 +408,7 @@ static uint8_t scale_key_hook(uint8_t key, uint8_t down)
         note = ui_snap(note);
         if (down) {
             ds_live_on(&eng, sel_track, (uint8_t)note, midi_vel);
-            ds_jam_capture(&eng, (uint8_t)note, midi_vel, 1);
+            sc_jam((uint8_t)note, midi_vel, 1);
             /* two sets, two jobs: sc_held is what the page NAMES (pitches
              * sounding), rel/cap is what the step will CONTAIN (pitches
              * pressed). A key whose snap lands on a pitch already down adds to
@@ -407,7 +426,7 @@ static uint8_t scale_key_hook(uint8_t key, uint8_t down)
             }
         } else {
             ds_live_off(&eng, sel_track, (uint8_t)note);
-            ds_jam_capture(&eng, (uint8_t)note, midi_vel, 0);
+            sc_jam((uint8_t)note, midi_vel, 0);
             for (i = 0; i < sc_held_n; i++)
                 if (sc_held[i] == (uint8_t)note) {
                     sc_held[i] = sc_held[--sc_held_n];

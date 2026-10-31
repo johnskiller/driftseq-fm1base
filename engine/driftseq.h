@@ -175,6 +175,15 @@ typedef struct {
                                               * that long can read as fresh once — harmless. */
     struct { uint8_t note; uint32_t on; } jam_held[8];
     uint8_t     jam_held_n;
+    /* WHICH PASS IS THE TAKE. It used to be derived at save time as
+     * jam_abs >> 6, i.e. "whatever pass the wall clock is in when the player
+     * presses SAVE". The ring is 64 steps and a sixteenth at 120 BPM is 125 ms,
+     * so a pass is 8 seconds: play a phrase, take a breath, press SAVE, and the
+     * whole take had been rolled into "an older pass" and was skipped -- the
+     * track came out empty (John 2026-10-31: "jam之后选save，replace，然后seq看到
+     * 所有step都是空的"). The take is decided by PLAYING, not by waiting, so the
+     * pass is the last one a note was captured in. */
+    uint8_t     jam_pass;                    /* the take's pass (jam_abs >> 6 when last hit) */
 } ds_state;
 
 /* rng */

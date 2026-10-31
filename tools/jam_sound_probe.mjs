@@ -74,11 +74,17 @@ const drain = () => {
 const onsOf = (pkts) => pkts.filter((k) => ((k >> 8) & 0xF0) === 0x90 && ((k >> 24) & 0x7F) > 0)
                            .map((k) => [((k >> 16) & 0x7F), ((k >> 24) & 0x7F)]);
 const btn = (mask) => { M.web_buttons(mask); settle(30); M.web_buttons(0); settle(30); };
-const keyVel = (k, vel) => { M.web_key(k, vel, 0); settle(260); M.web_key(k, 0, 0); settle(150); };
-/* 260ms hold: the emu's synthetic sense capture needs ~125ms before it emits
- * the ON event (8 pre-samples + the 48-sample capture) — a shorter hold gets
- * aborted by the release and the key never registers (a real finger is never
- * this fast). */
+/* The emu's key API is a LEVEL mask (web_keys), not per-key events, and its
+ * synthetic sense capture needs ~125 ms before it emits the ON edge (8
+ * pre-samples + the 48-sample capture). A shorter hold is aborted by the release
+ * and the key never registers; a real finger is never this fast. The previous
+ * version called M.web_key(k, vel, 0), which does not exist in the shipped wasm
+ * (it exports web_keys(mask)), so the key press silently did nothing and this
+ * probe failed as a product bug for two commits. */
+const keyVel = (k, vel) => {
+    M.web_keys(1 << k); settle(260);
+    M.web_keys(0); settle(150);
+};
 
 /* ---- setup: GRID, select track 5 (first empty melodic) ---- */
 settle(400);
@@ -104,7 +110,12 @@ settle(60); drain();
 /* ---- 3. SAVE -> MERGE ---- */
 btn(1 << 7);                                     /* SAVE: menu opens on any page */
 settle(60);
-btn(1 << 7);                                     /* confirm MERGE (sel defaults to 0) */
+/* OCT+ confirms (OCT- cancels). This probe used to confirm with a SECOND SAVE,
+ * which stopped confirming when docs/UI_GRAMMAR.md rule 3 made SAVE an opener
+ * rather than a confirm key - and a second SAVE now re-opens the menu on SAFE
+ * instead of doing nothing, so the take was never saved and this probe failed
+ * for two commits while reading like a product bug. */
+btn(1 << 12);                                    /* OCT+ = OK */
 settle(60);
 drain();
 
@@ -133,7 +144,7 @@ btn(1 << 7);                                     /* menu */
 settle(40);
 p.onMessage({ type: 'enc', role: 4, n: 1 });     /* K2 detent: sel -> REPLACE(1) */
 settle(40);
-btn(1 << 7);                                     /* confirm REPLACE */
+btn(1 << 12);                                    /* OCT+ = OK */
 settle(60); drain();
 btn(1 << 10);
 settle(2000);
