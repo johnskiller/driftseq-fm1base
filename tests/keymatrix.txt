@@ -1,0 +1,230 @@
+# Key matrix: every page, two questions
+#
+# This file exists because of a question John asked after two bugs shipped:
+# "为什么测试没有发现这些错误？"
+#
+# The answer was measurable: of 108 key-press sequences in the whole suite, 86
+# were on the SCALE page, 11 on GRID, and only 4 on the hero — and every one of
+# those asserted SCREEN state or grid cells. Nothing asserted that a key SOUNDS.
+# So a change that left the hero silent while looking exactly the same passed
+# the entire suite. The two faults (step record only working with CHORD KEYS on,
+# then the chord layer falling silent outside the grid pages) both lived in the
+# same untested cell: (page != SCALE/GRID) x (does it sound?) .
+#
+# The matrix makes that cell a first-class thing. Five pages, and for each, the
+# two claims that are NOT the same claim:
+#
+#   SOUND  - the key reaches the engine. Every page, always. This is the
+#            instrument, not a grid feature.
+#   WRITE  - the key is recorded into the pattern. GRID and SCALE only.
+#
+# A page can sound without writing (hero, ARP, TRACK SET) and must never write
+# without sounding. Testing one of the two is how the previous bugs hid.
+#
+# Order: the non-writing pages first, while step 0 still holds the demo's 304
+# (3 voices, first note 0x13). Once GRID writes, step 0 becomes 1091 and stays
+# there, so the writing pages are checked by the CURSOR moving as well as by the
+# cell - a write to a cell that already holds that chord is invisible in the
+# value but not in the cursor.
+
+tap SEQ
+wait 20
+turn SELECT 3
+wait 40
+expect ts_ch 0                     # a melody track: the chord layer owns its keys
+expect mode 1
+expect step0 304
+
+# --- CHORD KEYS on, MAJ, third selected: one key = four notes ---
+tap SEL
+wait 30
+turn K3 1
+wait 30
+turn K1 1
+wait 30
+key 24 down 60                     # a component key: without one the layer
+wait 60                            # deliberately plays the root alone
+key 24 up 60
+wait 60
+
+# --- ARP: sounds, does not write ---
+# The cursor is only K1's business on the GRID page; every section normalises it
+# there first, because a write in an earlier section leaves it advanced.
+tap SEQ
+wait 40
+turn K1 -9
+wait 40
+expect cursor 0
+tap ARP
+wait 60
+expect mode 2
+expect gm_noteons 0
+key 14 down 100
+wait 200
+expect gm_noteons 4                # the chord, on the ARP page
+key 14 up 100
+wait 200
+expect step0 304                   # untouched
+expect cursor 0
+
+# --- HOME (the hero): sounds, does not write ---
+tap SEQ
+wait 40
+turn K1 -9
+wait 40
+expect cursor 0
+tap HOME
+wait 80
+expect mode 0
+key 14 down 100
+wait 200
+expect gm_noteons 8
+key 14 up 100
+wait 200
+expect step0 304
+expect cursor 0
+
+# --- TRACK SET: sounds, does not write ---
+tap SEQ
+wait 40
+turn K1 -9
+wait 40
+expect cursor 0
+tap ENV
+wait 60
+expect mode 4
+key 14 down 100
+wait 200
+expect gm_noteons 12
+key 14 up 100
+wait 200
+expect step0 304
+expect cursor 0
+
+# --- GRID: sounds AND writes ---
+tap SEQ
+wait 40
+turn K1 -9
+wait 40
+expect cursor 0
+tap SEQ
+wait 60
+expect mode 1
+key 14 down 100
+wait 200
+expect gm_noteons 16
+key 14 up 100
+wait 200
+expect step0 1091                  # 4 voices (0x400), first note 0x43
+expect cursor 1
+
+# --- SCALE: sounds AND writes ---
+tap SEQ
+wait 40
+turn K1 -9
+wait 40
+expect cursor 0
+tap SEL
+wait 60
+expect mode 3
+key 14 down 100
+wait 200
+expect gm_noteons 20
+key 14 up 100
+wait 200
+expect step0 1091                  # same chord, same cell
+expect cursor 1                    # but the cursor moved: it was written again
+
+# --- the same matrix with CHORD KEYS OFF ---
+# Off, the chord layer still owns the keys (it snaps, and it records one step per
+# gesture); what changes is the SOUND: one note, not four. That is the other half
+# of the same untested cell.
+tap SEL
+wait 30
+turn K3 -1
+wait 30
+expect ofc 0
+
+# ARP: sounds, does not write
+tap SEQ
+wait 40
+turn K1 -9
+wait 40
+expect cursor 0
+tap ARP
+wait 60
+expect mode 2
+expect gm_noteons 20
+key 14 down 100
+wait 200
+expect gm_noteons 21               # ONE note: no chord, no snap
+key 14 up 100
+wait 200
+expect step0 1091
+expect cursor 0
+
+# HOME: sounds, does not write
+tap SEQ
+wait 40
+turn K1 -9
+wait 40
+expect cursor 0
+tap HOME
+wait 80
+expect mode 0
+key 14 down 100
+wait 200
+expect gm_noteons 22
+key 14 up 100
+wait 200
+expect step0 1091
+expect cursor 0
+
+# TRACK SET: sounds, does not write
+tap SEQ
+wait 40
+turn K1 -9
+wait 40
+expect cursor 0
+tap ENV
+wait 60
+expect mode 4
+key 14 down 100
+wait 200
+expect gm_noteons 23
+key 14 up 100
+wait 200
+expect step0 1091
+expect cursor 0
+
+# GRID: sounds and writes - on RELEASE, which is the step-record fix itself
+tap SEQ
+wait 60
+expect mode 1
+turn K1 -9
+wait 40
+expect cursor 0
+key 14 down 100
+wait 200
+expect gm_noteons 24
+expect cursor 0                    # NOT yet: off records on release
+key 14 up 100
+wait 200
+expect cursor 1                    # now
+expect step0 323                   # 1 voice, note 0x43: the root alone
+
+# SCALE: sounds and writes
+tap SEQ
+wait 40
+turn K1 -9
+wait 40
+expect cursor 0
+tap SEL
+wait 60
+expect mode 3
+key 14 down 100
+wait 200
+expect gm_noteons 25
+key 14 up 100
+wait 200
+expect step0 323

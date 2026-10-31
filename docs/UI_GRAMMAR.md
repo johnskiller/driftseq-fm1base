@@ -348,3 +348,38 @@ on the input is almost always wider than the rule it was meant to express.
   picture of the PATTERN, not of the keyboard), so sound is the only honest
   witness: the probe asserts the hero emits `[67,71,74,81]`, the same four notes
   the SCALE page emits. Reverse-verified: restoring the wide gate fails 3.
+
+### Why the suite missed it: the key matrix
+
+John asked, after two faults in the same area shipped back to back:
+"为什么测试没有发现这些错误？" The answer is countable rather than rhetorical.
+
+Of **108 key presses** in the whole suite before this file existed:
+
+- **86 on the SCALE page**, 11 on GRID, 4 on the hero, 4 on ARP, 3 on TRACK SET.
+- Every one of them asserted **screen state or grid cells**. Nothing asserted
+  that a key **sounds**.
+
+So the one cell both faults lived in — *(a page that is not SCALE or GRID) x
+(does the key sound?)* — was measured **exactly once**, on the hero, by
+`trkset.txt`'s `sel_track` check, and never by sound. A change that left the hero
+visually identical and silent passed the entire suite.
+
+The deeper mistake was in how I wrote the assertions: I tested the mechanism I
+had just touched (the write) and treated "sounds" as an invariant that could not
+break — because the chord layer was old and working. But both faults were
+**collateral**, not in the thing I changed: the first fix moved where the key was
+consumed, and the second fix gated the key instead of the write. A refactor of a
+shared path breaks the *other* consumers of that path, and those are precisely
+the ones a fix's own tests do not look at.
+
+`tests/keymatrix.txt` (56) is the missing table: five pages x two states of CHORD
+KEYS, and for each, two separate questions (**SOUND** via `gm_noteons`,
+**WRITE** via `step0`/`cursor`). Verified to catch both faults:
+
+- restoring the wide page gate -> **12** failures (hero/ARP/TRACK SET all report
+  one note instead of four)
+- restoring the old "OFC off only auditions" behaviour -> **4** failures
+
+A page may sound without writing. A page must never write without sounding.
+Testing one of the two is exactly how both bugs hid.
