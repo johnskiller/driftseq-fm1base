@@ -43,6 +43,7 @@ static void ui_encoder(uint8_t enc, int8_t det);
 static void ui_button(uint8_t btn, uint8_t down, uint8_t released);
 static void panel_key_handler(uint8_t key, uint8_t down);
 static int  cell_ticks(uint8_t div);              /* ui_screens.c: ticks per step */
+static const char *div_str(uint8_t div);          /* ui_screens.c: "1/16T" and friends */
 static void ui_leds(uint32_t *litK, uint32_t *dimK, uint32_t *litB, uint32_t *dimB);
 static void ui_leds_sync(void);                   /* ui.c: the four masks -> plat_lights */
 static void panel_key_up(uint8_t key);
@@ -81,8 +82,25 @@ static uint8_t  pz_prog;                 /* and the program, so a probe can read
  * the tests read it by that name. */
 #define gl_page (ui_page[M_GLOBAL])       /* 0 = settings, 1 = the radio */
 static uint8_t gl_row;                   /* the row K1 is on (both pages) */
-static uint8_t jam_menu;
-static uint8_t jam_menu_sel;
+/* The decision popup (docs/UI_GRAMMAR.md rule 2): one apparatus, several users.
+ * It was "the jam menu" while JAM was its only caller; TRACK SET's CLEAR TRACK
+ * is the second, so the state is named for what it is and the JAM code keeps its
+ * old names as macros below. One popup at a time - a second SAVE while CLEAR TRACK
+ * is up does not stack, it is just SAVE doing nothing (rule 3: whichever popup is
+ * up owns the keys).
+ *
+ *   pm_kind  what is being decided (PM_*), 0 = none up
+ *   pm_sel   the highlighted row (the JAM menu's four; a yes/no ignores it) */
+/* PM_CLRTRK = 2 is also "the JAM menu is up" to every existing `if (jam_menu)`,
+ * so the JAM code needs no change; popup_draw()/popup_act() switch on the kind. */
+enum { PM_NONE = 0, PM_JAM = 1, PM_CLRTRK = 2 };
+static uint8_t pm_kind;
+/* Defined here rather than declared: ui.c is included after this file and calls
+ * it, and a body this small has no reason to live further down. */
+static uint8_t pm_up(void) { return pm_kind != PM_NONE; }
+static uint8_t pm_sel;
+#define jam_menu      pm_kind            /* the JAM popup's own names, unchanged */
+#define jam_menu_sel  pm_sel
 /* The GLOBAL page (ui_global.c, included after every other page because ui.c
  * and ui_edit.c both call into it while ui_global itself needs their state:
  * glo_held, key_shift, midi_vel, txt_*, ui_draw_footer). */
@@ -101,9 +119,14 @@ static void preset_popup_text(char *b);
 static void ui_select_track(uint8_t t);
 static void preset_text(char *b, uint8_t prog, uint8_t is_kit);
 
-static void jam_menu_act(uint8_t which);
-static void jam_menu_close(void);
-static void jam_menu_draw(void);
+static void popup_act(uint8_t which);
+static void ts_clear_notes(uint8_t t);
+static int  ts_notes_of(uint8_t t);
+static uint8_t ts_row_on_clear(void);
+static void popup_close(void);
+static void popup_draw(void);
+static void popup_open(uint8_t kind);
+static void draw_trkset2(void);
 
 /* text builders (ui_text.c) */
 static char *txt_next(void);

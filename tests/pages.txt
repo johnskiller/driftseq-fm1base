@@ -1,0 +1,192 @@
+# Page keys (docs/UI_GRAMMAR.md rule 4).
+#
+# John 2026-10-31: "页面打开逻辑也不一致：现在home按钮是在hero和grid间切换，arp和seq是进入
+# 页面，再次按无效，env和scale都是在相应页面和hero间切换，比较混乱。统一改为按钮就是进入
+# 相应页面，重复按进入同一功能的不同页面（现在每个功能只有一个页面，所以就是停留在原页面），
+# 这样是不是更清晰？和glo+home的逻辑也一致"
+#
+# The rule, and the only one:
+#   a button of a page you are NOT on  -> go there
+#   a button of the page you ARE on    -> turn to that feature's next page
+#                                         (one page in: stay put)
+#   HOME from anywhere else            -> go to HOME
+#   HOME on HOME                       -> stay
+#
+# Every feature has a page COUNT even when it is 1 (ui_pages[] in ui.c), so this
+# test asserts the mechanism, not just today's answer: the same key does the same
+# thing whether the feature has one page or two. GLOBAL is the two-page case and
+# is asserted alongside the one-page ones to prove they go through one rule.
+#
+# mode: 0 HOME, 1 GRID, 2 ARP, 3 SCALE, 4 TRACK SET, 5 GLOBAL
+
+wait 600
+expect mode 0
+
+# --- the doors: each button goes to its own page ---
+tap SEQ
+wait 20
+expect mode 1                     # GRID
+tap ARP
+wait 20
+expect mode 2                     # ARP
+tap ENV
+wait 20
+expect mode 4                     # TRACK SET
+tap SEL
+wait 20
+expect mode 3                     # SCALE
+
+# --- and pressing the door of the page you are on does NOT leave it ---
+# This is the whole change: ENV and SEL used to bounce back to the hero.
+tap SEL
+wait 20
+expect mode 3                     # still SCALE. One page in, the page turn is a no-op
+tap SEL
+wait 20
+expect mode 3                     # and again
+tap ENV
+wait 20
+expect mode 4                     # the other door, from SCALE: goes where it says
+expect ts_page 0                  # and arrives on page 1, not wherever it was left
+tap ENV
+wait 20
+expect mode 4                     # still TRACK SET: the door did not become a bounce
+expect ts_page 1                  # but a second press is a page turn (it has two now)
+
+# --- the ones that already behaved do not regress ---
+tap SEQ
+wait 20
+expect mode 1
+tap SEQ
+wait 20
+expect mode 1                     # GRID, unchanged
+tap ARP
+wait 20
+expect mode 2
+tap ARP
+wait 20
+expect mode 2                     # ARP, unchanged
+
+# --- a door is a door, not a bounce through HOME ---
+# From ARP, ENV must land on TRACK SET. It used to work only because ui_mode was
+# M_HOME first; if a page key ever starts by clearing to HOME, this catches it.
+tap ENV
+wait 20
+expect mode 4
+tap SEL
+wait 20
+expect mode 3                     # ARP -> ENV -> SEL, no HOME in between
+tap SEQ
+wait 20
+expect mode 1                     # SCALE -> SEQ
+tap ENV
+wait 20
+expect mode 4                     # GRID -> TRACK SET
+tap ARP
+wait 20
+expect mode 2                     # TRACK SET -> ARP
+
+# --- HOME goes HOME from everywhere ---
+tap HOME
+wait 20
+expect mode 0
+tap SEQ
+wait 20
+expect mode 1
+tap HOME
+wait 20
+expect mode 0
+tap ARP
+wait 20
+expect mode 2
+tap HOME
+wait 20
+expect mode 0
+tap ENV
+wait 20
+expect mode 4
+tap HOME
+wait 20
+expect mode 0
+tap SEL
+wait 20
+expect mode 3
+tap HOME
+wait 20
+expect mode 0
+
+# --- and on HOME, HOME stays on HOME (it does not toggle to GRID any more) ---
+expect mode 0
+tap HOME
+wait 20
+expect mode 0
+tap HOME
+wait 20
+expect mode 0
+
+# --- EDIT is a LAYER, not a page: it must not become a door ---
+tap SEQ
+wait 20
+expect mode 1
+tap EDIT
+wait 20
+expect focus 1                    # the PIT/GAT/VEL layer is on
+tap EDIT
+wait 20
+expect focus 0
+expect mode 1                     # and EDIT never changed the page
+
+# --- GLOBAL: the two-page case, through the same rule ---
+# GLO+HOME opens it on page 1; the chord again turns to page 2; a bare HOME leaves.
+press GLO
+press HOME
+release HOME
+release GLO
+wait 60
+expect mode 5
+expect gl_page 0
+press GLO
+press HOME
+release HOME
+release GLO
+wait 60
+expect mode 5
+expect gl_page 1                  # the page turn, the same rule with n=2
+press GLO
+press HOME
+release HOME
+release GLO
+wait 60
+expect mode 5
+expect gl_page 0                  # and it wraps, because 2 % 2 == 0
+tap HOME
+wait 60
+expect mode 0
+
+# --- a feature remembers its page ---
+# GLOBAL is the only one with two, so this is the only feature that can show it:
+# leaving from page 2 and coming back must not silently reset to page 1.
+press GLO
+press HOME
+release HOME
+release GLO
+wait 60
+press GLO
+press HOME
+release HOME
+release GLO
+wait 60
+expect gl_page 1
+tap HOME
+wait 60
+expect mode 0
+press GLO
+press HOME
+release HOME
+release GLO
+wait 60
+expect mode 5
+expect gl_page 1                  # came back where it was left
+tap HOME
+wait 60
+expect mode 0

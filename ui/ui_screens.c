@@ -305,52 +305,136 @@ static void jam_menu_act(uint8_t which)
     }
 }
 
-static void jam_menu_close(void) { jam_menu = 0; }
+/* ---- one popup, several decisions (docs/UI_GRAMMAR.md rule 2) ---------------
+ *
+ * A decision popup replaces the page, paints its own footer, and is answered
+ * with OCT+ (OK) / OCT- (Cancel, and HOME cancels too). It used to be the JAM
+ * menu alone; CLEAR TRACK is the second user, and a second copy of the apparatus
+ * would be a second set of exits to keep in agreement.
+ *
+ * Each kind brings three things: a title line, its rows, and what OK means. */
 
-/* The JAM menu as a decision popup (docs/UI_GRAMMAR.md rule 2): the same
- * apparatus as the PRESET popup - it replaces the page, it owns the screen, it
- * paints its own footer - rather than the footer band it used to be.
- *
- * Why it moved: the four options were drawn in the footer, which is a 24 px strip
- * with five 56 px columns, so they competed for space with the page above them and
- * the highlight had to be an inverted box squeezed around a word. A decision gets
- * a decision's room, and the same room the PRESET popup already had.
- *
- * K1 picks, OCT+ = OK, OCT- = Cancel. The footer says so, because a popup whose
- * only exits are two unlabelled keys is a puzzle. */
-static void jam_menu_draw(void)
+/* CLEAR TRACK's two rows. Yes/no, not a list: the highlight is the only state,
+ * and it opens on NO (popup_open) so a hand that is already moving cannot commit
+ * a wipe by opening it. */
+static const char *const CLR_LABELS[2] = {"NO", "CLEAR"};
+
+/* How many steps of a track carry a sound: what CLEAR TRACK would take. Used by
+ * the popup (the specific count, at the moment of deciding) and by page 2 (the
+ * same count, as the row's context). */
+static int ts_notes_of(uint8_t t)
 {
-    int i, y, w;
+    int i, n = 0;
+    for (i = 0; i < DS_STEPS; i++)
+        if (eng.pat.track[t].steps[i].on || eng.pat.track[t].steps[i].nvoices)
+            n++;
+    return n;
+}
+
+static void popup_close(void) { pm_kind = PM_NONE; }
+
+/* Where the popup opens. JAM opens on MERGE (the least destructive of its four);
+ * CLEAR TRACK opens on NO, because the only way to be wrong here is to wipe. */
+static void popup_open(uint8_t kind)
+{
+    pm_kind = kind;
+    pm_sel  = 0;                             /* row 0 is the safe answer for both */
+}
+
+/* The popup itself: one painter for every kind. Replaces the whole page the way
+ * the PRESET popup does (it owns the screen while it is up), rather than the
+ * footer band the JAM menu used to be: four options in a 24 px strip competed
+ * for space with the page above them and the highlight had to be an inverted box
+ * squeezed around a word. A decision gets a decision's room.
+ *
+ * The footer names the exits, because a popup whose only ways out are two
+ * unlabelled keys is a puzzle. SAVE is not among them (rule 3): it does not
+ * confirm anything. */
+static void popup_draw(void)
+{
+    const char *title, *sub;
+    const char *const *labels;
+    int n, i, y, w;
+
+    if (pm_kind == PM_CLRTRK) {
+        /* The popup replaces the page, so the header's track pill is gone: a
+         * destructive question has to say WHICH track, in the corner where the
+         * page puts its context line. */
+        title = "CLEAR TRACK";
+        sub   = txt_trk("TRACK ", (uint8_t)(sel_track + 1));
+        labels = CLR_LABELS;
+        n = 2;
+    } else {
+        title = "JAM";
+        sub   = "SAVE TO WHERE?";
+        labels = JAM_MENU_LABELS;
+        n = 4;
+    }
+
     cv_begin(240, 216, RGB565(16, 16, 21));
+    cv_text(8, 6, &FONT_T, title, C_AMB);
+    cv_text(240 - 8 - (int)cv_text_w(&FONT_T, sub), 6, &FONT_T, sub,
+            RGB565(96, 96, 110));
 
-    cv_text(8, 6, &FONT_T, "JAM", C_AMB);
-    cv_text(240 - 8 - (int)cv_text_w(&FONT_T, "SAVE TO WHERE?"), 6, &FONT_T,
-            "SAVE TO WHERE?", RGB565(96, 96, 110));
-
-    /* Four rows, 34 px apart, the highlighted one in FONT_M and amber: size and
-     * colour both, so the selection reads from arm's length and without colour
-     * vision alone. */
-    for (i = 0; i < 4; i++) {
-        y = 34 + i * 34;
-        w = (int)cv_text_w(&FONT_M, JAM_MENU_LABELS[i]);
-        if (i == (int)jam_menu_sel) {
+    /* Rows 34 px apart, highlighted one in FONT_M and amber: size and colour
+     * both, so the selection reads from arm's length and without colour vision.
+     * A two-row popup starts lower than a four-row one so that the block sits in
+     * the middle of the canvas instead of clinging to the title: two rows of a
+     * four-row layout, at the top, leaves half the screen doing nothing. */
+    for (i = 0; i < n; i++) {
+        y = (n == 2 ? 62 : 34) + i * 34;
+        w = (int)cv_text_w(&FONT_M, labels[i]);
+        if (i == (int)pm_sel) {
             cv_rect(6, y - 4, 228, 30, RGB565(46, 40, 26));
             cv_rect(6, y - 4, 3, 30, C_AMB);        /* the same amber rule as a GLOBAL row */
-            cv_text((240 - w) / 2, y, &FONT_M, JAM_MENU_LABELS[i], BRIGHTTX);
+            cv_text((240 - w) / 2, y, &FONT_M, labels[i], BRIGHTTX);
         } else {
-            cv_text((240 - w) / 2, y, &FONT_M, JAM_MENU_LABELS[i],
-                    RGB565(120, 120, 134));
+            cv_text((240 - w) / 2, y, &FONT_M, labels[i], RGB565(120, 120, 134));
+        }
+    }
+    if (pm_kind == PM_CLRTRK) {
+        /* The page states the RULE (what a clear spares); the popup states the
+         * BILL (how much of this track it would take, right now). Two different
+         * sentences, not the same one twice - and the number is the thing you
+         * want in front of you while the answer is still NO. */
+        int n = ts_notes_of(sel_track);
+        char b[40];
+        int w;
+        if (n) {
+            strcpy_(b, "STEP");
+            if (n != 1) strcpy_(txt_end(b), "S");
+            strcpy_(txt_end(b), " WILL GO: ");
+            fmt_int(txt_end(b), n);
+            w = (int)cv_text_w(&FONT_S, b);
+            cv_text((240 - w) / 2, 140, &FONT_S, b, YELLOW);
+        } else {
+            w = (int)cv_text_w(&FONT_S, "THIS TRACK IS EMPTY");
+            cv_text((240 - w) / 2, 140, &FONT_S, "THIS TRACK IS EMPTY",
+                    RGB565(96, 96, 110));
         }
     }
     cv_blit(0, 0);
 
-    /* its own footer: the two ways out, named. No "SAVE: OK" - SAVE does not
-     * confirm anything any more. */
     cv_begin(240, 24, TB_BG);
     cv_text(8, 6, &FONT_T, "K1 PICK", FOOT_GRAY);
     cv_text(104, 6, &FONT_T, "OCT+ OK", C_AMB);
     cv_text(176, 6, &FONT_T, "OCT- ESC", FOOT_GRAY);
     cv_blit(0, 216);
+}
+
+/* OK. JAM commits the highlighted action; CLEAR TRACK wipes the notes of the
+ * selected track when CLEAR is the highlighted row, and nothing at all when NO
+ * is - so "OK" on a popup whose default is NO is a no-op, which is the point. */
+static void popup_act(uint8_t which)
+{
+    if (pm_kind == PM_CLRTRK) {
+        if (which == 1) {
+            ts_clear_notes(sel_track);
+            app_say("TRK", txt_trk("T", (uint8_t)(sel_track + 1)));
+        }
+        return;
+    }
+    jam_menu_act(which);
 }
 
 /* ---- footer (prefix-free, fixed columns, 10px) ----
@@ -405,8 +489,13 @@ static void ui_draw_footer(void)
          * blank (it was GLOBAL swing; the global half lives on GLOBAL, and this
          * page keeps its own track's half in the SWING row). */
         static const char *const FOOT_TRKSET[4] = {"ROW", "VALUE", "MUTE", ""};
+        /* Page 2's K2 is not always a value: on the CLEAR TRACK row it opens a
+         * decision. The footer says what the knob in hand does, per row, which is
+         * the same promise the GLOBAL page keeps on its switch row. */
+        static const char *const FOOT_TS2_CLEAR[4] = {"ROW", "ASK", "MUTE", ""};
+        const char *const *f = ts_row_on_clear() ? FOOT_TS2_CLEAR : FOOT_TRKSET;
         for (k = 0; k < 4; k++)
-            cv_text(FX[k], 6, &FONT_T, FOOT_TRKSET[k], FOOT_GRAY);
+            cv_text(FX[k], 6, &FONT_T, f[k], FOOT_GRAY);
     } else if (glo_held && ui_mode != M_ARP) {
         const char *const *f = (ui_mode == M_HOME) ? FOOT_GLO_HOME : FOOT_GLO_GRID;
         for (k = 0; k < 4; k++)

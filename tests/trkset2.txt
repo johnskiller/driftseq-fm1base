@@ -1,0 +1,301 @@
+# TRACK SET page 2: DIVISION and CLEAR TRACK (John 2026-10-31)
+#
+# "track set页面需要增加两个项目：1 change div，现在的div修改位置不是很明显，增加一个
+#  更明显的修改方式。2 clear track，这个危险操作需要弹出确认。页面可能容纳不下，需要
+#  第二页"
+#
+# Two things this file pins that a greener test would miss:
+#
+#   - CLEAR TRACK clears the NOTES and nothing else. John's call: "只清音符…清一个轨不该
+#     把轨静默搬到 ch1 / prog0". The obvious implementation, ds_clear_track(), memsets the
+#     whole ds_track and does exactly that silent move. Track 0 boots on ch9 (drums) here,
+#     so a memset would show up as ts_ch 9 -> 1 and is asserted against directly.
+#   - The popup opens on NO. A wipe is committed by turning the selection to CLEAR and
+#     pressing OK, in that order, and by nothing else. K2 left does not open it at all.
+
+# --- arrive, and page 1 is still the identity rows ---
+tap ENV
+wait 20
+expect mode 4
+expect ts_page 0
+expect ts_row 0
+
+# --- a second press turns to page 2 (rule 4; TRACK SET's page count is 2 now) ---
+tap ENV
+wait 60
+expect mode 4
+expect ts_page 1
+expect ts_row 0                  # arriving always starts at the top of the page
+
+# --- and a third press wraps back to page 1, not out of the page ---
+tap ENV
+wait 60
+expect mode 4
+expect ts_page 0
+tap ENV
+wait 60
+expect ts_page 1
+
+# --- page 2 carries exactly two rows, and K1 dead-stops at the bottom ---
+turn K1 1
+wait 10
+expect ts_row 1
+turn K1 1
+wait 10
+expect ts_row 1                  # dead stop: no wrap onto DIVISION
+turn K1 -1
+wait 10
+expect ts_row 0
+turn K1 -1
+wait 10
+expect ts_row 0                  # and no wrap past the top
+
+# --- DIVISION: the same five values and dead stops as the GLO+K3 chord ---
+# 0 1/8  1 1/8T  2 1/16  3 1/16T  4 1/32
+expect ts_div 2                  # boot value, unchanged by arriving here
+turn K2 1
+wait 10
+expect ts_div 3
+turn K2 1
+wait 10
+expect ts_div 4
+turn K2 1
+wait 10
+expect ts_div 4                  # dead stop at 1/32
+turn K2 -9
+wait 10
+expect ts_div 0                  # and at 1/8
+turn K2 -1
+wait 10
+expect ts_div 0
+turn K2 2
+wait 10
+expect ts_div 2                  # back to where it started
+
+# --- the popup: it opens on NO, and OK on NO commits nothing ---
+turn K1 1
+wait 10
+expect ts_row 1
+expect ts_notes 4                # track 0 boots with a demo phrase on it
+turn K2 1
+wait 60
+expect pm_kind 2                 # the CLEAR TRACK popup is up
+expect jam_menu 0                # and it is NOT the JAM popup (one apparatus, two users)
+expect jam_sel 0                 # row 0 = NO: the safe answer is the default
+tap OCT+
+wait 60
+expect pm_kind 0
+expect ts_notes 4                # OK on NO: nothing happened
+
+# --- cancel, both ways out, and neither commits ---
+turn K2 1
+wait 60
+expect pm_kind 2
+turn K1 1
+wait 10
+expect jam_sel 1                 # the selection moved to CLEAR
+tap OCT-
+wait 60
+expect pm_kind 0
+expect ts_notes 4                # OCT- is Cancel even with CLEAR highlighted
+turn K2 1
+wait 60
+expect pm_kind 2
+turn K1 1
+wait 10
+expect jam_sel 1
+tap HOME
+wait 60
+expect pm_kind 0
+expect ts_notes 4                # HOME is the universal back, and it cancels too
+expect mode 4                    # and it did not leave TRACK SET behind the popup
+expect ts_page 1                 # nor turn the page
+
+# --- K2 left does not open it: a wipe is never armed by twisting the other way ---
+turn K2 -1
+wait 60
+expect pm_kind 0
+
+# --- the selection dead-stops at CLEAR: wrapping past it would commit by accident ---
+turn K2 1
+wait 60
+expect pm_kind 2
+turn K1 1
+wait 10
+expect jam_sel 1
+turn K1 1
+wait 10
+expect jam_sel 1                 # dead stop, unlike the JAM menu's four-row cycle
+
+# --- commit: CLEAR highlighted, then OK ---
+tap OCT+
+wait 60
+expect pm_kind 0
+
+# the notes are gone
+expect ts_notes 0
+
+# the identity is NOT: this is the assertion ds_clear_track() would fail. Track 0
+# boots on channel 10 (0-based 9), which is what makes a memset obvious.
+expect ts_ch 9
+expect ts_prog 0
+expect ts_route 2
+expect ts_voice 0
+expect ts_swing 100
+expect ts_div 2
+
+# --- page 1 still reads the same track, and still owns its five rows ---
+tap ENV
+wait 60
+expect ts_page 0
+expect ts_ch 9
+expect ts_div 2                  # DIVISION is the same field, seen from both pages
+turn K1 4
+wait 10
+expect ts_row 4
+turn K1 1
+wait 10
+expect ts_row 4                  # page 1 keeps its own bottom
+
+# --- SELECT walks tracks and a new track starts at the top of the page it is on ---
+tap ENV
+wait 60
+expect ts_page 1
+turn K1 1
+wait 10
+expect ts_row 1
+turn SELECT 1
+wait 40
+expect sel_track 1
+expect ts_row 0                  # a new track starts at the top
+
+# --- CLEAR on a track with nothing on it is a no-op, not an error ---
+# (every demo track has notes, so this one is cleared first and then cleared again)
+expect ts_notes 5
+turn K1 1
+wait 10
+expect ts_row 1
+turn K2 1
+wait 60
+expect pm_kind 2
+turn K1 1
+wait 10
+expect jam_sel 1
+tap OCT+
+wait 60
+expect pm_kind 0
+expect ts_notes 0                # the second clear had nothing to take
+# the popup still opens on a track that is already empty - it says so, and OK on NO still commits nothing; it does not refuse to open, the row is the row
+turn K2 1
+wait 60
+expect pm_kind 2
+tap OCT+
+wait 60
+expect pm_kind 0
+expect ts_notes 0
+expect ts_ch 9                   # track 1's channel survived both clears (9 = the drum channel, 0-based)
+
+# --- and the JAM popup still works: one apparatus, both kinds ---
+tap SAVE
+wait 60
+expect pm_kind 1
+expect jam_menu 1
+expect jam_sel 0
+tap OCT-
+wait 60
+expect pm_kind 0
+expect jam_menu 0
+
+# --- and the JAM popup still works: one apparatus, both kinds ---
+tap SAVE
+wait 60
+expect pm_kind 1
+expect jam_menu 1
+expect jam_sel 0
+tap OCT-
+wait 60
+expect pm_kind 0
+expect jam_menu 0
+
+# --- the identity survives a clear even when it is NOT the default ---
+# The assertions above use track 0, whose channel is 9 (a memset would make it 1) but whose program is 0, which IS the default - so they cannot catch a wipe that resets only the program. This section sets a program that is not 0 and an identity that is not the boot one, clears, and reads them back.
+tap HOME
+wait 20
+expect sel_track 1                      # where the section above left the cursor
+turn SELECT 3
+wait 30
+expect sel_track 4                      # track 4: ch1, and melodic
+expect ts_ch 1
+tap ENV
+wait 20
+expect mode 4                           # TRACK SET, on the page it remembers (2)
+expect ts_page 1
+tap ENV
+wait 60
+expect ts_page 0                        # turn back to the identity rows
+expect ts_row 0                         # a page turn re-homes the row cursor
+turn K1 1
+wait 10
+expect ts_row 1                         # PROGRAM
+expect ts_prog 81                       # track 4's own program: the demo's calliope
+turn K2 4
+wait 20
+expect ts_prog 85                       # not the value it had a moment ago
+turn K1 2
+wait 10
+expect ts_row 3                         # VOICE
+turn K2 1
+wait 10
+expect ts_voice 1                       # MONO
+turn K1 -1
+wait 10
+expect ts_row 2                         # ROUTE
+turn K2 -1
+wait 10
+expect ts_route 1                       # BLE only
+expect ts_notes 4
+
+# now clear it from page 2
+tap ENV
+wait 60
+expect ts_page 1
+turn K1 1
+wait 10
+expect ts_row 1
+turn K2 1
+wait 60
+expect pm_kind 2
+turn K1 1
+wait 10
+expect jam_sel 1
+tap OCT+
+wait 60
+expect pm_kind 0
+expect ts_notes 0
+
+# every one of these would be its factory default after ds_clear_track()
+expect ts_prog 85
+expect ts_voice 1
+expect ts_route 1
+expect ts_ch 1
+
+
+# --- leaving and coming back: the PAGE is remembered, the ROW is not ---
+# ts_row = 0 on arrival is what "arriving" has always meant on this page, and it did
+# not change when the page grew a second half. Pinned because the two are easy to
+# conflate: rule 4 remembers pages, not cursors.
+# (the section above ends on TRACK SET page 2 with the CLEAR row selected)
+expect mode 4
+expect ts_page 1
+expect ts_row 1
+tap HOME
+wait 100
+expect mode 0
+tap ENV
+wait 60
+expect mode 4
+expect ts_page 1                 # the page came back
+expect ts_row 0                  # the cursor did not
+tap ENV
+wait 60
+expect ts_page 0                 # and the page still turns from there

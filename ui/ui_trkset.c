@@ -21,6 +21,18 @@
  * some other track's channel (GM gives them one program and one voice pool), so
  * the page answers "who else is there" — 16 cells, lit where a track lives,
  * and the sharing line names the other tracks by number.
+ *
+ * TWO PAGES (2026-10-31, John): "页面可能容纳不下，需要第二页". Page 1 is the five
+ * identity rows above; page 2 is the two things that act on the track rather
+ * than describe it -- DIVISION and CLEAR TRACK. Both were asked for on this page
+ * ("1 change div，现在的div修改位置不是很明显，增加一个更明显的修改方式。2 clear
+ * track，这个危险操作需要弹出确认"), and neither fits page 1: five 22 px rows plus
+ * the channel map already fill y30..194.
+ *
+ * DIVISION is not new, it is LOUDER. It lived on GLO+K3 on the grid screens,
+ * which is a chord nobody finds (John's words) and is also where the HOME and
+ * GRID footer already print "DIV" - a hint pointing at a modifier. As a row it
+ * is the same size as every other value on this page.
  */
 static uint8_t ts_row;          /* 0..TS_NROW-1, dead-stop */
 
@@ -45,6 +57,15 @@ static uint8_t ts_row;          /* 0..TS_NROW-1, dead-stop */
 
 static const char *const TS_LABEL[TS_NROW] = {"CHANNEL", "PROGRAM", "ROUTE", "VOICE", "SWING"};
 
+/* ---- page 2: the actions ---- */
+#define TS2_NROW  2
+#define TS2_DIV   0
+#define TS2_CLEAR 1
+static const char *const TS2_LABEL[TS2_NROW] = {"DIVISION", "CLEAR TRACK"};
+/* ts_row is ONE cursor for both pages: arriving resets it to 0 and K1 dead-stops
+ * at the bottom of whichever page is up. Two cursors would mean one of them
+ * points somewhere the player cannot see. */
+
 /* GM_PROG (the 128 names) is in ui_tables.c: the PRESET popup needs the same
  * table at a larger size, and two copies would drift. */
 
@@ -66,6 +87,11 @@ static const char *const TS_ROUTE_NAME[3] = {"USB", "BLE", "USB+BLE"};
  * point of the owner rule. Stopped, nothing is sent: there is no run to send
  * into, and the PC that PLAY emits carries the new number anyway. */
 
+/* the footer (ui_screens.c, included BEFORE this file) names what K2 does, and
+ * on page 2 that depends on the row: DIVISION edits a value, CLEAR TRACK opens a
+ * decision. A getter rather than moving ts_row up: the cursor is this page's. */
+static uint8_t ts_row_on_clear(void) { return ui_page[M_TRKSET] && ts_row == 1; }
+
 static void trkset_encoder(uint8_t enc, int8_t det)
 {
     ds_track *tr = TRK();
@@ -83,9 +109,10 @@ static void trkset_encoder(uint8_t enc, int8_t det)
         return;
     }
     if (enc == EN_K1) {                          /* row: dead stop, no wrap */
+        int n = ui_page[M_TRKSET] ? TS2_NROW : TS_NROW;
         int v = (int)ts_row + (det > 0 ? 1 : -1);
         if (v < 0) v = 0;
-        if (v > TS_NROW - 1) v = TS_NROW - 1;
+        if (v > n - 1) v = n - 1;
         ts_row = (uint8_t)v;
         return;
     }
@@ -95,6 +122,26 @@ static void trkset_encoder(uint8_t enc, int8_t det)
     }
     if (enc != EN_K2)
         return;
+    if (ui_page[M_TRKSET]) {                     /* ---- page 2 ---- */
+        if (ts_row == TS2_DIV) {
+            /* The same five values, the same dead stops as the GLO+K3 chord;
+             * ds_track's division is per track, so this is the track on the
+             * header pill. */
+            int v = (int)tr->division + (det > 0 ? 1 : -1);
+            if (v < DS_DIV_8) v = DS_DIV_8;
+            if (v > DS_DIV_32) v = DS_DIV_32;
+            tr->division = (uint8_t)v;
+        } else {
+            /* CLEAR TRACK is the row; the VALUE is the decision, and a value that
+             * wipes a track is a decision, not a detent (rule 2). K2 right opens
+             * the popup, K2 left does nothing - there is nothing to undo it with,
+             * and a left-twist that armed a wipe would be the worst possible
+             * surprise on a knob you were just turning to see what it does. */
+            if (det > 0)
+                popup_open(PM_CLRTRK);
+        }
+        return;
+    }
     switch (ts_row) {
     case TS_CH: {
         int v = (int)tr->channel + (det > 0 ? 1 : -1);
@@ -183,6 +230,45 @@ static uint8_t trkset_button(uint8_t btn)
 
 /* "039 SYNTH BASS 1" into b — the buffer is the caller's, so this does not
  * juggle the text ring (that ring is 8 deep and the page already uses several). */
+/* Wipe the NOTES of one track, and nothing else (John 2026-10-31: "只清音符…清
+ * 一个轨不该把轨静默搬到 ch1 / prog0").
+ *
+ * ds_clear_track() is the wrong tool: it memsets the whole ds_track, so channel,
+ * program, division, route, voice mode and swing all snap back to their defaults
+ * and the track silently moves to ch1 with the piano. That is what a factory
+ * reset does, not what a player means by "clear this". So the note fields are
+ * cleared BY NAME - the same clearing ds_clear_track does per step (voice notes
+ * to 0xFF = empty, prob back to 100, cond none, on/tie off) - and the identity
+ * bytes are never written. A field added to ds_step later defaults to 0 in a
+ * memset and would be missed here, so the step is zeroed first and then given
+ * its non-zero defaults, which keeps this correct by construction rather than by
+ * remembering.
+ *
+ * euclid's eu_on/eu_k/eu_n/eu_rot are the SKELETON, not the notes: ds_euclid_fill
+ * repaints steps from them, so leaving them behind would resurrect the old
+ * pattern on the next repaint. They go; the sounding steps go with them. */
+static void ts_clear_notes(uint8_t t)
+{
+    ds_track *tr = &eng.pat.track[t];
+    int i;
+    for (i = 0; i < DS_STEPS; i++) {
+        ds_step *st = &tr->steps[i];
+        memset(st, 0, sizeof *st);
+        memset(st->v, 0xFF, sizeof st->v);       /* note 0xFF = empty voice */
+        st->prob = 100;                          /* a fresh step always plays */
+        st->cond = DS_C_NONE;
+    }
+    tr->eu_on = 0;
+    tr->eu_k  = 0;
+    tr->eu_n  = 0;
+    tr->eu_rot = 0;
+    /* Nothing is done about notes that are sounding right now ON PURPOSE: each
+     * one already has its gate-off scheduled in eng.gates[] (keyed by track, not
+     * by the step that started it), so they end on time whether or not the step
+     * that started them still exists. Panicking here would cut a note that was
+     * going to end by itself in 20 ms, which is audible as a click. */
+}
+
 static void ts_prog_text(char *b)
 {
     int32_t p = (int32_t)TRK()->prog;
@@ -220,7 +306,13 @@ static void draw_trkset(void)
          * column's own bare M / S, so the two screens agree without a legend.
          * One letter also makes the chip small, which was John's second note -
          * a word-sized pill took a third of the bar for two bits of state. */
-        h.ctx = (char *)(is_drum_trk() ? "DRUM" : "MELODIC");
+        /* Page 1's context says what the channel MEANS. Page 2 has no channel
+         * question to answer, so it says where in the feature you are: this is
+         * the first page that needed to, and it is the model GLOBAL already set
+         * ("GLOBAL 1/2"). */
+        h.ctx = (char *)(ui_page[M_TRKSET]
+                         ? "TRACK 2/2"
+                         : (is_drum_trk() ? "DRUM" : "MELODIC"));
         h.right = (char *)0;
         h.right_c = TB_TX;
         h.dots = 1;
@@ -370,6 +462,93 @@ static void draw_trkset(void)
             }
         }
     }
+    cv_blit_band(0, 0, 216);
+    ui_draw_footer();
+}
+
+/* ---- page 2: the actions ---------------------------------------------------
+ *
+ * Two rows, big. The page exists because page 1 is full (five identity rows and
+ * the channel map own y30..194), not because these two are lesser - so they get
+ * page 1's row geometry exactly: same 22 px pitch, same 16 px label/value, same
+ * amber rule on the row being edited. A second page that looked like a
+ * different page would read as a different screen, not as the other half of
+ * this one.
+ */
+static void draw_trkset2(void)
+{
+    ds_track *tr = TRK();
+    int i, y;
+
+    cv_begin(240, 224, C_BLACK);
+    {
+        hdr_t h = {0};
+        h.ctx = (char *)"TRACK 2/2";
+        h.right = (char *)0;
+        h.right_c = TB_TX;
+        h.dots = 1;
+        h.page = 3;                              /* the TRACK SET dot, both pages */
+        h.badge = tr->mute ? "M" : (tr->solo ? "S" : (char *)0);
+        h.badge_c = HERO_MS;
+        ui_draw_header(&h);
+    }
+
+    for (i = 0; i < TS2_NROW; i++) {
+        char buf[36];
+        const char *val;
+        y = TS_Y0 + i * TS_PITCH;
+        if (i == (int)ts_row) {
+            cv_rect(4, y - 6, 232, 21, RGB565(26, 26, 34));
+            cv_rect(4, y - 6, 2, 21, C_AMB);
+        }
+        cv_text(12, y, &FONT_S, TS2_LABEL[i], (i == (int)ts_row) ? C_AMB : C_GRAY);
+        if (i == TS2_DIV) {
+            /* The value is a word, not a number: "1/16T" is what the thing is
+             * called, and the grid screens' HOME bar prints the same string. */
+            val = div_str(tr->division);
+            cv_text(100, y, &FONT_B, val, BRIGHTTX);
+            {
+                int w = cv_text_w(&FONT_B, val);
+                cv_text(100 + w + 8, y, &FONT_S, "STEPS", RGB565(96, 96, 110));
+            }
+        } else {
+            /* CLEAR TRACK shows no value: it is an action, and its "value" is a
+             * decision that happens in a popup. The row says what it would act
+             * on instead, so the row is never a word waiting for a noun. */
+            val = "PRESS K2 RIGHT";
+            cv_text(100, y, &FONT_B, val, (i == (int)ts_row) ? C_AMB : RGB565(120, 120, 134));
+        }
+        (void)buf;
+    }
+
+    /* Below the rows: what CLEAR TRACK would take, counted, and what it would
+     * leave. Both belong HERE and not in the popup - the doubt ("will this move
+     * my track to ch1?") arises at the row, and the popup's job is the decision,
+     * not the lesson. One statement of the rule, at the place it is needed. */
+    {
+        int n = ts_notes_of(sel_track);
+        char b[48];
+        strcpy_(b, "STEPS IN USE ");
+        fmt_int(txt_end(b), n);
+        strcpy_(txt_end(b), " OF ");
+        fmt_int(txt_end(b), DS_STEPS);
+        cv_text(8, 100, &FONT_T, b, n ? YELLOW : RGB565(74, 74, 82));
+
+        b[0] = 0;
+        strcpy_(b, "WINDOW ");
+        fmt_int(txt_end(b), (int32_t)tr->loop_start + 1);
+        strcpy_(txt_end(b), "-");
+        fmt_int(txt_end(b), (int32_t)((tr->loop_start + tr->loop_len - 1) % 64) + 1);
+        strcpy_(txt_end(b), "  LEN ");
+        fmt_int(txt_end(b), tr->loop_len);
+        cv_text(8, 116, &FONT_T, b, RGB565(120, 120, 134));
+    }
+    /* the rule, stated once. John's line: a track clear must not quietly move the
+     * track to ch1 / prog0 - so the survivors are named where the finger is. */
+    cv_text(8, 152, &FONT_S, "CLEAR TAKES THE NOTES", RGB565(150, 104, 48));
+    cv_text(8, 172, &FONT_T, "CH PROG DIV ROUTE VOICE", RGB565(120, 120, 134));
+    cv_text(8, 188, &FONT_T, "SWING ARE KEPT", RGB565(120, 120, 134));
+
     cv_blit_band(0, 0, 216);
     ui_draw_footer();
 }

@@ -893,8 +893,22 @@ int app_expect(const char *what, int *got)
         *got = focus_layer ? 1 : 0;
     else if (!strcmp(what, "key_shift"))         /* the keybed's octave: OCT+/- when no menu is up */
         *got = (int)key_shift;
-    else if (!strcmp(what, "jam_menu"))          /* the decision popup is up (docs/UI_GRAMMAR.md) */
-        *got = jam_menu ? 1 : 0;
+    else if (!strcmp(what, "jam_menu"))          /* the JAM popup is up (docs/UI_GRAMMAR.md) */
+        *got = (pm_kind == PM_JAM) ? 1 : 0;
+    else if (!strcmp(what, "pm_kind"))           /* which popup is up: 0 none 1 JAM 2 CLEAR TRACK */
+        *got = pm_kind;
+    else if (!strcmp(what, "ts_page"))           /* TRACK SET's page: 0 the identity, 1 the actions */
+        *got = ui_page[M_TRKSET];
+    else if (!strcmp(what, "ts_div"))            /* its DIVISION row */
+        *got = TRK()->division;
+    else if (!strcmp(what, "ts_notes"))          /* steps of this track that carry a sound */
+    {
+        int i, n = 0;
+        for (i = 0; i < DS_STEPS; i++)
+            if (TRK()->steps[i].on || TRK()->steps[i].nvoices)
+                n++;
+        *got = n;
+    }
     else if (!strcmp(what, "jam_sel"))           /* which of its four rows is highlighted */
         *got = (int)jam_menu_sel;
     else if (!strcmp(what, "jam_used"))          /* how much the jam ring has taken: 0 = keys auditioned only */

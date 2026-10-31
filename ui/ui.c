@@ -19,7 +19,7 @@ static uint8_t ui_mode = M_HOME;
  * everything else.
  *
  * Indexed by ui_mode, so the two arrays below must stay in that order. */
-static const uint8_t ui_pages[] = { 1, 1, 1, 1, 1, 2 };
+static const uint8_t ui_pages[] = { 1, 1, 1, 1, 2, 2 };   /* TRACK SET grew a page 2 */
 static uint8_t ui_page[sizeof ui_pages];      /* 0 = page 1 */
 
 /* The page key (rule 4): leave to a feature, or turn its page if already there.
@@ -147,13 +147,13 @@ static void ui_draw(void)
         preset_draw();
         return;
     }
-    if (jam_menu) {                           /* a decision popup, same apparatus as
+    if (pm_up()) {                            /* a decision popup, same apparatus as
                                                * the PRESET one: it replaces the page
                                                * rather than sitting on it, because a
                                                * menu that shares the screen with the
                                                * thing it is about is a menu you read
                                                * two ways (docs/UI_GRAMMAR.md) */
-        jam_menu_draw();
+        popup_draw();
         return;
     }
     cv_begin(240, 224, C_BLACK);              /* painters blit their own bands */
@@ -161,7 +161,10 @@ static void ui_draw(void)
     else if (ui_mode == M_GRID) {
         if (is_drum_trk()) draw_grid_drum(); else draw_grid_melodic();
     } else if (ui_mode == M_SCALE) draw_scale();
-    else if (ui_mode == M_TRKSET) draw_trkset();
+    else if (ui_mode == M_TRKSET) {
+        if (ui_page[M_TRKSET]) draw_trkset2();
+        else                   draw_trkset();
+    }
     else if (ui_mode == M_GLOBAL) draw_global();
     else draw_arp();
 }
@@ -611,7 +614,7 @@ static void ui_leds(uint32_t *litK, uint32_t *dimK, uint32_t *litB, uint32_t *di
      * cursor-step toggle, not an armed mode, so it has no idle light) */
     if (eng.playing)   *litB |= 1u << B_PLAY;
     if (focus_layer) *litB |= 1u << B_EDIT;
-    if (jam_menu) *litB |= 1u << B_SAVE;     /* the menu is open: SAVE is what opened it */
+    if (pm_kind == PM_JAM) *litB |= 1u << B_SAVE;   /* SAVE lit only for SAVE's popup */
     if (ui_mode == M_TRKSET) *litB |= 1u << B_ENV;   /* this page's door is ENV */
 }
 

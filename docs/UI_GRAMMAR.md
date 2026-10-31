@@ -146,9 +146,13 @@ left rather than at page 1 -- the same thing GLOBAL already did with `gl_page`.
 | HOME | M_HOME | 1 |
 | SEQ | M_GRID | 1 |
 | ARP | M_ARP | 1 |
-| ENV | M_TRKSET | 1 |
+| ENV | M_TRKSET | 2 |
 | SEL | M_SCALE | 1 |
 | GLO+HOME | M_GLOBAL | 2 |
+
+TRACK SET became the second two-page feature on 2026-10-31 (its page 2 is
+DIVISION and CLEAR TRACK - see below), so the table above is no longer "one page
+each plus GLOBAL".
 
 GLOBAL keeps working exactly as it did; it simply stops being the only page with
 a page number. Its header (`GLOBAL 1/2`, `GLOBAL 2/2`) is the model for the rest:
@@ -204,7 +208,16 @@ Two consequences worth stating because they were behaviour before:
 
 ## Test consequences
 
-- `pages.txt` (new, 46): each page key reaches its page, a second press stays
+- `trkset2.txt` (new, 111): TRACK SET's second page - the page turn, the row
+  dead stops, DIVISION's five values and their stops, and the popup in all four
+  outcomes (OK on NO, OCT- cancel, HOME cancel, OK on CLEAR). It also sets
+  PROGRAM/VOICE/ROUTE to non-default values, clears, and reads them back: the
+  identity assertions on track 0 alone cannot catch a wipe that resets the
+  program, because track 0's program IS the default.
+- `tools/trkset2_probe.mjs` (new, 24 px checks): page 2 is a real page drawn at
+  page 1's scale, the header says n/2, the footer names a different K2 on the
+  CLEAR row, and Cancel restores the page byte for byte above y216.
+- `pages.txt` (new, 48): each page key reaches its page, a second press stays
   put (one page each), HOME arrives from every page and leaves every page, and
   GLOBAL's page number is remembered across a trip to GLOBAL and back.
 - `global.txt`: the BLE connect / let-go assertions move from SAVE to K2 detents;
@@ -215,3 +228,44 @@ Two consequences worth stating because they were behaviour before:
 - A popup must be **closable without committing**: assert that OCT- leaves the
   ring exactly as it was, not merely that the menu closed.
 - Popups no longer expire: the idle-timeout assertions (if any) are removed.
+
+---
+
+## 5. A destructive action is a popup whose default is NO
+
+CLEAR TRACK (TRACK SET page 2, 2026-10-31) is the first destructive action in the
+UI, so it fixes the shape:
+
+| | |
+|---|---|
+| the row | names the action, and K2 **right** opens the popup; K2 left does nothing |
+| the popup | two rows, **NO first**, opened on NO |
+| the exits | OCT+ OK / OCT- Cancel / HOME cancels - the same as every popup |
+| the selection | dead-stops at both ends (the JAM menu's four cycle; a yes/no must not wrap past NO onto CLEAR) |
+| the page | states the RULE (what a clear spares), on page 2 where the doubt arises |
+| the popup | states the BILL (how many steps of which track), where the decision is made |
+
+Two rules that came out of it:
+
+- **A wipe is never armed by twisting left.** K2 left on the CLEAR row is a no-op,
+  not "close the popup", because there is nothing to close yet and a left-twist
+  that opened one would be the worst possible surprise on a knob you were just
+  turning to see what it does.
+- **The default is the safe answer, and OK on the default commits nothing.** The
+  test asserts `ts_notes` is unchanged after OK-on-NO, not merely that the popup
+  closed. A popup that closes and wipes anyway would pass a weaker assertion.
+
+### What CLEAR TRACK clears
+
+The notes, and nothing else (John 2026-10-31: "清一个轨不该把轨静默搬到 ch1 /
+prog0"). `ds_clear_track()` is NOT the implementation: it memsets the whole
+`ds_track`, so channel, program, division, route, voice mode and swing all snap
+back to factory values and the track silently moves to ch1 with the piano. The
+note fields are cleared by name instead, and the euclid meta (eu_on/k/eu_n/eu_rot)
+goes with them because `ds_euclid_fill()` would otherwise repaint the pattern from
+the old skeleton on the next call.
+
+Sounding notes are left alone on purpose: each one already has its gate-off
+scheduled in `eng.gates[]` keyed by track, so it ends on time whether or not the
+step that started it still exists. Panicking would cut a note that was going to
+end by itself in 20 ms.

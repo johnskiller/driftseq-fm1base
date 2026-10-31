@@ -548,12 +548,21 @@ static void ui_encoder(uint8_t enc, int8_t det)
 
     /* the SAVE menu swallows the four knobs: K1..K4 all rotate the highlight
      * (one list, four entries — which knob you grab should not matter) */
-    if (jam_menu) {
+    if (pm_up()) {
         if (enc >= EN_K1 && enc <= EN_K4) {
-            int sel = (int)jam_menu_sel + (det > 0 ? 1 : -1);
-            if (sel < 0) sel = 3;
-            if (sel > 3) sel = 0;
-            jam_menu_sel = (uint8_t)sel;
+            int n = (pm_kind == PM_CLRTRK) ? 2 : 4;
+            int sel = (int)pm_sel + (det > 0 ? 1 : -1);
+            /* CLEAR TRACK dead-stops: two answers, and wrapping past NO onto
+             * CLEAR is the one wrap that could commit by accident. JAM's four
+             * cycle, which is what it always did. */
+            if (n == 2) {
+                if (sel < 0) sel = 0;
+                if (sel > 1) sel = 1;
+            } else {
+                if (sel < 0) sel = n - 1;
+                if (sel > n - 1) sel = 0;
+            }
+            pm_sel = (uint8_t)sel;
         }
         return;
     }
@@ -626,13 +635,13 @@ static void ui_button(uint8_t btn, uint8_t down, uint8_t released)
      *
      * These two buttons are the octave keys when no menu is up; a menu makes them
      * OK/Cancel and nothing else changes. */
-    if (jam_menu) {
+    if (pm_up()) {
         if (released) {
             if (btn == B_OCTUP) {
-                jam_menu_act(jam_menu_sel);
-                jam_menu_close();
+                popup_act(pm_sel);
+                popup_close();
             } else if (btn == B_OCTDN || btn == B_HOME) {
-                jam_menu_close();
+                popup_close();
             }
         }
         return;
@@ -676,8 +685,7 @@ static void ui_button(uint8_t btn, uint8_t down, uint8_t released)
         /* SAVE opens the menu; it never confirms one (docs/UI_GRAMMAR.md). GLOBAL
          * page 2 no longer claims it: its link moved onto K2, where a row's value
          * belongs. */
-        jam_menu = 1;                             /* every SAVE opens the choice (no silent default) */
-        jam_menu_sel = 0;
+        popup_open(PM_JAM);                       /* every SAVE opens the choice (no silent default) */
         break;
     case B_REC:                                    /* v1: REC = cursor step toggle (emu) */
         {   uint8_t on = TRK()->steps[cursor].on;
@@ -733,7 +741,7 @@ static void ui_init(void)
     key_shift = 0;
     glo_held = 0;
     sel_track = 0;
-    jam_menu_close();                        /* boot: no menu, no ttl */
+    popup_close();                           /* boot: no popup, no ttl */
     /* the SCALE page's live-only state (ui_scale.c): boot = CHR/C/OFC off
      * (John 2026-10-31: chromatic is the default) */
     sc_kind = SC_CHR;

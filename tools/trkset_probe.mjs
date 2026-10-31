@@ -229,6 +229,24 @@ function bandTop(fb) {
     check(pill(grab()) === plain, 'and the pill goes away when the track is audible');
 }
 
+/* ---------- the page has a second half, and this probe was written before it ----------
+ * TRACK SET grew a page 2 on 2026-10-31 (DIVISION + CLEAR TRACK). This file tests
+ * page 1's five rows, which are unchanged - but a probe that did not notice the
+ * page had grown would go on calling the page "five rows" forever. It records the
+ * fact and leaves the detail to tools/trkset2_probe.mjs. */
+{
+    press(2);                               /* B_ENV: out and back, so we land on page 2 */
+    step(200);
+    const p2 = grab();
+    const rows2 = bandsOf(textRows(p2, 24, 100, 12, 60)).length;
+    check(rows2 < 5, 'page 2 has fewer text rows than page 1 (it is the actions page)',
+          rows2 + ' rows against page 1\'s 5');
+    press(2);                               /* and back to page 1 for the rest of this file */
+    step(200);
+    check(bandsOf(textRows(grab(), 24, 146, 12, 60)).length === 5,
+          'and page 1 still has its five rows after a turn');
+}
+
 /* ---------- leaving ---------- */
 press(6);                                   /* B_HOME */
 {
