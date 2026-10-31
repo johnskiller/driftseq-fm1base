@@ -31,6 +31,8 @@ static uint8_t trkset_button(uint8_t btn);
 static void trkset_encoder(uint8_t enc, int8_t det);
 static void scale_leds(uint32_t *litK, uint32_t *dimK, uint32_t *litB, uint8_t is_drum);
 void sc_chord_name(char *buf, uint8_t n);
+uint8_t sc_held_names(char *chord, char *notes);
+extern uint8_t sc_held_n;
 void sc_chord_name_str(char *buf);
 uint32_t sc_marks(void);
 

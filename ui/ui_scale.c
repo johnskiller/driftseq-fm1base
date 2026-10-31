@@ -273,6 +273,42 @@ static void sc_grid_write(void)
  * The hook sits at the TOP of panel_key_handler (before every existing path).
  * Returns 1 = consumed. Drums bypass (ch9 tracks never snap/chord), and the
  * EDIT layer keeps raw notes (it edits written voices). */
+static void chord_name_of(char *buf, const uint8_t *tones, uint8_t n);
+static const char *tone_name_of(uint8_t i, const uint8_t *tones, uint8_t n);
+
+uint8_t sc_held_n;                               /* OFC off: how many keys are down now */
+static uint8_t sc_held[27];                      /* OFC off: the notes they sound, ascending
+                                                  * (John 2026-10-30: 关闭和弦的时候，弹奏也
+                                                  * 希望显示音名，能组成和弦也显示出来).
+                                                  * Sorted, so the chord name reads from the
+                                                  * lowest note as the root -- the way the
+                                                  * GRID page names a step's voices. */
+
+/* OFC off is a plain keyboard, so the held keys ARE the answer: name them, and
+ * name the chord when they are one. Returns 0 when nothing is down. */
+uint8_t sc_held_names(char *chord, char *notes)
+{
+    uint8_t i, j, t[27], n = sc_held_n;
+    char *q = notes;
+    *chord = 0;
+    *notes = 0;
+    if (!n) return 0;
+    for (i = 0; i < n; i++) t[i] = sc_held[i];
+    for (i = 1; i < n; i++) {                    /* insertion sort, low to high */
+        uint8_t v = t[i];
+        for (j = i; j > 0 && t[j - 1] > v; j--) t[j] = t[j - 1];
+        t[j] = v;
+    }
+    chord_name_of(chord, t, n);
+    for (i = 0; i < n; i++) {
+        const char *nm = tone_name_of(i, t, n);  /* interval-aware spelling: Cm is C Eb G */
+        while (*nm) *q++ = *nm++;
+        if (i + 1 < n) *q++ = ' ';
+    }
+    *q = 0;
+    return 1;
+}
+
 static uint8_t scale_key_hook(uint8_t key, uint8_t down)
 {
     uint8_t is_drum = is_drum_trk();
@@ -283,8 +319,24 @@ static uint8_t scale_key_hook(uint8_t key, uint8_t down)
         if (down) {
             ds_live_on(&eng, sel_track, (uint8_t)note, midi_vel);
             ds_jam_capture(&eng, (uint8_t)note, midi_vel, 1);
-        } else
+            /* remember it for the name readout. Same key twice (or a key whose
+             * snap lands on a note already down) must not double up: sc_held is
+             * the set of PITCHES sounding, not the list of presses. */
+            if (sc_held_n < 27) {
+                uint8_t i;
+                for (i = 0; i < sc_held_n; i++)
+                    if (sc_held[i] == (uint8_t)note) break;
+                if (i == sc_held_n) sc_held[sc_held_n++] = (uint8_t)note;
+            }
+        } else {
+            uint8_t i;
             ds_live_off(&eng, sel_track, (uint8_t)note);
+            for (i = 0; i < sc_held_n; i++)
+                if (sc_held[i] == (uint8_t)note) {
+                    sc_held[i] = sc_held[--sc_held_n];
+                    break;
+                }
+        }
         return 1;
     }
     /* OFC on: the three zones. Selection vs sounding (John's review 2026-10-29):
@@ -377,39 +429,45 @@ static uint8_t scale_key_hook(uint8_t key, uint8_t down)
 
 /* a chord tone's NAME with the spelling its function calls for: a flat third,
  * fifth and seventh read Eb / Gb / Bb (NOTE_NAMES is sharp-only, which turns
- * a C minor into "C D# G"). i = 0 is the root. */
-static const char *sc_tone_name(uint8_t i)
+ * a C minor into "C D# G"). i = 0 is the root.
+ *
+ * Takes the set rather than reading sc_tones[]: the Active Chord is not the only
+ * thing on this page that needs spelling now (OFC off names what is being played,
+ * see sc_held_names). */
+static const char *tone_name_of(uint8_t i, const uint8_t *tones, uint8_t n)
 {
     static const char *const FLAT[12] = {"C", "Db", "D", "Eb", "E", "F",
                                          "Gb", "G", "Ab", "A", "Bb", "B"};
     static const char *const SHARP[12] = {"C", "C#", "D", "D#", "E", "F",
                                           "F#", "G", "G#", "A", "A#", "B"};
     uint8_t iv;
-    if (!i) return ui_note_name((uint8_t)(sc_tones[0] % 12));
-    iv = (uint8_t)((sc_tones[i] - sc_tones[0]) % 12);
+    if (!i) return ui_note_name((uint8_t)(tones[0] % 12));
+    iv = (uint8_t)((tones[i] - tones[0]) % 12);
     if (iv == 3 || iv == 6 || iv == 10 || iv == 1)   /* b3, b5, b7, b9 */
-        return FLAT[(sc_tones[i]) % 12];
+        return FLAT[(tones[i]) % 12];
     if (iv == 8)                                     /* #5 */
-        return SHARP[(sc_tones[i]) % 12];
-    return FLAT[(sc_tones[i]) % 12];                 /* naturals spell the same */
+        return SHARP[(tones[i]) % 12];
+    return FLAT[(tones[i]) % 12];                 /* naturals spell the same */
 }
+
+static const char *sc_tone_name(uint8_t i) { return tone_name_of(i, sc_tones, sc_tones_n); }
 
 /* the ACTIVE chord's NAME, read back from the interval set it will send
  * (John 2026-10-29: "除了音名，也要写出和弦名", written the way players write
  * them: Cm, CM7, C7sus4 — not CMAJ7). Rules, not a lookup table, so every set
  * the panel can build gets an honest name; a set with no common name prints
  * "C?" rather than something invented. */
-void sc_chord_name(char *buf, uint8_t n)
+static void chord_name_of(char *buf, const uint8_t *tones, uint8_t n)
 {
     uint16_t iv = 0;
     const char *nm;
     char *q = buf;
     uint8_t i, maj3, min3, sus4, p2, p5, b5, s5, m7, M7, s6, ninth;
     if (!n) { *buf = 0; return; }
-    nm = ui_note_name((uint8_t)(sc_tones[0] % 12));
+    nm = ui_note_name((uint8_t)(tones[0] % 12));
     while (*nm) *q++ = *nm++;
     for (i = 1; i < n; i++)                          /* intervals above the root */
-        iv |= (uint16_t)(1u << ((sc_tones[i] - sc_tones[0]) % 12));
+        iv |= (uint16_t)(1u << ((tones[i] - tones[0]) % 12));
     if (!iv) { *q = 0; return; }                     /* a single note: its name only */
     maj3  = (iv >> 4) & 1u;
     min3  = (iv >> 3) & 1u;
@@ -456,6 +514,8 @@ done:
     *q = 0;
     #undef PUT
 }
+
+void sc_chord_name(char *buf, uint8_t n) { chord_name_of(buf, sc_tones, n); }
 
 /* the keybed's chord markers as a bitmask (the painter and the host probe) */
 uint32_t sc_marks(void)
@@ -642,6 +702,26 @@ static void draw_scale(void)
             } else {
                 cv_text(6, 186, &FONT_M, chord, C_AMB);
                 cv_text(6 + cw + 12, 190, &FONT_S, notes, C_HI);
+            }
+        }
+    }
+    /* The held keys as names (John 2026-10-30: 关闭和弦的时候，弹奏也希望能显示
+     * 音名，如果能组成和弦也要显示出来). OFC off only: when it is on, the line
+     * above already states the Active Chord -- one answer per screen, not two. */
+    if (!sc_ofc && !is_drum_trk()) {
+        char chord[22], notes[60];
+        if (sc_held_names(chord, notes)) {
+            if (chord[0]) {                          /* a nameable set: the name leads */
+                int32_t cw = text_w(&FONT_M, chord);
+                if (6 + cw + 12 + text_w(&FONT_S, notes) > 232) {
+                    cv_text(6, 190, &FONT_B, chord, C_AMB);
+                    cv_text(6 + text_w(&FONT_B, chord) + 6, 190, &FONT_T, notes, C_HI);
+                } else {
+                    cv_text(6, 186, &FONT_M, chord, C_AMB);
+                    cv_text(6 + cw + 12, 190, &FONT_S, notes, C_HI);
+                }
+            } else {                                 /* single note: the name alone is the answer */
+                cv_text(6, 186, &FONT_M, notes, C_AMB);
             }
         }
     }

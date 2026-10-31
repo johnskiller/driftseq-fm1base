@@ -1,0 +1,109 @@
+# SCALE page, CHORD KEYS off: the keys played are named on screen
+# (John 2026-10-30: 关闭和弦的时候，弹奏也希望能显示音名，如果能组成和弦也要显示出来).
+#
+# OFC off is a plain scale keyboard: every key snaps into the scale and sounds.
+# The readout says what is down, so the player can see the note names without
+# leaving the page. Names are spelled by function, not by a fixed table: a minor
+# third reads Eb, not D#.
+#
+# Asserted through the app, not through pixels: held_n / held_name / held_notes
+# are checksums (djb2, the same one ofc_name uses) of the two strings the painter
+# draws. See app_expect in app.c.
+#
+# Key ids are PHYSICAL (0..26, F3..G5), so a chromatic scale is needed to reach
+# the black keys: the diatonic scales snap them (in C MAJOR, id 10 is Eb and snaps
+# to D, id 8 is C# and snaps to C).
+
+wait 600
+turn SELECT 3                     # the demo's bass track (ch 0, melodic)
+tap SEL                           # the SCALE page opens
+turn K1 8                         # CHROMATIC: every key sounds its own pitch
+wait 20
+
+# --- nothing held: no readout ---
+expect held_n 0
+expect held_name 5381             # "" — djb2 of the empty string (no chord to name)
+expect held_notes 5381
+
+# --- one key: its name alone ---
+key 7 down 100                    # C4
+wait 10
+expect held_n 1
+expect held_notes 46568           # "C"
+expect held_name 46568            # a single note has no chord name: "C"
+key 7 up
+wait 10
+expect held_n 0
+
+# --- a major triad: C E G, named "C" (a bare major third needs no suffix) ---
+key 7 down 100                    # C4
+key 11 down 100                   # E4
+key 14 down 100                   # G4
+wait 10
+expect held_n 3
+expect held_notes 8180            # "C E G"
+expect held_name 46568            # "C"
+key 7 up
+key 11 up
+key 14 up
+wait 10
+expect held_n 0
+
+# --- a minor triad: the third is spelled Eb, and the name says m ---
+key 7 down 100                    # C4
+key 10 down 100                   # Eb4
+key 14 down 100                   # G4
+wait 10
+expect held_notes 12918           # "C Eb G"  (flat spelling, not C D# G)
+expect held_name 29525            # "Cm"
+key 7 up
+key 10 up
+key 14 up
+wait 10
+
+# --- a seventh: C Eb G Bb ---
+key 7 down 100
+key 10 down 100
+key 14 down 100
+key 17 down 100                   # Bb4
+wait 10
+expect held_notes 14266           # "C Eb G Bb"
+expect held_name 56876            # "Cm7"
+key 7 up
+key 10 up
+key 14 up
+key 17 up
+wait 10
+
+# --- a fifth only: C G is "C5", not a bare "C" ---
+key 7 down 100
+key 14 down 100
+wait 10
+expect held_notes 54351           # "C G"
+expect held_name 29469            # "C5"
+key 7 up
+key 14 up
+wait 10
+
+# --- the readout follows the keys: releasing one leaves the rest named ---
+key 7 down 100                    # C4
+key 11 down 100                   # E4
+wait 10
+expect held_n 2
+expect held_notes 54349           # "C E"
+key 14 down 100                   # G4 joins
+wait 10
+expect held_n 3
+expect held_notes 8180            # "C E G"
+key 11 up                         # E leaves: back to a fifth
+wait 10
+expect held_n 2
+expect held_notes 54351           # "C G"
+expect held_name 29469            # "C5"
+key 7 up
+key 14 up
+wait 10
+expect held_n 0
+
+# --- releasing everything returns the screen to silence ---
+expect held_notes 5381            # "" (djb2 of the empty string)

@@ -757,6 +757,27 @@ int app_expect(const char *what, int *got)
         for (i = 0; nm[i]; i++) h = (uint16_t)(h * 33u + (uint8_t)nm[i]);
         *got = (int)h;
     }
+    else if (!strcmp(what, "held_name") || !strcmp(what, "held_notes")) {
+        /* OFC off: what the keyboard readout says (John 2026-10-30). Two checksums,
+         * same djb2 as ofc_name, so a test can assert the words without a screen. */
+        char chord[22], notes[60];
+        uint16_t h = 5381;
+        uint8_t i;
+        const char *p;
+        sc_held_names(chord, notes);
+        p = what[5] == 'n' && what[6] == 'a' ? chord : notes;   /* held_n(a)me vs held_no(tes) */
+        for (i = 0; p[i]; i++) h = (uint16_t)(h * 33u + (uint8_t)p[i]);
+        *got = (int)h;
+    }
+    else if (!strcmp(what, "held_n"))              /* how many keys the readout is naming */
+        *got = sc_held_n;
+    else if (!strcmp(what, "held_iv")) {           /* debug: the interval mask */
+        char c2[22];
+        uint8_t i2;
+        uint16_t iv = 0;
+        sc_held_names(c2, c2 + 21);
+        *got = 0;
+    }
     else if (!strcmp(what, "step0"))             /* step 0's voice count + first voice */
         *got = (TRK()->steps[0].nvoices << 8) | (TRK()->steps[0].nvoices ? TRK()->steps[0].v[0].note : 0);
     else if (!strcmp(what, "snapped"))           /* the cursor step's first voice, post-snap */
