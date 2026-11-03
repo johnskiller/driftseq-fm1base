@@ -25,7 +25,7 @@ Reproduce:
 # engine contracts, no toolchain needed
 gcc -O2 -Iengine tests_engine/test_golden.c engine/driftseq.c engine/demo_pattern.c -lm -o /tmp/tg && /tmp/tg
 # the firmware (from the fm1-ctrl checkout that has platform/ as a submodule)
-AC79_SDK=/tmp/fw-AC79_AIoT_SDK JIELI_TOOLCHAIN=/home/john/.jieli/toolchain \
+AC79_SDK=/home/john/scratch/fw-AC79_AIoT_SDK JIELI_TOOLCHAIN=/home/john/.jieli/toolchain \
   python3 platform/tools/build.py /home/john/.hermes/workspace/driftseq-fm1base
 ```
 

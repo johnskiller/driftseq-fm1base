@@ -218,14 +218,14 @@ web_resume_probe 23 checks
 ```bash
 # 固件
 cd /home/john/.hermes/workspace/fm1-ctrl
-AC79_SDK=/tmp/fw-AC79_AIoT_SDK JIELI_TOOLCHAIN=/home/john/.jieli/toolchain \
+AC79_SDK=/home/john/scratch/fw-AC79_AIoT_SDK JIELI_TOOLCHAIN=/home/john/.jieli/toolchain \
   python3 platform/tools/build.py /home/john/.hermes/workspace/driftseq-fm1base
 
 # 加 --web 出 emulator
-# 必须先 export PATH=/tmp/emsdk/upstream/emscripten:$PATH 才找得到 emcc
+# 必须先 export PATH=/home/john/scratch/emsdk/upstream/emscripten:$PATH 才找得到 emcc
 ```
 
-**坑**：不要 `source /tmp/emsdk/emsdk_env.sh`，它会覆盖 `/home/john/.hermes/node/bin/node`。构建后跑探针要单独给 PATH。
+**坑**：不要 `source /home/john/scratch/emsdk/emsdk_env.sh`，它会覆盖 `/home/john/.hermes/node/bin/node`。构建后跑探针要单独给 PATH。
 
 ## 本地服务（都是 gateway 的子进程，重启 gateway 会全死）
 
@@ -558,7 +558,7 @@ host 测试脚本把 HOME 的释放写在 GLO 之前，正好把这个 bug 藏�
 - **realtime 录音不自行设计**："realtime录音我有些想法，明天再仔细说"
 - **hero 只显示 loop 内 bar**；每轨独立 playhead；melody 纵向按音高；LED dim 每 4 step 一个、与 DIV 无关；圆环点可用方块
 - **header**：24px 单行、实心药丸、药丸里只写数字、宽度不随位数变化、圆角 r=6
-- **不要 `source /tmp/emsdk/emsdk_env.sh`** 之后 build/run
+- **不要 `source /home/john/scratch/emsdk/emsdk_env.sh`** 之后 build/run
 - 凭证一律不写入文件
 
 ## 关键坐标（改 UI 时要用）
